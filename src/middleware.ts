@@ -40,7 +40,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     pathname === '/api/internal/pinterest/ingest' ||
     pathname === '/api/internal/pinterest/daily-dispatch' ||
     pathname === '/api/internal/pinterest/cleanup-retention' ||
-    pathname === '/api/internal/pinterest/process-due-pins' ||
+    pathname === '/api/internal/pinterest/dispatch-due-pin' ||
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/_astro') ||
     pathname === '/favicon.svg';

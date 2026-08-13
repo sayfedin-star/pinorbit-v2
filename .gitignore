@@ -1,72 +1,41 @@
 ```
-# Logs and temp files
-*.log
-*.tmp
-*.swp
+# Dependencies
+node_modules/
 
-# Environment
+# Environment variables
 .env
 .env.local
 .env.*
 
-# Dependencies
-node_modules/
+# Logs
+*.log
 
-# Build artifacts
-dist/
-build/
-target/
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
 
-# Python
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Build outputs
+dist/
+build/
 *.egg-info/
-.eggs/
-.Python
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-.git/modules/
-.DS_Store
-*.sublime-workspace
-.pytest_cache/
-.hypothesis/
-.coverage*
-.venv/
-venv/
-ENV/
 
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
-
-# IDE
-.vscode/
-.idea/
+# Temporary files
+*.tmp
 *.swp
 *.swo
 
-# OS
+# OS generated files
 .DS_Store
 Thumbs.db
 
-# Database
-*.db
-*.db-journal
-
-# Supabase
-supabase/.temp/
-supabase/migrations/*.sql.bak
+# Testing
+.pytest_cache/
+.mypy_cache/
 ```
