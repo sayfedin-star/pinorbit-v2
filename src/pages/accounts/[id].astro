@@ -666,6 +666,11 @@ const { id } = Astro.params;
         getAccountWebhookSummary(accountId),
       ]);
 
+      const whs = await getAccountWebhooks(accountId);
+      activeAccountWebhooks = (whs || []).filter((w: any) => w.is_active);
+      setupSchedulesListeners();
+      await loadSchedules();
+
       if (!acc) {
         document.getElementById('account-header-container')!.innerHTML = renderEmptyStateHTML(
           'Account Not Found',
@@ -1480,6 +1485,155 @@ const { id } = Astro.params;
       } else {
         alert(res.error || 'Failed to update limit');
       }
+    });
+  }
+
+  // ===== Posting Schedules (engine) wiring =====
+  let accountSchedules: any[] = [];
+
+  async function loadSchedules() {
+    const rowsEl = document.getElementById('account-schedules-rows');
+    if (!rowsEl || !accountId) return;
+    try {
+      const r = await fetch('/api/schedules?account_id=' + encodeURIComponent(accountId));
+      const d = await r.json();
+      accountSchedules = Array.isArray(d) ? d : [];
+    } catch { accountSchedules = []; }
+    rowsEl.innerHTML = accountSchedules.length === 0
+      ? '<tr><td colspan="7" class="p-3 text-center text-muted-foreground">No engine schedules yet. Use "Convert current schedule" or "+ Add Posting Schedule".</td></tr>'
+      : accountSchedules.map((s: any) =>
+          '<tr class="border-b">' +
+          '<td class="p-2">' + escapeHtml(s.label || '(unnamed)') + '</td>' +
+          '<td class="p-2">' + escapeHtml(s.webhook_id ? 'selected' : 'auto') + '</td>' +
+          '<td class="p-2">' + escapeHtml(s.window_start) + '–' + escapeHtml(s.window_end) + '<br/>' + escapeHtml(s.timezone) + '</td>' +
+          '<td class="p-2">' + s.interval_minutes + 'm ±' + s.random_delay_minutes + 'm</td>' +
+          '<td class="p-2">' + escapeHtml((s.active_days || []).join(',')) + '</td>' +
+          '<td class="p-2">' + escapeHtml(s.status) + (s.fastcron_job_id ? '' : ' (no job)') + '</td>' +
+          '<td class="p-2">' +
+          '<button data-sact="run" data-sid="' + s.id + '">Run</button> ' +
+          '<button data-sact="edit" data-sid="' + s.id + '">Edit</button> ' +
+          '<button data-sact="' + (s.status === 'paused' ? 'resume' : 'pause') + '" data-sid="' + s.id + '">' + (s.status === 'paused' ? 'Resume' : 'Pause') + '</button> ' +
+          '<button data-sact="clone" data-sid="' + s.id + '">Clone</button> ' +
+          '<button data-sact="logs" data-sid="' + s.id + '">Logs</button> ' +
+          '<button data-sact="delete" data-sid="' + s.id + '">Del</button>' +
+          '</td></tr>').join('');
+  }
+
+  function populateChannelSelect() {
+    const sel = document.getElementById('f-channel') as HTMLSelectElement | null;
+    if (!sel) return;
+    const active = (activeAccountWebhooks || []).filter((w: any) => w.is_active);
+    sel.innerHTML = active.length
+      ? active.map((w: any, i: number) => '<option value="' + w.id + '">' + escapeHtml((w as any).label || (i === 0 ? 'Primary' : 'Channel ' + (i + 1))) + '</option>').join('')
+      : '<option value="">No active webhook</option>';
+  }
+
+  function updateSchedCadence() {
+    const interval = Number((document.getElementById('f-sched-interval') as HTMLInputElement).value || 36);
+    const start = (document.getElementById('f-sched-start') as HTMLInputElement).value || '09:00';
+    const end = (document.getElementById('f-sched-end') as HTMLInputElement).value || '21:00';
+    const h = Math.max(0, Number(end.slice(0, 2)) - Number(start.slice(0, 2)));
+    const el = document.getElementById('sched-cadence');
+    if (el) el.textContent = '≈ ' + Math.floor((h * 60) / interval) + ' pins/day capacity at ' + interval + 'm interval across ' + h + 'h window.';
+  }
+
+  function openScheduleModal(s?: any) {
+    populateChannelSelect();
+    const acc: any = currentAccount || {};
+    (document.getElementById('schedule-modal-title') as HTMLElement).textContent = s ? 'Edit Posting Schedule' : 'Add Posting Schedule';
+    (document.getElementById('f-sched-id') as HTMLInputElement).value = s?.id || '';
+    (document.getElementById('f-sched-label') as HTMLInputElement).value = s?.label || '';
+    if (s?.webhook_id) (document.getElementById('f-channel') as HTMLSelectElement).value = s.webhook_id;
+    (document.getElementById('f-sched-tz') as HTMLInputElement).value = s?.timezone || acc.timezone || 'UTC';
+    (document.getElementById('f-sched-batch') as HTMLInputElement).value = String(s?.batch ?? 1);
+    (document.getElementById('f-sched-start') as HTMLInputElement).value = (s?.window_start || acc.posting_window_start || '09:00').slice(0, 5);
+    (document.getElementById('f-sched-end') as HTMLInputElement).value = (s?.window_end || acc.posting_window_end || '21:00').slice(0, 5);
+    (document.getElementById('f-sched-interval') as HTMLInputElement).value = String(s?.interval_minutes ?? acc.posting_interval_minutes ?? 36);
+    (document.getElementById('f-sched-delay') as HTMLInputElement).value = String(s?.random_delay_minutes ?? acc.random_delay_minutes ?? 0);
+    const days = s?.active_days ?? acc.active_days;
+    (document.getElementById('f-sched-days') as HTMLInputElement).value = Array.isArray(days) ? days.join(',') : (typeof days === 'string' ? (days as string).replace(/[{}"']/g, '') : 'Mon,Tue,Wed,Thu,Fri,Sat,Sun');
+    (document.getElementById('f-sched-started') as HTMLInputElement).value = s?.started_at ? String(s.started_at).slice(0, 10) : '';
+    updateSchedCadence();
+    (document.getElementById('schedule-modal') as any)?.showModal?.();
+  }
+
+  async function scheduleAction(id: string, act: string) {
+    if (act === 'edit') { openScheduleModal(accountSchedules.find((x) => x.id === id)); return; }
+    if (act === 'logs') {
+      const r = await fetch('/api/schedules/' + id + '/fastcron?view=logs');
+      const d = await r.json();
+      alert(JSON.stringify(d, null, 2));
+      return;
+    }
+    if (act === 'delete' && !confirm('Delete this schedule?')) return;
+    const r = await fetch('/api/schedules/' + id + '/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: act }) });
+    const d = await r.json();
+    if (!r.ok) alert(d.error || 'Failed');
+    await loadSchedules();
+  }
+
+  function setupSchedulesListeners() {
+    document.getElementById('btn-refresh-schedules')?.addEventListener('click', () => loadSchedules());
+    document.getElementById('btn-sync-missing')?.addEventListener('click', async () => {
+      const r = await fetch('/api/schedules/sync-missing', { method: 'POST' });
+      const d = await r.json();
+      alert(JSON.stringify(d));
+      await loadSchedules();
+    });
+    document.getElementById('btn-add-schedule')?.addEventListener('click', () => openScheduleModal());
+    document.getElementById('btn-convert-legacy')?.addEventListener('click', async () => {
+      if (!currentAccount) return;
+      const acc: any = currentAccount;
+      const firstWebhook: any = (activeAccountWebhooks || []).filter((w: any) => w.is_active)[0];
+      const body = {
+        account_id: accountId,
+        label: 'Legacy schedule',
+        webhook_id: firstWebhook?.id || null,
+        timezone: acc.timezone || 'UTC',
+        window_start: (acc.posting_window_start || '09:00').slice(0, 5),
+        window_end: (acc.posting_window_end || '21:00').slice(0, 5),
+        interval_minutes: acc.posting_interval_minutes || 36,
+        random_delay_minutes: acc.random_delay_minutes || 0,
+        active_days: Array.isArray(acc.active_days) ? acc.active_days : String(acc.active_days || 'Mon,Tue,Wed,Thu,Fri,Sat,Sun').replace(/[{}"']/g, '').split(',').map((x: string) => x.trim()),
+        started_at: acc.pinning_started_at || null,
+        batch: 1,
+      };
+      const r = await fetch('/api/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || 'Failed'); return; }
+      showFeedbackBanner('Schedule created from current account schedule.', 'success');
+      await loadSchedules();
+    });
+    document.getElementById('btn-cancel-sched')?.addEventListener('click', () => (document.getElementById('schedule-modal') as any)?.close?.());
+    ['f-sched-interval', 'f-sched-start', 'f-sched-end'].forEach((iv) => document.getElementById(iv)?.addEventListener('input', updateSchedCadence));
+    document.getElementById('schedule-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = (document.getElementById('f-sched-id') as HTMLInputElement).value;
+      const body = {
+        account_id: accountId,
+        label: (document.getElementById('f-sched-label') as HTMLInputElement).value,
+        webhook_id: (document.getElementById('f-channel') as HTMLSelectElement).value || null,
+        timezone: (document.getElementById('f-sched-tz') as HTMLInputElement).value,
+        batch: Number((document.getElementById('f-sched-batch') as HTMLInputElement).value),
+        window_start: (document.getElementById('f-sched-start') as HTMLInputElement).value,
+        window_end: (document.getElementById('f-sched-end') as HTMLInputElement).value,
+        interval_minutes: Number((document.getElementById('f-sched-interval') as HTMLInputElement).value),
+        random_delay_minutes: Number((document.getElementById('f-sched-delay') as HTMLInputElement).value),
+        active_days: ((document.getElementById('f-sched-days') as HTMLInputElement).value).split(',').map((x: string) => x.trim()).filter(Boolean),
+        started_at: (document.getElementById('f-sched-started') as HTMLInputElement).value || null,
+      };
+      const r = id
+        ? await fetch('/api/schedules/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        : await fetch('/api/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || 'Failed'); return; }
+      (document.getElementById('schedule-modal') as any)?.close?.();
+      await loadSchedules();
+    });
+    document.getElementById('account-schedules-rows')?.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      const act = t.getAttribute('data-sact'); const sid = t.getAttribute('data-sid');
+      if (act && sid) scheduleAction(sid, act);
     });
   }
 
