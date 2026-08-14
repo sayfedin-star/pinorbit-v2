@@ -390,6 +390,11 @@ interface RawLog extends Log {
 
 const DEFAULT_WS_ID = '00000000-0000-0000-0000-000000000001';
 
+/** Escapes special characters for LIKE/ILIKE patterns: %, _, and backslash. */
+export function escapeLike(str: string): string {
+  return str.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
 function matchesWorkspace(entityWsId?: string, targetWsId?: string): boolean {
   if (!targetWsId) return true;
   const actualWs = entityWsId || DEFAULT_WS_ID;
@@ -2139,7 +2144,7 @@ export async function getAccountPins(options: FetchAccountPinsOptions): Promise<
     }
 
     if (search && search.trim() !== '') {
-      query = query.ilike('title', `%${search.trim()}%`);
+      query = query.ilike('title', `%${escapeLike(search.trim())}%`);
     }
 
     if (dateFrom) {
@@ -2171,7 +2176,7 @@ export async function getAccountPins(options: FetchAccountPinsOptions): Promise<
         fallbackQuery = fallbackQuery.eq('board_name', boardId);
       }
       if (search && search.trim() !== '') {
-        fallbackQuery = fallbackQuery.ilike('title', `%${search.trim()}%`);
+        fallbackQuery = fallbackQuery.ilike('title', `%${escapeLike(search.trim())}%`);
       }
       if (dateFrom) {
         fallbackQuery = fallbackQuery.gte('created_at', dateFrom);

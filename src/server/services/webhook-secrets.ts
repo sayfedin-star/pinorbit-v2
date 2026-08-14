@@ -127,3 +127,26 @@ export async function getSecretStatus(
     hasOverride: false,
   };
 }
+
+/**
+ * Masks a secret for display in UI (shows first 8 chars + ellipsis).
+ */
+export function maskSecret(secret: string): string {
+  if (!secret || secret.length <= 8) return '********';
+  return secret.slice(0, 8) + '...';
+}
+
+/**
+ * Retrieves masked secret status for UI display.
+ */
+export async function getSecretStatusMasked(
+  wsId: string,
+  runtimeEnv: Record<string, any>
+): Promise<{ masked: string; source: string; hasOverride: boolean }> {
+  const status = await getSecretStatus(wsId, runtimeEnv);
+  return {
+    masked: maskSecret(status.secret),
+    source: status.source,
+    hasOverride: status.hasOverride,
+  };
+}

@@ -86,6 +86,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const syncResult = await syncPublishingSchedule(inserted, runtimeEnv);
     if (!syncResult.success) {
       await adminClient.from('posting_schedules').update({ status: 'error' }).eq('id', inserted.id);
+    } else {
+      await adminClient.from('posting_schedules').update({ status: 'active', fastcron_job_id: syncResult.job_id }).eq('id', inserted.id);
     }
     return new Response(JSON.stringify({ ...inserted, job_id: syncResult.job_id }), { status: 201, headers: { 'Content-Type': 'application/json' } });
   } catch (err: any) {

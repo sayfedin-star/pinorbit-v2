@@ -24,7 +24,7 @@ export const POST: APIRoute = async ({ locals }) => {
       .select('*')
       .eq('workspace_id', workspaceId)
       .is('fastcron_job_id', null)
-      .eq('status', 'active');
+      .in('status', ['active', 'not_synced', 'error']);
     if (fetchErr) throw fetchErr;
 
     const results: { id: string; success: boolean; error?: string; job_id?: number | null }[] = [];

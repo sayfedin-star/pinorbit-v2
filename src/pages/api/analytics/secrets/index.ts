@@ -2,7 +2,7 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { assertWorkspaceAccess } from '../../../../server/auth/workspace-guard';
-import { getSecretStatus } from '../../../../server/services/webhook-secrets';
+import { getSecretStatusMasked } from '../../../../server/services/webhook-secrets';
 
 export const GET: APIRoute = async ({ locals }) => {
   const user = locals.user;
@@ -45,12 +45,12 @@ export const GET: APIRoute = async ({ locals }) => {
       );
     }
 
-    const status = await getSecretStatus(workspaceId, runtimeEnv);
+    const status = await getSecretStatusMasked(workspaceId, runtimeEnv);
 
     return new Response(
       JSON.stringify({
         success: true,
-        secret: status.secret,
+        masked: status.masked,
         source: status.source,
         hasOverride: status.hasOverride,
       }),

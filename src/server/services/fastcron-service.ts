@@ -8,7 +8,7 @@ import type {
 } from '../../lib/types';
 
 export const FASTCRON_BASE = 'https://www.fastcron.com/api/v1';
-export const DISPATCH_ENDPOINT_URL = 'https://pinorbit-v2.o-i.workers.dev/api/internal/pinterest/daily-dispatch';
+export const DISPATCH_ENDPOINT_URL = process.env.DISPATCH_BASE_URL || 'https://pinorbit-v2.o-i.workers.dev/api/internal/pinterest/daily-dispatch';
 
 const ALLOWED_WEBHOOK_HOSTS = [
   'hook.make.com',
