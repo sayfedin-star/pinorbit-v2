@@ -83,7 +83,7 @@ jobs:
 
       - name: Stagger Job Start (IP distribution)
         run: |
-          DELAY=$(( ${{ matrix.shard }} * 30 ))
+          DELAY=$(( ${{ matrix.shard }} * 45 ))
           echo "Stagger delay for shard ${{ matrix.shard }}: ${DELAY}s"
           sleep $DELAY
 

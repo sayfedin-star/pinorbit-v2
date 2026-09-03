@@ -1431,6 +1431,63 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     });
   }
 
+  // ─── Last Result Badge Renderer ───────────────────────────────────────────
+  function renderLastResultBadges(raw: string | null | undefined): string {
+    if (!raw || raw === '—') return '<span class="text-muted-foreground">—</span>';
+
+    const str = String(raw).trim();
+    // Tolerant regex matching:
+    // New format: pages=5 fetched=247 +3 sheet=131 (app=110, upd=21, unch=116)
+    // Old format: pages=5 +3 qual=3 sheet=131
+    const m = str.match(/^pages=(\d+)(?:\s+fetched=(\d+))?\s+\+(\d+)(?:\s+qual=\d+)?\s+sheet=(\d+)(?:\s+\(app=(\d+),\s*upd=(\d+)(?:,\s*unch=(\d+))?\))?(.*)$/i);
+
+    if (!m) {
+      // Graceful Fallback: render raw text safely
+      return `<span class="text-[11px] text-muted-foreground truncate" title="${escapeHtml(str)}">${escapeHtml(str)}</span>`;
+    }
+
+    const pages = m[1];
+    const fetched = m[2];
+    const newPins = Number(m[3]) || 0;
+    const sheet = m[4];
+    const app = m[5];
+    const upd = m[6];
+    const unch = m[7];
+    const extra = (m[8] || '').trim();
+
+    const isCircuitBroken = str.includes('circuit-broken');
+    const isSheetErr = str.includes('sheet_err');
+
+    let tooltip = `Pages: ${pages}`;
+    if (fetched) tooltip += ` (${fetched} pins fetched)`;
+    tooltip += ` • DB: +${newPins}`;
+    tooltip += ` • Sheet: ${sheet}`;
+    if (app !== undefined && upd !== undefined) {
+      tooltip += ` (New: ${app}, Updated: ${upd}${unch !== undefined ? `, Unchanged: ${unch}` : ''})`;
+    }
+    if (extra) tooltip += ` • ${extra}`;
+
+    const dbBadgeClass = newPins > 0
+      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 font-semibold'
+      : 'bg-muted text-muted-foreground border-border/50 font-normal';
+
+    return `
+      <div class="inline-flex items-center gap-1 flex-wrap text-[10.5px]" title="${escapeHtml(tooltip)}">
+        <span class="inline-flex items-center px-1.5 py-0.2 rounded bg-muted text-muted-foreground border border-border/60 font-mono">
+          ${pages}p
+        </span>
+        <span class="inline-flex items-center px-1.5 py-0.2 rounded border ${dbBadgeClass} font-mono">
+          +${newPins} DB
+        </span>
+        <span class="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-mono">
+          📑 ${sheet}
+        </span>
+        ${isCircuitBroken ? '<span class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20">Breaker</span>' : ''}
+        ${isSheetErr ? '<span class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-bold bg-rose-500/10 text-rose-600 border border-rose-500/20">SheetErr</span>' : ''}
+      </div>
+    `;
+  }
+
   // ─── Table Body Renderer ──────────────────────────────────────────────────
   function renderAccountsStrip(accounts: any[]) {
     const tbody = document.getElementById('accounts-table-body');
@@ -1568,7 +1625,7 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
         }
 
         if (colVisible.last_result) {
-          dynamicCells += `<td class="${padClass} text-[11px] text-muted-foreground max-w-[180px] truncate" title="${escapeHtml(acc.last_result || '')}">${escapeHtml(acc.last_result || '—')}</td>`;
+          dynamicCells += `<td class="${padClass} max-w-[240px] whitespace-nowrap">${renderLastResultBadges(acc.last_result)}</td>`;
         }
 
         const compInfo = competitorMap.get((acc.username || '').toLowerCase().trim());
