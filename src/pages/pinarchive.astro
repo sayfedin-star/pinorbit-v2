@@ -1625,9 +1625,8 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
         const isCompetitor = Boolean(compInfo);
         const compHref = compInfo?.id ? `/competitors/details?id=${encodeURIComponent(compInfo.id)}` : '/competitors';
         const compBadge = isCompetitor
-          ? `<a href="${compHref}" title="View @${escapeHtml(acc.username)} in Competitor Intelligence" class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-md text-[9.5px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition-colors shadow-2xs">
+          ? `<a href="${compHref}" title="View @${escapeHtml(acc.username)} in Competitor Intelligence" class="inline-flex items-center justify-center h-4.5 w-4.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition-colors shadow-2xs shrink-0">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
-              <span>Comp</span>
             </a>`
           : '';
 
