@@ -1409,8 +1409,6 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     if (colVisible.last_result) headersHtml += `<th class="py-3 px-4 font-semibold">Last Result</th>`;
 
     headersHtml += `
-        <th class="py-3 px-4 font-semibold text-center">Ingest Active</th>
-        <th class="py-3 px-4 text-right font-semibold">Actions</th>
       </tr>
     `;
 
@@ -1431,6 +1429,63 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     });
   }
 
+  // ─── Last Result Badge Renderer ───────────────────────────────────────────
+  function renderLastResultBadges(raw: string | null | undefined): string {
+    if (!raw || raw === '—') return '<span class="text-muted-foreground">—</span>';
+
+    const str = String(raw).trim();
+    // Tolerant regex matching:
+    // New format: pages=5 fetched=247 +3 sheet=131 (app=110, upd=21, unch=116)
+    // Old format: pages=5 +3 qual=3 sheet=131
+    const m = str.match(/^pages=(\d+)(?:\s+fetched=(\d+))?\s+\+(\d+)(?:\s+qual=\d+)?\s+sheet=(\d+)(?:\s+\(app=(\d+),\s*upd=(\d+)(?:,\s*unch=(\d+))?\))?(.*)$/i);
+
+    if (!m) {
+      // Graceful Fallback: render raw text safely
+      return `<span class="text-[11px] text-muted-foreground truncate" title="${escapeHtml(str)}">${escapeHtml(str)}</span>`;
+    }
+
+    const pages = m[1];
+    const fetched = m[2];
+    const newPins = Number(m[3]) || 0;
+    const sheet = m[4];
+    const app = m[5];
+    const upd = m[6];
+    const unch = m[7];
+    const extra = (m[8] || '').trim();
+
+    const isCircuitBroken = str.includes('circuit-broken');
+    const isSheetErr = str.includes('sheet_err');
+
+    let tooltip = `Pages: ${pages}`;
+    if (fetched) tooltip += ` (${fetched} pins fetched)`;
+    tooltip += ` • DB: +${newPins}`;
+    tooltip += ` • Sheet: ${sheet}`;
+    if (app !== undefined && upd !== undefined) {
+      tooltip += ` (New: ${app}, Updated: ${upd}${unch !== undefined ? `, Unchanged: ${unch}` : ''})`;
+    }
+    if (extra) tooltip += ` • ${extra}`;
+
+    const dbBadgeClass = newPins > 0
+      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 font-semibold'
+      : 'bg-muted text-muted-foreground border-border/50 font-normal';
+
+    return `
+      <div class="inline-flex items-center gap-1 flex-wrap text-[10.5px]" title="${escapeHtml(tooltip)}">
+        <span class="inline-flex items-center px-1.5 py-0.2 rounded bg-muted text-muted-foreground border border-border/60 font-mono">
+          ${pages}p
+        </span>
+        <span class="inline-flex items-center px-1.5 py-0.2 rounded border ${dbBadgeClass} font-mono">
+          +${newPins} DB
+        </span>
+        <span class="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-mono">
+          📑 ${sheet}
+        </span>
+        ${isCircuitBroken ? '<span class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20">Breaker</span>' : ''}
+        ${isSheetErr ? '<span class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-bold bg-rose-500/10 text-rose-600 border border-rose-500/20">SheetErr</span>' : ''}
+      </div>
+    `;
+  }
+
   // ─── Table Body Renderer ──────────────────────────────────────────────────
   function renderAccountsStrip(accounts: any[]) {
     const tbody = document.getElementById('accounts-table-body');
@@ -1442,7 +1497,7 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     if (accounts.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="12" class="p-12 text-center text-xs text-muted-foreground bg-muted/10">
+          <td colspan="10" class="p-12 text-center text-xs text-muted-foreground bg-muted/10">
             <div class="flex flex-col items-center gap-2 max-w-sm mx-auto">
               <span class="text-2xl">🔍</span>
               <span class="font-bold text-foreground">${rawAccounts.length === 0 ? 'No accounts tracked in archive yet' : 'No accounts match active filters'}</span>
@@ -1465,16 +1520,11 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
         const { bg: avatarBg, initial } = getAvatarStyle(acc.username || '');
         const isPaused = acc.status === 'paused' || (acc.status === 'active' && acc.ingest_enabled === false);
         const isError = ['cookie_expired', 'error'].includes(acc.status);
-        const badgeText = isPaused
-          ? 'PAUSED'
-          : escapeHtml(String(acc.status || 'unknown').replace(/_/g, ' ').toUpperCase());
-        const badgeClass = isIngestActive
-          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-          : isPaused
-          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+        const statusBadge = isPaused
+          ? `<button type="button" data-acc-status-toggle="${escapeHtml(acc.id)}" data-current-status="paused" class="inline-flex items-center justify-center text-xs hover:scale-125 transition-transform cursor-pointer p-0.5" title="Paused (Click to Resume Ingest)">⏸</button>`
           : isError
-          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
-          : 'bg-muted text-muted-foreground border border-muted-foreground/20';
+          ? `<span class="inline-flex items-center text-[9.5px] font-bold uppercase px-1.5 py-0.2 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20" title="${escapeHtml(acc.status)}">⚠️ ${escapeHtml(acc.status)}</span>`
+          : `<button type="button" data-acc-status-toggle="${escapeHtml(acc.id)}" data-current-status="active" class="inline-flex items-center justify-center text-[10px] hover:scale-125 transition-transform cursor-pointer p-0.5" title="Active (Click to Pause Ingest)">🟢</button>`;
         const changed = Number(acc.changed_last_refresh ?? 0);
         const total = Number(acc.checked_last_refresh ?? (acc.db_pins_count !== undefined ? acc.db_pins_count : (acc.pins_count ?? 0)));
         const archCount = acc.db_pins_count !== undefined ? acc.db_pins_count : (acc.pins_count ?? 0);
@@ -1568,16 +1618,18 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
         }
 
         if (colVisible.last_result) {
-          dynamicCells += `<td class="${padClass} text-[11px] text-muted-foreground max-w-[180px] truncate" title="${escapeHtml(acc.last_result || '')}">${escapeHtml(acc.last_result || '—')}</td>`;
+          dynamicCells += `<td class="${padClass} max-w-[240px] whitespace-nowrap">${renderLastResultBadges(acc.last_result)}</td>`;
         }
 
         const compInfo = competitorMap.get((acc.username || '').toLowerCase().trim());
         const isCompetitor = Boolean(compInfo);
         const compHref = compInfo?.id ? `/competitors/details?id=${encodeURIComponent(compInfo.id)}` : '/competitors';
         const compBadge = isCompetitor
-          ? `<a href="${compHref}" title="View @${escapeHtml(acc.username)} in Competitor Intelligence" class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-md text-[9.5px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition-colors shadow-2xs">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
-              <span>Comp</span>
+          ? `<a href="${compHref}" title="View @${escapeHtml(acc.username)} in Competitor Intelligence" class="inline-flex items-center justify-center h-5 w-5 rounded-md bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 transition-colors shadow-2xs shrink-0" title="Competitor Intelligence">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
             </a>`
           : '';
 
@@ -1609,64 +1661,12 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
                       <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                     </a>
                     ${compBadge}
-                    <span class="text-[9.5px] font-bold uppercase px-1.5 py-0.2 rounded-full ${badgeClass}">
-                      ${badgeText}
-                    </span>
+                    ${statusBadge}
                   </div>
                 </div>
               </div>
             </td>
             ${dynamicCells}
-            <td class="${padClass} text-center">
-              <label class="relative inline-flex items-center cursor-pointer shrink-0">
-                <input
-                  type="checkbox"
-                  data-acc-ingest-toggle="${escapeHtml(acc.id)}"
-                  ${acc.ingest_enabled !== false && acc.status === 'active' ? 'checked' : ''}
-                  class="sr-only peer"
-                  id="toggle-ingest-${escapeHtml(acc.id)}"
-                />
-                <div class="w-9 h-5 bg-zinc-300 dark:bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-4 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all after:shadow-xs peer-checked:bg-emerald-500"></div>
-              </label>
-            </td>
-            <td class="${padClass} text-right">
-              <div class="inline-flex items-center justify-end gap-1.5">
-                ${isCompetitor ? `
-                  <a
-                    href="${compHref}"
-                    class="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition-colors shadow-2xs"
-                    title="View @${escapeHtml(acc.username)} in Competitor Intelligence"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
-                  </a>
-                ` : `
-                  <button
-                    type="button"
-                    data-send-to-comp-user="${escapeHtml(acc.username)}"
-                    class="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-border bg-background hover:border-emerald-500/50 hover:bg-emerald-500/10 text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer shadow-2xs"
-                    title="Track in Competitor Intelligence"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
-                  </button>
-                `}
-                <a
-                  href="/pinarchive/account/${encodeURIComponent(acc.username)}"
-                  class="inline-flex items-center gap-1 rounded-xl border border-border bg-background hover:bg-muted/80 text-foreground px-2.5 py-1 text-xs font-semibold shadow-2xs hover:border-primary/40 transition-all"
-                >
-                  <span>Details</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-                </a>
-                <button
-                  type="button"
-                  data-single-delete-acc-id="${escapeHtml(acc.id)}"
-                  data-single-delete-acc-user="${escapeHtml(acc.username)}"
-                  class="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-border bg-background hover:border-rose-500/50 hover:bg-rose-500/10 text-muted-foreground hover:text-rose-500 transition-colors cursor-pointer shadow-2xs"
-                  title="Delete account"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                </button>
-              </div>
-            </td>
           </tr>
         `;
       })
@@ -2203,6 +2203,59 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
 
   // ─── Account Ingest Toggle & Selection ────────────────────────────────────
   function attachAccountIngestToggleListeners() {
+    // Handle 🟢 / ⏸ status badge clicks
+    document.querySelectorAll<HTMLElement>('[data-acc-status-toggle]').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-acc-status-toggle');
+        const currentStatus = btn.getAttribute('data-current-status');
+        if (!id) return;
+        const enabled = currentStatus === 'paused'; // if paused -> active; if active -> paused
+
+        btn.style.opacity = '0.4';
+        btn.style.pointerEvents = 'none';
+
+        const root = document.getElementById('pinarchive-page-root');
+        const wsId = root?.getAttribute('data-workspace-id');
+
+        try {
+          const res = await fetch('/api/pinarchive/accounts-ingest-toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              workspace_id: wsId,
+              account_ids: [id],
+              ingest_enabled: enabled,
+            }),
+          });
+
+          if (res.status === 403) {
+            toast('Admin access required to toggle account ingestion.', 'error');
+            return;
+          }
+
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok || !json.success) {
+            toast(json.error || 'Failed to update account ingest status.', 'error');
+          } else {
+            const target = rawAccounts.find(a => a.id === id);
+            if (target) {
+              target.ingest_enabled = enabled;
+              target.status = enabled ? 'active' : 'paused';
+            }
+            toast(`@${target?.username || 'Account'} is now ${enabled ? 'active' : 'paused'}`);
+            filterAndRenderAccounts();
+          }
+        } catch (e: any) {
+          toast(e.message || 'Error updating account status', 'error');
+        } finally {
+          btn.style.opacity = '1';
+          btn.style.pointerEvents = 'auto';
+        }
+      });
+    });
+
+    // Fallback for any lingering toggle switches
     document.querySelectorAll<HTMLInputElement>('[data-acc-ingest-toggle]').forEach((cb) => {
       cb.addEventListener('change', async () => {
         const id = cb.getAttribute('data-acc-ingest-toggle');

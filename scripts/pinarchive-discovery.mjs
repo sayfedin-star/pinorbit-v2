@@ -371,7 +371,7 @@ async function pushToIngest(workspaceId, username, pins, followerCount, accountM
 }
 
 // ── GAS Sheet Write Helper ──
-async function writeToGas(gasUrl, secret, payload, maxRetries = 1) {
+async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
   if (!gasUrl || gasUrl.trim() === '') {
     console.log('ℹ️ sheet_write skipped: GAS URL not configured');
     return { ok: true, skipped: true };
@@ -391,18 +391,20 @@ async function writeToGas(gasUrl, secret, payload, maxRetries = 1) {
 
       const data = await res.json().catch(() => ({}));
       if (data?.ok === false && data?.error === 'locked' && attempt < maxRetries) {
-        console.warn('⚠️ [GAS Write] Lock conflict detected, retrying after 2s...');
-        await sleep(2000);
+        const backoffMs = Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000);
+        console.warn(`⚠️ [GAS Write] Lock conflict detected on attempt ${attempt + 1}/${maxRetries + 1}, retrying after ${Math.round(backoffMs / 1000)}s...`);
+        await sleep(backoffMs);
         continue;
       }
       return data;
     } catch (err) {
       if (attempt < maxRetries) {
-        console.warn(`⚠️ [GAS Write] Error on attempt ${attempt + 1}: ${err.message}, retrying after 2s...`);
-        await sleep(2000);
+        const backoffMs = Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000);
+        console.warn(`⚠️ [GAS Write] Error on attempt ${attempt + 1}/${maxRetries + 1}: ${err.message}, retrying after ${Math.round(backoffMs / 1000)}s...`);
+        await sleep(backoffMs);
         continue;
       }
-      console.warn(`❌ [GAS Write] Failed: ${err.message}`);
+      console.warn(`❌ [GAS Write] Failed after ${maxRetries + 1} attempts: ${err.message}`);
       return { ok: false, error: err.message };
     }
   }
@@ -815,6 +817,7 @@ async function main() {
 
     // 5. Push all pins to GAS writer (sheet_write mode=update)
     let sheetPushed = 0;
+    let sheetBreakdown = '';
     if (allPinsForSheet.length > 0 && PINARCHIVE_GAS_URL) {
       console.log(`📑 Writing ${allPinsForSheet.length} pins to Google Sheet via GAS writer (mode=update)...`);
       for (let i = 0; i < allPinsForSheet.length; i += maxBatchPins) {
@@ -826,9 +829,24 @@ async function main() {
           rows: batch,
         });
         if (gasRes?.ok) {
-          const writtenCount = gasRes.written ?? batch.length;
+          const writtenCount = typeof gasRes.written === 'number'
+            ? gasRes.written
+            : (Number(gasRes.appended) || 0) + (Number(gasRes.updated) || 0);
           sheetPushed += writtenCount;
           grandSummary.sheetPushed += writtenCount;
+
+          if (typeof gasRes.appended === 'number' && typeof gasRes.updated === 'number') {
+            if (typeof gasRes.unchanged === 'number') {
+              sheetBreakdown = ` (app=${gasRes.appended}, upd=${gasRes.updated}, unch=${gasRes.unchanged})`;
+            } else {
+              sheetBreakdown = ` (app=${gasRes.appended}, upd=${gasRes.updated})`;
+            }
+          }
+        } else {
+          const errMsg = gasRes?.error || 'gas_write_failed';
+          console.error(`❌ [GAS Write] Failed for @${acc.username}: ${errMsg}`);
+          grandSummary.errors.push(`sheet: @${acc.username} - ${errMsg}`);
+          sheetBreakdown = ` (sheet_err: ${errMsg})`;
         }
       }
     }
@@ -839,7 +857,7 @@ async function main() {
       ? new Date().toISOString()
       : computeNextRunDate(todayUTC, intervalDays);
 
-    const lastResult = `pages=${pageCount} +${newPinsCount} qual=${newPinsCount} sheet=${sheetPushed}${circuitBroken ? ' (circuit-broken)' : ''}`;
+    const lastResult = `pages=${pageCount} fetched=${allPinsForSheet.length} +${newPinsCount} sheet=${sheetPushed}${sheetBreakdown}${circuitBroken ? ' (circuit-broken)' : ''}`;
 
     await supaPatch('pa_accounts', `workspace_id=eq.${acc.workspace_id}&id=eq.${acc.id}`, {
       next_run_at: nextRunAt,
@@ -870,7 +888,8 @@ async function main() {
   console.log(`🎉 Discovery Complete!`);
   console.log(`Accounts: ${grandSummary.accounts} | Pages: ${grandSummary.pages} | New Qualifying Pins: ${grandSummary.qualifyingPins} | Sheet Pushed: ${grandSummary.sheetPushed} | Errors: ${grandSummary.errors.length}`);
 
-  if (grandSummary.errors.length > 0 && grandSummary.newPins === 0 && grandSummary.accounts > 0) {
+  if (grandSummary.errors.length > 0) {
+    console.error(`\n❌ Discovery pipeline completed with ${grandSummary.errors.length} error(s):\n - ${grandSummary.errors.join('\n - ')}`);
     process.exit(1);
   }
 }
