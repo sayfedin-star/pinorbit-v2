@@ -1,4 +1,4 @@
-﻿export const prerender = false;
+export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { dbClients } from '../../../../server/db/clients';
@@ -28,10 +28,10 @@ export const GET: APIRoute = async ({ locals }) => {
     // 1. Fetch active accounts
     const { data: accounts, error: accErr } = await p1Admin
       .from('accounts')
-      .select('id, name, username, is_active')
+      .select('id, account_name, is_active')
       .eq('workspace_id', workspaceId)
       .eq('is_active', true)
-      .order('name', { ascending: true });
+      .order('account_name', { ascending: true });
 
     if (accErr) {
       return json({ success: false, error: accErr.message }, 500);
@@ -62,8 +62,8 @@ export const GET: APIRoute = async ({ locals }) => {
 
     const targets = (accounts || []).map((acc) => ({
       id: acc.id,
-      name: acc.name || acc.username,
-      username: acc.username,
+      name: acc.account_name,
+      username: acc.account_name,
       boards: boardsByAccount.get(acc.id) || [],
     }));
 

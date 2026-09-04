@@ -1,0 +1,572 @@
+---
+export const prerender = false;
+import Layout from '../../layouts/Layout.astro';
+import SectionHeader from '../../components/ui/SectionHeader.astro';
+---
+
+<Layout
+  title="📤 Dispatched Pins Ledger — PinArchive"
+  description="Comprehensive audit trail of repurposed pins dispatched to P1 scheduling across target accounts."
+>
+  <div id="dispatched-page-root" class="space-y-6">
+    <!-- Back Link & Top Bar -->
+    <div>
+      <a
+        href="/pinarchive"
+        class="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors group mb-3"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        <span>Back to PinArchive Dashboard</span>
+      </a>
+
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <SectionHeader
+            title="📤 Dispatched Pins Ledger"
+            description="Pure audit trail of all repurposed pins dispatched to P1 scheduling with real-time publishing status."
+          />
+          <div class="text-xs text-muted-foreground -mt-3 mb-2 flex items-center gap-2">
+            <span class="relative flex h-2 w-2">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span id="dispatched-live-indicator" class="font-medium text-foreground">Live multi-database synchronized</span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            id="refresh-dispatches-btn"
+            type="button"
+            class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-xs hover:bg-muted transition-all cursor-pointer"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/>
+            </svg>
+            <span>Refresh</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- P1 Degraded Warning Banner (Hidden by default) -->
+    <div
+      id="p1-degraded-banner"
+      class="hidden rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-500 transition-all shadow-xs"
+    >
+      <div class="flex items-start gap-3">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0 text-amber-500 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <div>
+          <h4 class="font-bold text-amber-600 dark:text-amber-400">P1 Scheduling Connection Degraded</h4>
+          <p class="text-amber-600/90 dark:text-amber-400/90 mt-0.5 text-[11px] leading-relaxed">
+            The P1 scheduling database is temporarily slow or unreachable. PinArchive stamps (P4) are fully loaded and intact, but live publishing status cannot be verified right now.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters Bar -->
+    <div class="rounded-2xl border border-border bg-card p-4 shadow-xs space-y-3">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Filter 1: Target Account -->
+          <div class="flex items-center gap-2">
+            <label for="filter-account" class="text-xs font-semibold text-muted-foreground whitespace-nowrap">Target Account:</label>
+            <select
+              id="filter-account"
+              class="rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer max-w-[200px]"
+            >
+              <option value="">All Accounts</option>
+            </select>
+          </div>
+
+          <!-- Filter 2: Timeframe -->
+          <div class="flex items-center gap-2">
+            <label for="filter-timeframe" class="text-xs font-semibold text-muted-foreground whitespace-nowrap">Timeframe:</label>
+            <select
+              id="filter-timeframe"
+              class="rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="7d">Last 7 Days</option>
+              <option value="30d" selected>Last 30 Days</option>
+              <option value="90d">Last 90 Days</option>
+              <option value="all">All Time</option>
+            </select>
+          </div>
+
+          <!-- Filter 3a: Batch Status -->
+          <div class="flex items-center gap-2">
+            <label for="filter-batch-status" class="text-xs font-semibold text-muted-foreground whitespace-nowrap">Batch Status:</label>
+            <select
+              id="filter-batch-status"
+              class="rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="all">All Batches</option>
+              <option value="completed">Completed</option>
+              <option value="in_progress">In Progress</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
+
+          <!-- Filter 3b: Publishing Status (P1) -->
+          <div class="flex items-center gap-2">
+            <label for="filter-publish-status" class="text-xs font-semibold text-muted-foreground whitespace-nowrap">Publishing Status:</label>
+            <select
+              id="filter-publish-status"
+              class="rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="all">All Publishing</option>
+              <option value="draft">Draft (Scheduled)</option>
+              <option value="posted">Posted (Published)</option>
+              <option value="failed">Failed</option>
+              <option value="missing">Missing Pin (—)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between lg:justify-end gap-3 pt-2 lg:pt-0 border-t lg:border-t-0 border-border">
+          <span id="dispatches-count-summary" class="text-xs font-semibold text-muted-foreground">0 dispatched pins</span>
+          <button
+            id="reset-filters-btn"
+            type="button"
+            class="text-xs font-medium text-primary hover:underline cursor-pointer"
+          >
+            Reset Filters
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="dispatches-loading" class="py-16 text-center text-xs text-muted-foreground">
+      <div class="inline-block h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent mb-3"></div>
+      <p class="font-medium text-foreground">Loading dispatched pins ledger…</p>
+      <p class="text-[11px] text-muted-foreground mt-1">Cross-referencing P4 dispatches with live P1 publishing state</p>
+    </div>
+
+    <!-- Error State -->
+    <div id="dispatches-error" class="hidden rounded-2xl border border-rose-500/30 bg-rose-500/10 p-6 text-center text-xs text-rose-500">
+      <p id="dispatches-error-msg" class="font-bold">Failed to load dispatched pins.</p>
+      <button
+        id="dispatches-retry-btn"
+        type="button"
+        class="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/20 px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-500/30 transition-all cursor-pointer"
+      >
+        Retry
+      </button>
+    </div>
+
+    <!-- Table Container -->
+    <div id="dispatches-table-card" class="hidden rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-border bg-muted/30 text-muted-foreground font-semibold">
+              <th class="py-3 px-4 min-w-[240px]">Source Pin</th>
+              <th class="py-3 px-4 min-w-[170px]">Target Account & Board</th>
+              <th class="py-3 px-4 min-w-[180px]">Link Attached</th>
+              <th class="py-3 px-4 min-w-[150px]">Dispatched At</th>
+              <th class="py-3 px-4 min-w-[120px]">Batch Status</th>
+              <th class="py-3 px-4 min-w-[140px]">Publishing Status</th>
+              <th class="py-3 px-4 min-w-[110px] text-right">P1 Ref</th>
+            </tr>
+          </thead>
+          <tbody id="dispatches-tbody" class="divide-y divide-border">
+            <!-- Rows rendered dynamically -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Keyset Load More Footer -->
+      <div id="dispatches-footer" class="p-4 border-t border-border bg-muted/10 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <span id="dispatches-pagination-info" class="text-xs text-muted-foreground font-medium">
+          Showing <span id="displayed-count" class="font-bold text-foreground">0</span> records
+        </span>
+        <button
+          id="load-more-btn"
+          type="button"
+          class="hidden inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground px-4 py-2 text-xs font-semibold shadow-xs hover:bg-primary/90 transition-all cursor-pointer"
+        >
+          <span id="load-more-spinner" class="hidden h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
+          <span id="load-more-text">Load More Dispatches</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  (() => {
+    let nextCursor: { sent_at: string; id: string } | null = null;
+    let hasMore = false;
+    let allLoadedItems: any[] = [];
+    let isLoading = false;
+
+    const accountSelect = document.getElementById('filter-account') as HTMLSelectElement | null;
+    const timeframeSelect = document.getElementById('filter-timeframe') as HTMLSelectElement | null;
+    const batchStatusSelect = document.getElementById('filter-batch-status') as HTMLSelectElement | null;
+    const publishStatusSelect = document.getElementById('filter-publish-status') as HTMLSelectElement | null;
+    const resetFiltersBtn = document.getElementById('reset-filters-btn');
+    const refreshBtn = document.getElementById('refresh-dispatches-btn');
+    const retryBtn = document.getElementById('dispatches-retry-btn');
+    const loadMoreBtn = document.getElementById('load-more-btn');
+    const loadMoreSpinner = document.getElementById('load-more-spinner');
+    const loadMoreText = document.getElementById('load-more-text');
+
+    const loadingEl = document.getElementById('dispatches-loading');
+    const errorEl = document.getElementById('dispatches-error');
+    const errorMsgEl = document.getElementById('dispatches-error-msg');
+    const tableCardEl = document.getElementById('dispatches-table-card');
+    const tbody = document.getElementById('dispatches-tbody');
+    const bannerEl = document.getElementById('p1-degraded-banner');
+    const countSummaryEl = document.getElementById('dispatches-count-summary');
+    const displayedCountEl = document.getElementById('displayed-count');
+
+    function escapeHtml(str: string): string {
+      return (str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function formatDate(dateStr: string): { formatted: string; relative: string } {
+      if (!dateStr) return { formatted: '—', relative: '' };
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return { formatted: dateStr, relative: '' };
+
+      const formatted = d.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      const now = Date.now();
+      const diffSec = Math.floor((now - d.getTime()) / 1000);
+      let relative = '';
+      if (diffSec < 60) relative = 'Just now';
+      else if (diffSec < 3600) relative = `${Math.floor(diffSec / 60)}m ago`;
+      else if (diffSec < 86400) relative = `${Math.floor(diffSec / 3600)}h ago`;
+      else relative = `${Math.floor(diffSec / 86400)}d ago`;
+
+      return { formatted, relative };
+    }
+
+    async function loadAccounts() {
+      if (!accountSelect) return;
+      try {
+        const res = await fetch('/api/pinarchive/repurpose/targets', { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) return;
+        const data = await res.json();
+        const accounts = data.accounts || [];
+        accounts.forEach((acc: any) => {
+          const opt = document.createElement('option');
+          opt.value = acc.id;
+          opt.textContent = acc.name || acc.account_name || acc.username || 'Account';
+          accountSelect.appendChild(opt);
+        });
+      } catch (e) {
+        console.warn('Failed to load target accounts:', e);
+      }
+    }
+
+    function renderPublishBadge(status: string, error?: string | null): string {
+      const s = (status || '').toLowerCase();
+      if (s === 'posted') {
+        return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+          <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>Posted
+        </span>`;
+      }
+      if (s === 'draft') {
+        return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+          <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Draft
+        </span>`;
+      }
+      if (s === 'failed') {
+        const titleAttr = error ? ` title="${escapeHtml(error)}"` : '';
+        return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"${titleAttr}>
+          <span class="h-1.5 w-1.5 rounded-full bg-rose-500"></span>Failed
+          ${error ? '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-rose-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' : ''}
+        </span>`;
+      }
+      if (s === 'missing') {
+        return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-500/10 text-slate-500 border border-slate-500/20" title="Pin record missing or deleted in P1">
+          <span class="h-1.5 w-1.5 rounded-full bg-slate-400"></span>Missing (—)
+        </span>`;
+      }
+      return `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground border border-border" title="Publishing status unavailable">
+        <span class="h-1.5 w-1.5 rounded-full bg-muted-foreground"></span>Unknown
+      </span>`;
+    }
+
+    function renderBatchBadge(status: string): string {
+      const s = (status || '').toLowerCase();
+      if (s === 'completed') {
+        return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+          Completed
+        </span>`;
+      }
+      if (s === 'in_progress') {
+        return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-400">
+          In Progress
+        </span>`;
+      }
+      if (s === 'failed') {
+        return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400">
+          Failed
+        </span>`;
+      }
+      return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted text-muted-foreground">
+        ${escapeHtml(s || '—')}
+      </span>`;
+    }
+
+    function renderRow(item: any): string {
+      const { formatted, relative } = formatDate(item.sent_at);
+      const thumbnailHtml = item.pin_image_url
+        ? `<img src="${escapeHtml(item.pin_image_url)}" alt="Pin" class="h-10 w-8 rounded object-cover border border-border shrink-0 bg-muted" loading="lazy" />`
+        : `<div class="h-10 w-8 rounded border border-dashed border-border bg-muted flex items-center justify-center shrink-0 text-muted-foreground">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+          </div>`;
+
+      const linkHtml = item.link_used
+        ? `<div class="flex items-center gap-1.5 group">
+            <a href="${escapeHtml(item.link_used)}" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline max-w-[200px] truncate block font-mono text-[11px]">
+              ${escapeHtml(item.link_used)}
+            </a>
+            <button
+              type="button"
+              class="copy-link-btn opacity-0 group-hover:opacity-100 transition-opacity p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
+              data-link="${escapeHtml(item.link_used)}"
+              title="Copy URL"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            </button>
+          </div>`
+        : `<span class="text-muted-foreground text-[11px]">—</span>`;
+
+      return `
+        <tr class="hover:bg-muted/30 transition-colors">
+          <!-- Pin -->
+          <td class="py-3 px-4">
+            <div class="flex items-center gap-3">
+              ${thumbnailHtml}
+              <div class="min-w-0 max-w-xs">
+                <a
+                  href="/pinarchive/details?id=${encodeURIComponent(item.pa_pin_id)}"
+                  class="font-semibold text-foreground hover:text-primary hover:underline truncate block text-xs"
+                  title="${escapeHtml(item.pin_title)}"
+                >
+                  ${escapeHtml(item.pin_title)}
+                </a>
+                <span class="text-[10px] text-muted-foreground font-mono block truncate">
+                  ID: ${escapeHtml(item.pa_pin_id.slice(0, 8))}…
+                </span>
+              </div>
+            </div>
+          </td>
+
+          <!-- Target Account & Board -->
+          <td class="py-3 px-4">
+            <div class="space-y-0.5">
+              <div class="font-semibold text-foreground flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-muted-foreground shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span class="truncate">${escapeHtml(item.target_account_label)}</span>
+              </div>
+              <div class="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                <span>📌 ${escapeHtml(item.target_board_name)}</span>
+              </div>
+            </div>
+          </td>
+
+          <!-- Link Used -->
+          <td class="py-3 px-4">
+            ${linkHtml}
+          </td>
+
+          <!-- Dispatched At -->
+          <td class="py-3 px-4">
+            <div class="space-y-0.5">
+              <div class="font-medium text-foreground whitespace-nowrap">${formatted}</div>
+              <div class="text-[10px] text-muted-foreground">${relative}</div>
+            </div>
+          </td>
+
+          <!-- Batch Status -->
+          <td class="py-3 px-4">
+            ${renderBatchBadge(item.batch_status)}
+          </td>
+
+          <!-- Publishing Status (P1) -->
+          <td class="py-3 px-4">
+            ${renderPublishBadge(item.publish_status, item.publish_error)}
+          </td>
+
+          <!-- P1 Ref -->
+          <td class="py-3 px-4 text-right">
+            ${item.p1_pin_id ? `
+              <a
+                href="/calendar"
+                class="font-mono text-[11px] text-primary hover:underline block"
+                title="View in Calendar (ID: ${escapeHtml(item.p1_pin_id)})"
+              >
+                ${escapeHtml(item.p1_pin_id.slice(0, 8))}…
+              </a>
+            ` : `<span class="text-muted-foreground font-mono text-[11px]">—</span>`}
+          </td>
+        </tr>
+      `;
+    }
+
+    async function fetchLedger(append = false) {
+      if (isLoading) return;
+      isLoading = true;
+
+      if (!append) {
+        allLoadedItems = [];
+        nextCursor = null;
+        if (loadingEl) loadingEl.classList.remove('hidden');
+        if (errorEl) errorEl.classList.add('hidden');
+        if (tableCardEl) tableCardEl.classList.add('hidden');
+      } else {
+        if (loadMoreSpinner) loadMoreSpinner.classList.remove('hidden');
+        if (loadMoreText) loadMoreText.textContent = 'Loading...';
+        if (loadMoreBtn) (loadMoreBtn as HTMLButtonElement).disabled = true;
+      }
+
+      try {
+        const params = new URLSearchParams();
+        if (accountSelect?.value) params.set('accountId', accountSelect.value);
+        if (timeframeSelect?.value) params.set('timeframe', timeframeSelect.value);
+        if (batchStatusSelect?.value) params.set('batchStatus', batchStatusSelect.value);
+        if (publishStatusSelect?.value) params.set('publishStatus', publishStatusSelect.value);
+        params.set('limit', '50');
+
+        if (append && nextCursor) {
+          params.set('cursor', JSON.stringify(nextCursor));
+        }
+
+        const res = await fetch(`/api/pinarchive/dispatches?${params.toString()}`, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error || 'Failed to fetch dispatches');
+
+        const newItems = json.items || [];
+        nextCursor = json.next_cursor || null;
+        hasMore = Boolean(json.has_more);
+
+        // Degraded Banner Handling
+        if (bannerEl) {
+          if (json.p1_degraded) {
+            bannerEl.classList.remove('hidden');
+          } else {
+            bannerEl.classList.add('hidden');
+          }
+        }
+
+        if (append) {
+          allLoadedItems = allLoadedItems.concat(newItems);
+        } else {
+          allLoadedItems = newItems;
+        }
+
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (errorEl) errorEl.classList.add('hidden');
+        if (tableCardEl) tableCardEl.classList.remove('hidden');
+
+        if (countSummaryEl) {
+          countSummaryEl.textContent = `${allLoadedItems.length} dispatched pins`;
+        }
+        if (displayedCountEl) {
+          displayedCountEl.textContent = String(allLoadedItems.length);
+        }
+
+        if (tbody) {
+          if (allLoadedItems.length === 0) {
+            tbody.innerHTML = `
+              <tr>
+                <td colspan="7" class="p-12 text-center text-muted-foreground bg-muted/10">
+                  <div class="flex flex-col items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-muted-foreground mb-3 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+                    <p class="font-semibold text-foreground text-sm">No dispatched pins found</p>
+                    <p class="text-xs text-muted-foreground mt-1 max-w-sm">Pins dispatched via the Repurpose flow will appear here with live scheduling audit records.</p>
+                  </div>
+                </td>
+              </tr>
+            `;
+          } else {
+            if (append) {
+              tbody.insertAdjacentHTML('beforeend', newItems.map(renderRow).join(''));
+            } else {
+              tbody.innerHTML = allLoadedItems.map(renderRow).join('');
+            }
+          }
+        }
+
+        // Setup copy link buttons
+        document.querySelectorAll('.copy-link-btn').forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const link = (btn as HTMLElement).getAttribute('data-link');
+            if (link) {
+              navigator.clipboard.writeText(link);
+              btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+              setTimeout(() => {
+                btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+              }, 2000);
+            }
+          });
+        });
+
+        // Load More button state
+        if (loadMoreBtn) {
+          if (hasMore) {
+            loadMoreBtn.classList.remove('hidden');
+          } else {
+            loadMoreBtn.classList.add('hidden');
+          }
+        }
+      } catch (err: any) {
+        console.error('Error fetching dispatches ledger:', err);
+        if (!append) {
+          if (loadingEl) loadingEl.classList.add('hidden');
+          if (tableCardEl) tableCardEl.classList.add('hidden');
+          if (errorEl) errorEl.classList.remove('hidden');
+          if (errorMsgEl) errorMsgEl.textContent = err.message || 'Failed to load dispatched pins.';
+        }
+      } finally {
+        isLoading = false;
+        if (loadMoreSpinner) loadMoreSpinner.classList.add('hidden');
+        if (loadMoreText) loadMoreText.textContent = 'Load More Dispatches';
+        if (loadMoreBtn) (loadMoreBtn as HTMLButtonElement).disabled = false;
+      }
+    }
+
+    // Attach Event Listeners
+    accountSelect?.addEventListener('change', () => fetchLedger(false));
+    timeframeSelect?.addEventListener('change', () => fetchLedger(false));
+    batchStatusSelect?.addEventListener('change', () => fetchLedger(false));
+    publishStatusSelect?.addEventListener('change', () => fetchLedger(false));
+
+    resetFiltersBtn?.addEventListener('click', () => {
+      if (accountSelect) accountSelect.value = '';
+      if (timeframeSelect) timeframeSelect.value = '30d';
+      if (batchStatusSelect) batchStatusSelect.value = 'all';
+      if (publishStatusSelect) publishStatusSelect.value = 'all';
+      fetchLedger(false);
+    });
+
+    refreshBtn?.addEventListener('click', () => fetchLedger(false));
+    retryBtn?.addEventListener('click', () => fetchLedger(false));
+    loadMoreBtn?.addEventListener('click', () => fetchLedger(true));
+
+    // Initialize
+    loadAccounts();
+    fetchLedger(false);
+  })();
+</script>
