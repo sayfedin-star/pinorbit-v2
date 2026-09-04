@@ -6,13 +6,55 @@ export interface AccountDefaultsResult {
   defaults: Record<string, string>;
   domains: string[];
   singleDomain: string | null;
-  user_count?: number;
-  workspace_count?: number;
-  domain_counts?: Record<string, number>;
+  user_count: number;
+  workspace_count: number;
+  domain_counts: Record<string, number>;
+}
+
+/**
+ * Helper to fetch all URLs from a table in range-chunks to avoid PostgREST's 1000-row default limit.
+ */
+async function fetchTableUrlsChunked(
+  paAdmin: SupabaseClient,
+  tableName: 'user_links' | 'workspace_links',
+  filterCol?: string,
+  filterVal?: string
+): Promise<{ urls: string[]; totalCount: number }> {
+  const CHUNK_SIZE = 1000;
+  const urls: string[] = [];
+  let from = 0;
+  let exactTotal = 0;
+
+  while (true) {
+    let query = paAdmin
+      .from(tableName)
+      .select('url', { count: from === 0 ? 'exact' : undefined });
+
+    if (filterCol && filterVal) {
+      query = query.eq(filterCol, filterVal);
+    }
+
+    const { data, count, error } = await query
+      .order('created_at', { ascending: false })
+      .range(from, from + CHUNK_SIZE - 1);
+
+    if (error || !data || data.length === 0) break;
+    if (from === 0 && typeof count === 'number') {
+      exactTotal = count;
+    }
+    for (const row of data) {
+      if (row?.url) urls.push(row.url);
+    }
+    if (data.length < CHUNK_SIZE) break;
+    from += CHUNK_SIZE;
+  }
+
+  return { urls, totalCount: Math.max(exactTotal, urls.length) };
 }
 
 /**
  * Get account default sites for a workspace, along with all known notebook domains and aggregate counts.
+ * Range-chunks across user_links and workspace_links so tables larger than 1000 rows are accurately aggregated.
  * Implements AUTO-RULE: If exactly 1 domain exists in the notebook, it acts as the default
  * for all accounts without an explicit override.
  */
@@ -38,35 +80,29 @@ export async function getAccountDefaults(
     }
   }
 
-  // 2. Fetch distinct domains and counts from user_links and workspace_links
-  let userQuery = paAdmin.from('user_links').select('url', { count: 'exact' });
-  if (userId) {
-    userQuery = userQuery.eq('user_id', userId);
-  }
-
-  const [userLinksRes, wsLinksRes] = await Promise.all([
-    userQuery,
-    paAdmin.from('workspace_links').select('url', { count: 'exact' }).eq('workspace_id', workspaceId),
+  // 2. Fetch distinct domains and counts from user_links and workspace_links in range chunks
+  const [userResult, wsResult] = await Promise.all([
+    fetchTableUrlsChunked(paAdmin, 'user_links', userId ? 'user_id' : undefined, userId || undefined),
+    fetchTableUrlsChunked(paAdmin, 'workspace_links', 'workspace_id', workspaceId),
   ]);
 
   const domainCounts: Record<string, number> = {};
   const domainSet = new Set<string>();
-  const collectDomains = (rows: any[] | null) => {
-    for (const r of rows || []) {
-      if (r?.url) {
-        try {
-          const u = new URL(r.url);
-          if (u.hostname) {
-            domainSet.add(u.hostname);
-            domainCounts[u.hostname] = (domainCounts[u.hostname] || 0) + 1;
-          }
-        } catch {}
-      }
+
+  const collectDomains = (urls: string[]) => {
+    for (const rawUrl of urls) {
+      try {
+        const u = new URL(rawUrl);
+        if (u.hostname) {
+          domainSet.add(u.hostname);
+          domainCounts[u.hostname] = (domainCounts[u.hostname] || 0) + 1;
+        }
+      } catch {}
     }
   };
 
-  collectDomains(userLinksRes.data);
-  collectDomains(wsLinksRes.data);
+  collectDomains(userResult.urls);
+  collectDomains(wsResult.urls);
 
   const domains = Array.from(domainSet).sort();
   const singleDomain = domains.length === 1 ? domains[0] : null;
@@ -75,8 +111,8 @@ export async function getAccountDefaults(
     defaults,
     domains,
     singleDomain,
-    user_count: userLinksRes.count ?? (userLinksRes.data?.length || 0),
-    workspace_count: wsLinksRes.count ?? (wsLinksRes.data?.length || 0),
+    user_count: userResult.totalCount,
+    workspace_count: wsResult.totalCount,
     domain_counts: domainCounts,
   };
 }

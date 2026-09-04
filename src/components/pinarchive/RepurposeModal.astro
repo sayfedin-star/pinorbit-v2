@@ -179,11 +179,12 @@ const { id = 'repurpose-modal' } = Astro.props;
 
         if (notebookSelectContainer) {
           if (comboboxInstance) {
-            comboboxInstance.updateLinks(notebookLinks);
+            comboboxInstance.updateLinks(notebookLinks, notebookLinks.length);
           } else {
             comboboxInstance = createNotebookCombobox({
               container: notebookSelectContainer,
               links: notebookLinks,
+              serverTotal: notebookLinks.length,
               placeholder: 'Search label, url, or slug…',
               onSelect: (link) => {
                 selectedLinkObj = link;

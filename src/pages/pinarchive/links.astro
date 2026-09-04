@@ -108,7 +108,7 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
         </div>
 
         <div id="auto-rule-note" class="hidden p-3 rounded-xl bg-primary/5 border border-primary/20 text-xs text-foreground">
-          💡 <strong>Single Domain Detected:</strong> Because exactly one domain (<span id="auto-rule-domain-name" class="font-bold text-primary"></span>) exists in your Link Notebook, it is <strong>automatically applied to all connected accounts</strong> without needing manual assignment.
+          💡 <strong>Single Domain Detected:</strong> Because exactly one domain (<span id="auto-rule-domain-name" class="font-bold text-primary"></span>) exists in your Link Notebook, it is <strong>automatically applied to all connected accounts unless overridden</strong>.
         </div>
 
         <!-- Accounts Table -->
@@ -768,9 +768,11 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
                   value="${escapeHtml(configured)}"
                   placeholder="${singleDomainAutoName ? `Auto: https://${singleDomainAutoName}/` : 'e.g. https://mysite.com'}"
                 />
-                ${!configured && singleDomainAutoName ? `
+                ${configured ? `
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-600 border border-amber-500/30 shrink-0">Override</span>
+                ` : (singleDomainAutoName ? `
                   <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary shrink-0">AUTO</span>
-                ` : ''}
+                ` : '')}
               </div>
             </td>
             <td class="py-3 px-3 text-right">

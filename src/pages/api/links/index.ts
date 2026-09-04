@@ -125,26 +125,38 @@ export const GET: APIRoute = async ({ locals, url }) => {
     }
 
     // ═══ MODE B: Unpaginated Legacy Query (Backward Compatibility) ═══
-    const { data: userLinks } = await paAdmin
-      .from('user_links')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('is_default', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(5000);
+    // Range-chunked to guarantee all links are retrieved without PostgREST 1000-row capping
+    const fetchAllLinks = async (table: 'user_links' | 'workspace_links', filterCol: string, filterVal: string) => {
+      const CHUNK_SIZE = 1000;
+      const all: any[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await paAdmin
+          .from(table)
+          .select('*')
+          .eq(filterCol, filterVal)
+          .order('is_default', { ascending: false })
+          .order('created_at', { ascending: false })
+          .range(from, from + CHUNK_SIZE - 1);
 
-    const { data: wsLinks } = await paAdmin
-      .from('workspace_links')
-      .select('*')
-      .eq('workspace_id', workspaceId)
-      .order('is_default', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(5000);
+        if (error || !data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < CHUNK_SIZE) break;
+        from += CHUNK_SIZE;
+      }
+      return all;
+    };
+
+    const [userLinks, wsLinks] = await Promise.all([
+      fetchAllLinks('user_links', 'user_id', user.id),
+      fetchAllLinks('workspace_links', 'workspace_id', workspaceId),
+    ]);
 
     return json({
       success: true,
-      user_links: (userLinks || []).map(formatLink),
-      workspace_links: (wsLinks || []).map(formatLink),
+      user_links: userLinks.map(formatLink),
+      workspace_links: wsLinks.map(formatLink),
+      total: userLinks.length + wsLinks.length,
     });
   } catch (err: any) {
     if (err instanceof HttpError) {

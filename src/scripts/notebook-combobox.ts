@@ -13,13 +13,15 @@ export interface NotebookComboboxOptions {
   links: NotebookLink[];
   selectedUrl?: string;
   placeholder?: string;
+  serverTotal?: number;
   onSelect: (link: NotebookLink | null) => void;
 }
 
 export interface NotebookComboboxInstance {
   getSelectedLink: () => NotebookLink | null;
   setSelectedLink: (link: NotebookLink | null) => void;
-  updateLinks: (links: NotebookLink[]) => void;
+  updateLinks: (links: NotebookLink[], serverTotal?: number) => void;
+  setServerTotal: (total: number) => void;
   destroy: () => void;
 }
 
@@ -35,11 +37,12 @@ function escapeHtml(str: string): string {
 /**
  * Creates an interactive Notebook Combobox instance inside the provided container.
  * Supports keyword search across label/url/slug, domain and shelf filtering,
- * capped 50 preview list, and compact chip display.
+ * capped 50 preview list, serverTotal support, and compact chip display.
  */
 export function createNotebookCombobox(options: NotebookComboboxOptions): NotebookComboboxInstance {
   const { container, placeholder = 'Search label, url, or slug…', onSelect } = options;
   let allLinks = [...(options.links || [])];
+  let serverTotal = options.serverTotal !== undefined ? options.serverTotal : allLinks.length;
   let selectedLink: NotebookLink | null = null;
 
   // Initialize selected link if provided
@@ -174,15 +177,24 @@ export function createNotebookCombobox(options: NotebookComboboxOptions): Notebo
       return (a.label || '').localeCompare(b.label || '');
     });
 
+    const hasFilter = Boolean(q || dom || shelf !== 'all');
     const totalMatches = filtered.length;
+    const effectiveTotal = hasFilter ? totalMatches : Math.max(serverTotal, allLinks.length);
     const capped = filtered.slice(0, 50);
 
     if (resultsCountEl) {
-      resultsCountEl.textContent = `${capped.length} of ${totalMatches} links`;
+      resultsCountEl.textContent = `${capped.length} of ${effectiveTotal} links`;
     }
     if (capNoticeEl) {
-      if (totalMatches > 50) capNoticeEl.classList.remove('hidden');
-      else capNoticeEl.classList.add('hidden');
+      if (totalMatches > 50) {
+        capNoticeEl.textContent = 'Showing first 50 — narrow search';
+        capNoticeEl.classList.remove('hidden');
+      } else if (!hasFilter && allLinks.length < serverTotal) {
+        capNoticeEl.textContent = `Loaded first ${allLinks.length} of ${serverTotal} — use search`;
+        capNoticeEl.classList.remove('hidden');
+      } else {
+        capNoticeEl.classList.add('hidden');
+      }
     }
 
     if (capped.length === 0) {
@@ -269,9 +281,18 @@ export function createNotebookCombobox(options: NotebookComboboxOptions): Notebo
     setSelectedLink: (link: NotebookLink | null) => {
       applySelection(link);
     },
-    updateLinks: (newLinks: NotebookLink[]) => {
+    updateLinks: (newLinks: NotebookLink[], newServerTotal?: number) => {
       allLinks = [...(newLinks || [])];
+      if (newServerTotal !== undefined) {
+        serverTotal = newServerTotal;
+      } else {
+        serverTotal = Math.max(serverTotal, allLinks.length);
+      }
       populateDomains();
+      renderList();
+    },
+    setServerTotal: (total: number) => {
+      serverTotal = total;
       renderList();
     },
     destroy: () => {

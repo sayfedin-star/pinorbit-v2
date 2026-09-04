@@ -435,6 +435,7 @@ const { id = 'assign-accounts-modal' } = Astro.props;
           container: nbContainer,
           links: notebookLinks,
           selectedUrl: defStar?.url,
+          serverTotal: notebookLinks.length,
           onSelect: (link) => {
             accountLinkChoice[acc.id] = link;
             updateAccountPreview(acc.id);

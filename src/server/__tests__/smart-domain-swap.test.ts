@@ -57,7 +57,23 @@ describe('Smart Domain-Swap & Account Defaults Suite (v2.9)', () => {
     });
   });
 
-  describe('Account Defaults Service (AUTO-RULE)', () => {
+  function createMockTableQuery(rows: { url: string }[]) {
+    return {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      range: vi.fn((from: number, to: number) => {
+        const slice = rows.slice(from, to + 1);
+        return Promise.resolve({
+          data: slice,
+          count: rows.length,
+          error: null,
+        });
+      }),
+    };
+  }
+
+  describe('Account Defaults Service (AUTO-RULE & Chunked Aggregation)', () => {
     it('applies AUTO-RULE when exactly 1 unique domain exists across notebook links', async () => {
       const mockPaAdmin = {
         from: vi.fn((table: string) => {
@@ -68,30 +84,15 @@ describe('Smart Domain-Swap & Account Defaults Suite (v2.9)', () => {
             };
           }
           if (table === 'user_links') {
-            const userQueryResult: any = {
-              data: [
-                { url: 'https://40aprons.com/recipe-1' },
-                { url: 'https://40aprons.com/recipe-2' },
-              ],
-              count: 2,
-              error: null,
-            };
-            const queryObj: any = {
-              eq: vi.fn().mockResolvedValue(userQueryResult),
-              then: (resolve: any) => resolve(userQueryResult),
-            };
-            return {
-              select: vi.fn().mockReturnValue(queryObj),
-            };
+            return createMockTableQuery([
+              { url: 'https://40aprons.com/recipe-1' },
+              { url: 'https://40aprons.com/recipe-2' },
+            ]);
           }
           if (table === 'workspace_links') {
-            return {
-              select: vi.fn().mockReturnThis(),
-              eq: vi.fn().mockResolvedValue({
-                data: [{ url: 'https://40aprons.com/recipe-3' }],
-                error: null,
-              }),
-            };
+            return createMockTableQuery([
+              { url: 'https://40aprons.com/recipe-3' },
+            ]);
           }
           return {};
         }),
@@ -102,7 +103,37 @@ describe('Smart Domain-Swap & Account Defaults Suite (v2.9)', () => {
       expect(res.singleDomain).toBe('40aprons.com');
       expect(res.defaults).toEqual({});
       expect(res.user_count).toBe(2);
+      expect(res.workspace_count).toBe(1);
       expect(res.domain_counts).toEqual({ '40aprons.com': 3 });
+    });
+
+    it('accurately aggregates across multi-chunk pagination when table has > 1000 items (1733 links)', async () => {
+      const largeUserLinks = Array.from({ length: 1733 }, (_, i) => ({
+        url: `https://40aprons.com/recipe-${i}`,
+      }));
+
+      const mockPaAdmin = {
+        from: vi.fn((table: string) => {
+          if (table === 'pa_account_default_sites') {
+            return {
+              select: vi.fn().mockReturnThis(),
+              eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+            };
+          }
+          if (table === 'user_links') {
+            return createMockTableQuery(largeUserLinks);
+          }
+          if (table === 'workspace_links') {
+            return createMockTableQuery([]);
+          }
+          return {};
+        }),
+      } as any;
+
+      const res = await getAccountDefaults(mockPaAdmin, workspaceId, userId);
+      expect(res.user_count).toBe(1733);
+      expect(res.domain_counts['40aprons.com']).toBe(1733);
+      expect(res.singleDomain).toBe('40aprons.com');
     });
 
     it('does not set singleDomain if multiple domains exist', async () => {
@@ -115,27 +146,13 @@ describe('Smart Domain-Swap & Account Defaults Suite (v2.9)', () => {
             };
           }
           if (table === 'user_links') {
-            const userQueryResult: any = {
-              data: [
-                { url: 'https://site1.com/a' },
-                { url: 'https://site2.com/b' },
-              ],
-              count: 2,
-              error: null,
-            };
-            const queryObj: any = {
-              eq: vi.fn().mockResolvedValue(userQueryResult),
-              then: (resolve: any) => resolve(userQueryResult),
-            };
-            return {
-              select: vi.fn().mockReturnValue(queryObj),
-            };
+            return createMockTableQuery([
+              { url: 'https://site1.com/a' },
+              { url: 'https://site2.com/b' },
+            ]);
           }
           if (table === 'workspace_links') {
-            return {
-              select: vi.fn().mockReturnThis(),
-              eq: vi.fn().mockResolvedValue({ data: [], error: null }),
-            };
+            return createMockTableQuery([]);
           }
           return {};
         }),
@@ -182,7 +199,6 @@ describe('Smart Domain-Swap & Account Defaults Suite (v2.9)', () => {
           board_name: 'Salads',
           status: 'staged',
         },
-        // pin-2 will fail CAS (already dispatched or deleted)
       };
 
       const mockPaAdmin = {
