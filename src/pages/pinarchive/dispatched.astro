@@ -55,8 +55,8 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
     <!-- ==================== TAB 1: STAGING QUEUE ==================== -->
     <div id="tab-queue-content" class="space-y-4">
       <!-- Queue Top Bar -->
-      <div class="rounded-2xl border border-border bg-card p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div class="relative flex-1 w-full sm:max-w-md">
+      <div class="rounded-2xl border border-border bg-card p-4 shadow-xs flex flex-col lg:flex-row items-center justify-between gap-3">
+        <div class="relative flex-1 w-full lg:max-w-md">
           <input
             type="text"
             id="queue-search-input"
@@ -66,7 +66,29 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
           <svg xmlns="http://www.w3.org/2000/svg" class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         </div>
 
-        <div class="flex items-center gap-2.5 w-full sm:w-auto justify-between sm:justify-end">
+        <div class="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-between lg:justify-end">
+          <!-- View Switcher (Table default vs Cards) -->
+          <div class="flex items-center p-1 rounded-xl bg-muted/60 border border-border text-xs">
+            <button
+              id="view-table-btn"
+              type="button"
+              class="px-2.5 py-1 rounded-lg font-bold transition-all bg-card text-foreground shadow-xs cursor-pointer flex items-center gap-1.5"
+              title="Table View (Default)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+              <span>Table</span>
+            </button>
+            <button
+              id="view-cards-btn"
+              type="button"
+              class="px-2.5 py-1 rounded-lg font-medium transition-all text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1.5"
+              title="Cards View"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+              <span>Cards</span>
+            </button>
+          </div>
+
           <button
             id="refresh-queue-btn"
             type="button"
@@ -77,10 +99,48 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
           </button>
           <a
             href="/pinarchive/winning-pins"
-            class="inline-flex items-center gap-1.5 rounded-xl bg-primary/10 border border-primary/20 px-3.5 py-2 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
+            class="inline-flex items-center gap-1.5 rounded-xl bg-primary text-primary-foreground px-3.5 py-2 text-xs font-semibold shadow-xs hover:opacity-90 transition-opacity"
           >
             <span>+ Stage More Pins</span>
           </a>
+        </div>
+      </div>
+
+      <!-- Bulk Action Bar (Visible when 1+ pins selected) -->
+      <div
+        id="queue-bulk-bar"
+        class="hidden rounded-xl border border-primary/30 bg-primary/5 p-3 flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-all"
+      >
+        <div class="flex items-center gap-2.5">
+          <span class="font-bold text-primary flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            <span id="queue-selected-count">0</span> items selected
+          </span>
+          <button
+            type="button"
+            id="queue-clear-selection-btn"
+            class="text-[11px] text-muted-foreground hover:text-foreground underline cursor-pointer"
+          >
+            Clear selection
+          </button>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            id="queue-bulk-assign-btn"
+            class="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3.5 py-1.5 text-xs font-bold shadow-xs hover:opacity-90 transition-opacity cursor-pointer"
+          >
+            <span>🎯 Assign & Dispatch Selected</span>
+          </button>
+          <button
+            type="button"
+            id="queue-bulk-delete-btn"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 px-3 py-1.5 text-xs font-semibold hover:bg-rose-500/20 transition-colors cursor-pointer"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <span>Delete Selected</span>
+          </button>
         </div>
       </div>
 
@@ -107,7 +167,35 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
         </a>
       </div>
 
-      <!-- Queue Cards Grid -->
+      <!-- View 1: Table View (DEFAULT) -->
+      <div id="queue-table-card" class="hidden rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-border bg-muted/30 text-muted-foreground font-semibold">
+                <th class="py-3 px-4 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    id="queue-select-all-cb"
+                    class="rounded border-border text-primary h-4 w-4 cursor-pointer"
+                    title="Select All"
+                  />
+                </th>
+                <th class="py-3 px-4 min-w-[220px]">Pin Details</th>
+                <th class="py-3 px-4 min-w-[150px]">Default Board</th>
+                <th class="py-3 px-4 min-w-[220px]">Destination Link</th>
+                <th class="py-3 px-4 min-w-[130px]">Staged Time</th>
+                <th class="py-3 px-4 min-w-[180px] text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="queue-tbody" class="divide-y divide-border">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- View 2: Cards Grid -->
       <div id="queue-grid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         <!-- Rendered dynamically -->
       </div>
@@ -314,15 +402,48 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
 
     // ==================== STAGING QUEUE LOGIC ====================
     let stagedPins: any[] = [];
+    let selectedStagedIds = new Set<string>();
+    let currentViewMode: 'table' | 'cards' = 'table';
+
     const queueLoading = document.getElementById('queue-loading');
     const queueEmpty = document.getElementById('queue-empty');
+    const queueTableCard = document.getElementById('queue-table-card');
+    const queueTbody = document.getElementById('queue-tbody');
     const queueGrid = document.getElementById('queue-grid');
     const queueSearchInput = document.getElementById('queue-search-input') as HTMLInputElement | null;
     const refreshQueueBtn = document.getElementById('refresh-queue-btn');
+    const viewTableBtn = document.getElementById('view-table-btn');
+    const viewCardsBtn = document.getElementById('view-cards-btn');
+    const selectAllCb = document.getElementById('queue-select-all-cb') as HTMLInputElement | null;
+    const bulkBar = document.getElementById('queue-bulk-bar');
+    const bulkCountSpan = document.getElementById('queue-selected-count');
+    const bulkClearBtn = document.getElementById('queue-clear-selection-btn');
+    const bulkAssignBtn = document.getElementById('queue-bulk-assign-btn');
+    const bulkDeleteBtn = document.getElementById('queue-bulk-delete-btn');
+
+    function setViewMode(mode: 'table' | 'cards') {
+      currentViewMode = mode;
+      if (mode === 'table') {
+        viewTableBtn?.classList.add('bg-card', 'text-foreground', 'shadow-xs');
+        viewTableBtn?.classList.remove('text-muted-foreground');
+        viewCardsBtn?.classList.remove('bg-card', 'text-foreground', 'shadow-xs');
+        viewCardsBtn?.classList.add('text-muted-foreground');
+      } else {
+        viewCardsBtn?.classList.add('bg-card', 'text-foreground', 'shadow-xs');
+        viewCardsBtn?.classList.remove('text-muted-foreground');
+        viewTableBtn?.classList.remove('bg-card', 'text-foreground', 'shadow-xs');
+        viewTableBtn?.classList.add('text-muted-foreground');
+      }
+      renderQueue();
+    }
+
+    viewTableBtn?.addEventListener('click', () => setViewMode('table'));
+    viewCardsBtn?.addEventListener('click', () => setViewMode('cards'));
 
     async function loadQueue() {
       if (queueLoading) queueLoading.classList.remove('hidden');
       if (queueEmpty) queueEmpty.classList.add('hidden');
+      if (queueTableCard) queueTableCard.classList.add('hidden');
       if (queueGrid) queueGrid.classList.add('hidden');
 
       try {
@@ -332,6 +453,11 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
         if (data.success) {
           stagedPins = data.queue || [];
           if (stagedCountBadge) stagedCountBadge.textContent = String(stagedPins.length);
+          const existingIds = new Set(stagedPins.map((p) => p.id));
+          selectedStagedIds.forEach((id) => {
+            if (!existingIds.has(id)) selectedStagedIds.delete(id);
+          });
+          updateBulkBar();
           renderQueue();
         }
       } catch (err) {
@@ -341,8 +467,69 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
       }
     }
 
+    function updateBulkBar() {
+      const count = selectedStagedIds.size;
+      if (bulkCountSpan) bulkCountSpan.textContent = String(count);
+
+      if (count > 0) {
+        bulkBar?.classList.remove('hidden');
+      } else {
+        bulkBar?.classList.add('hidden');
+      }
+
+      if (selectAllCb) {
+        const total = stagedPins.length;
+        selectAllCb.checked = total > 0 && count === total;
+        selectAllCb.indeterminate = count > 0 && count < total;
+      }
+    }
+
+    bulkClearBtn?.addEventListener('click', () => {
+      selectedStagedIds.clear();
+      updateBulkBar();
+      renderQueue();
+    });
+
+    selectAllCb?.addEventListener('change', () => {
+      const checked = selectAllCb.checked;
+      if (checked) {
+        stagedPins.forEach((p) => selectedStagedIds.add(p.id));
+      } else {
+        selectedStagedIds.clear();
+      }
+      updateBulkBar();
+      renderQueue();
+    });
+
+    // Bulk Assign Action
+    bulkAssignBtn?.addEventListener('click', () => {
+      if (selectedStagedIds.size === 0) return;
+      const selectedPinsList = stagedPins.filter((p) => selectedStagedIds.has(p.id));
+      if (selectedPinsList.length > 0) {
+        window.dispatchEvent(new CustomEvent('open-assign-modal', { detail: { stagedPins: selectedPinsList } }));
+      }
+    });
+
+    // Bulk Delete Action
+    bulkDeleteBtn?.addEventListener('click', async () => {
+      if (selectedStagedIds.size === 0) return;
+      const count = selectedStagedIds.size;
+      if (!confirm(`Are you sure you want to delete ${count} selected pin${count === 1 ? '' : 's'} from the staging queue?`)) return;
+
+      const idsToDelete = Array.from(selectedStagedIds);
+      try {
+        await Promise.all(
+          idsToDelete.map((id) => fetch(`/api/pinarchive/staged/${encodeURIComponent(id)}`, { method: 'DELETE' }))
+        );
+        selectedStagedIds.clear();
+        loadQueue();
+      } catch (err) {
+        console.error('Bulk delete failed:', err);
+      }
+    });
+
     function renderQueue() {
-      if (!queueGrid || !queueEmpty) return;
+      if (!queueEmpty || !queueTableCard || !queueGrid || !queueTbody) return;
 
       const q = (queueSearchInput?.value || '').trim().toLowerCase();
       const filtered = stagedPins.filter((pin) => {
@@ -354,98 +541,213 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
       });
 
       if (filtered.length === 0) {
+        queueTableCard.classList.add('hidden');
         queueGrid.classList.add('hidden');
         queueEmpty.classList.remove('hidden');
         return;
       }
 
       queueEmpty.classList.add('hidden');
-      queueGrid.classList.remove('hidden');
 
-      queueGrid.innerHTML = filtered.map((pin) => {
-        const activeLink = pin.override_link || pin.original_link || '';
-        const isOverride = Boolean(pin.override_link);
-        const { relative } = formatDate(pin.created_at);
+      if (currentViewMode === 'table') {
+        queueGrid.classList.add('hidden');
+        queueTableCard.classList.remove('hidden');
 
-        return `
-          <div class="rounded-2xl border border-border bg-card p-3.5 shadow-xs flex flex-col justify-between hover:border-border/80 transition-all" data-staged-id="${pin.id}">
-            <!-- Top Content -->
-            <div>
-              <div class="aspect-3/4 w-full rounded-xl overflow-hidden bg-muted mb-3 relative group">
-                <img
-                  src="${escapeHtml(pin.image_url)}"
-                  alt="Pin"
-                  class="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  loading="lazy"
+        queueTbody.innerHTML = filtered.map((pin) => {
+          const isSelected = selectedStagedIds.has(pin.id);
+          const activeLink = pin.override_link || pin.original_link || '';
+          const isOverride = Boolean(pin.override_link);
+          const { relative } = formatDate(pin.created_at);
+
+          return `
+            <tr class="hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''}" data-row-id="${pin.id}">
+              <td class="py-3 px-4 text-center">
+                <input
+                  type="checkbox"
+                  class="staged-pin-cb rounded border-border text-primary h-4 w-4 cursor-pointer"
+                  data-pin-id="${pin.id}"
+                  ${isSelected ? 'checked' : ''}
                 />
-                <div class="absolute top-2 left-2">
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-background/90 text-primary border border-border shadow-xs">
-                    Staged
-                  </span>
-                </div>
-                ${pin.board_name ? `
-                  <div class="absolute bottom-2 left-2 right-2 truncate">
-                    <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-background/90 text-foreground border border-border shadow-xs truncate block">
-                      📌 ${escapeHtml(pin.board_name)}
+              </td>
+              <td class="py-3 px-4">
+                <div class="flex items-center gap-3">
+                  <img
+                    src="${escapeHtml(pin.image_url)}"
+                    alt="Pin"
+                    class="h-12 w-9 rounded-lg object-cover border border-border shrink-0 bg-muted"
+                    loading="lazy"
+                  />
+                  <div class="min-w-0 max-w-sm">
+                    <span class="font-semibold text-foreground truncate block text-xs" title="${escapeHtml(pin.title)}">
+                      ${escapeHtml(pin.title)}
+                    </span>
+                    <span class="text-[10px] text-muted-foreground font-mono block truncate">
+                      ID: ${escapeHtml(pin.id.slice(0, 8))}…
                     </span>
                   </div>
-                ` : ''}
-              </div>
-
-              <h4 class="font-bold text-xs text-foreground line-clamp-2 mb-1.5" title="${escapeHtml(pin.title)}">
-                ${escapeHtml(pin.title)}
-              </h4>
-
-              <div class="text-[11px] mb-2">
+                </div>
+              </td>
+              <td class="py-3 px-4">
+                ${pin.board_name ? `
+                  <span class="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-muted text-foreground border border-border">
+                    📌 ${escapeHtml(pin.board_name)}
+                  </span>
+                ` : `<span class="text-muted-foreground italic text-[11px]">—</span>`}
+              </td>
+              <td class="py-3 px-4">
                 ${activeLink ? `
-                  <div class="flex items-center gap-1 font-mono text-[10px] text-muted-foreground truncate" title="${escapeHtml(activeLink)}">
-                    <span class="${isOverride ? 'text-primary font-bold' : 'text-muted-foreground'}">${isOverride ? '🔗 Override:' : '📎 Orig:'}</span>
-                    <a href="${escapeHtml(activeLink)}" target="_blank" rel="noopener noreferrer" class="hover:underline truncate">${escapeHtml(activeLink)}</a>
+                  <div class="flex items-center gap-1 font-mono text-[11px] max-w-[240px] truncate" title="${escapeHtml(activeLink)}">
+                    <span class="${isOverride ? 'text-primary font-bold' : 'text-muted-foreground'} shrink-0">${isOverride ? '🔗 Override:' : '📎 Orig:'}</span>
+                    <a href="${escapeHtml(activeLink)}" target="_blank" rel="noopener noreferrer" class="hover:underline truncate text-primary">${escapeHtml(activeLink)}</a>
                   </div>
-                ` : `
-                  <span class="text-muted-foreground italic text-[10px]">No destination link set</span>
-                `}
+                ` : `<span class="text-muted-foreground italic text-[11px]">No link</span>`}
+              </td>
+              <td class="py-3 px-4 text-muted-foreground text-[11px] whitespace-nowrap">
+                ${relative}
+              </td>
+              <td class="py-3 px-4 text-right">
+                <div class="flex items-center justify-end gap-1.5">
+                  <button
+                    type="button"
+                    class="assign-pin-btn inline-flex items-center gap-1 rounded-xl bg-primary text-primary-foreground px-2.5 py-1 text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer"
+                    data-staged-id="${pin.id}"
+                  >
+                    <span>🎯 Assign</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="edit-pin-btn p-1.5 rounded-xl border border-border bg-background hover:bg-muted text-foreground transition-colors cursor-pointer"
+                    data-staged-id="${pin.id}"
+                    title="Edit Pin Details"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="delete-pin-btn p-1.5 rounded-xl border border-border bg-background hover:bg-rose-500/10 hover:text-rose-600 text-muted-foreground transition-colors cursor-pointer"
+                    data-staged-id="${pin.id}"
+                    title="Remove from Queue"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } else {
+        queueTableCard.classList.add('hidden');
+        queueGrid.classList.remove('hidden');
+
+        queueGrid.innerHTML = filtered.map((pin) => {
+          const isSelected = selectedStagedIds.has(pin.id);
+          const activeLink = pin.override_link || pin.original_link || '';
+          const isOverride = Boolean(pin.override_link);
+          const { relative } = formatDate(pin.created_at);
+
+          return `
+            <div class="rounded-2xl border ${isSelected ? 'border-primary shadow-sm bg-primary/5' : 'border-border bg-card'} p-3.5 shadow-xs flex flex-col justify-between hover:border-border/80 transition-all relative" data-staged-id="${pin.id}">
+              <div class="absolute top-3 right-3 z-10">
+                <input
+                  type="checkbox"
+                  class="staged-pin-cb rounded border-border text-primary h-4 w-4 cursor-pointer bg-background/90"
+                  data-pin-id="${pin.id}"
+                  ${isSelected ? 'checked' : ''}
+                />
+              </div>
+              <div>
+                <div class="aspect-3/4 w-full rounded-xl overflow-hidden bg-muted mb-3 relative group">
+                  <img
+                    src="${escapeHtml(pin.image_url)}"
+                    alt="Pin"
+                    class="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    loading="lazy"
+                  />
+                  <div class="absolute top-2 left-2">
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-background/90 text-primary border border-border shadow-xs">
+                      Staged
+                    </span>
+                  </div>
+                  ${pin.board_name ? `
+                    <div class="absolute bottom-2 left-2 right-2 truncate">
+                      <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-background/90 text-foreground border border-border shadow-xs truncate block">
+                        📌 ${escapeHtml(pin.board_name)}
+                      </span>
+                    </div>
+                  ` : ''}
+                </div>
+                <h4 class="font-bold text-xs text-foreground line-clamp-2 mb-1.5" title="${escapeHtml(pin.title)}">
+                  ${escapeHtml(pin.title)}
+                </h4>
+                <div class="text-[11px] mb-2">
+                  ${activeLink ? `
+                    <div class="flex items-center gap-1 font-mono text-[10px] text-muted-foreground truncate" title="${escapeHtml(activeLink)}">
+                      <span class="${isOverride ? 'text-primary font-bold' : 'text-muted-foreground'}">${isOverride ? '🔗 Override:' : '📎 Orig:'}</span>
+                      <a href="${escapeHtml(activeLink)}" target="_blank" rel="noopener noreferrer" class="hover:underline truncate">${escapeHtml(activeLink)}</a>
+                    </div>
+                  ` : `
+                    <span class="text-muted-foreground italic text-[10px]">No destination link set</span>
+                  `}
+                </div>
+              </div>
+              <div class="border-t border-border/40 pt-2.5 space-y-2 mt-2">
+                <div class="text-[10px] text-muted-foreground flex items-center justify-between">
+                  <span>Staged ${relative}</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    class="assign-pin-btn flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary text-primary-foreground py-1.5 text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer"
+                    data-staged-id="${pin.id}"
+                  >
+                    <span>🎯 Assign & Dispatch</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="edit-pin-btn p-1.5 rounded-xl border border-border bg-background hover:bg-muted text-foreground transition-colors cursor-pointer"
+                    data-staged-id="${pin.id}"
+                    title="Edit Pin Details"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="delete-pin-btn p-1.5 rounded-xl border border-border bg-background hover:bg-rose-500/10 hover:text-rose-600 text-muted-foreground transition-colors cursor-pointer"
+                    data-staged-id="${pin.id}"
+                    title="Remove from Queue"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  </button>
+                </div>
               </div>
             </div>
+          `;
+        }).join('');
+      }
 
-            <!-- Bottom Actions -->
-            <div class="border-t border-border/40 pt-2.5 space-y-2 mt-2">
-              <div class="text-[10px] text-muted-foreground flex items-center justify-between">
-                <span>Staged ${relative}</span>
-              </div>
+      // Checkbox click handlers
+      const container = currentViewMode === 'table' ? queueTbody : queueGrid;
+      container.querySelectorAll('.staged-pin-cb').forEach((cb) => {
+        cb.addEventListener('change', (e) => {
+          const input = e.target as HTMLInputElement;
+          const id = input.getAttribute('data-pin-id');
+          if (!id) return;
+          if (input.checked) {
+            selectedStagedIds.add(id);
+          } else {
+            selectedStagedIds.delete(id);
+          }
+          updateBulkBar();
+          const row = document.querySelector(`[data-row-id="${id}"]`);
+          if (row) {
+            if (input.checked) row.classList.add('bg-primary/5');
+            else row.classList.remove('bg-primary/5');
+          }
+        });
+      });
 
-              <div class="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  class="assign-pin-btn flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary text-primary-foreground py-1.5 text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer"
-                  data-staged-id="${pin.id}"
-                >
-                  <span>🎯 Assign & Dispatch</span>
-                </button>
-                <button
-                  type="button"
-                  class="edit-pin-btn p-1.5 rounded-xl border border-border bg-background hover:bg-muted text-foreground transition-colors cursor-pointer"
-                  data-staged-id="${pin.id}"
-                  title="Edit Pin Details"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                </button>
-                <button
-                  type="button"
-                  class="delete-pin-btn p-1.5 rounded-xl border border-border bg-background hover:bg-rose-500/10 hover:text-rose-600 text-muted-foreground transition-colors cursor-pointer"
-                  data-staged-id="${pin.id}"
-                  title="Remove from Queue"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                </button>
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('');
-
-      // Wire up actions
-      queueGrid.querySelectorAll('.assign-pin-btn').forEach((btn) => {
+      // Individual Assign Action
+      container.querySelectorAll('.assign-pin-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
           const id = btn.getAttribute('data-staged-id');
           const pin = stagedPins.find((p) => p.id === id);
@@ -455,7 +757,8 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
         });
       });
 
-      queueGrid.querySelectorAll('.edit-pin-btn').forEach((btn) => {
+      // Individual Edit Action
+      container.querySelectorAll('.edit-pin-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
           const id = btn.getAttribute('data-staged-id');
           const pin = stagedPins.find((p) => p.id === id);
@@ -465,7 +768,8 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
         });
       });
 
-      queueGrid.querySelectorAll('.delete-pin-btn').forEach((btn) => {
+      // Individual Delete Action
+      container.querySelectorAll('.delete-pin-btn').forEach((btn) => {
         btn.addEventListener('click', async () => {
           const id = btn.getAttribute('data-staged-id');
           if (!id) return;
@@ -475,7 +779,9 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
             const res = await fetch(`/api/pinarchive/staged/${encodeURIComponent(id)}`, { method: 'DELETE' });
             if (res.ok) {
               stagedPins = stagedPins.filter((p) => p.id !== id);
+              selectedStagedIds.delete(id);
               if (stagedCountBadge) stagedCountBadge.textContent = String(stagedPins.length);
+              updateBulkBar();
               renderQueue();
             }
           } catch (err) {
@@ -504,11 +810,24 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
       const dispatchedId = e.detail?.stagedPinId;
       if (dispatchedId) {
         stagedPins = stagedPins.filter((p) => p.id !== dispatchedId);
+        selectedStagedIds.delete(dispatchedId);
         if (stagedCountBadge) stagedCountBadge.textContent = String(stagedPins.length);
+        updateBulkBar();
         renderQueue();
       }
     }) as EventListener);
 
+    window.addEventListener('staged-pins-bulk-dispatched', ((e: CustomEvent) => {
+      const succeededIds: string[] = e.detail?.succeeded || [];
+      if (succeededIds.length > 0) {
+        const succSet = new Set(succeededIds);
+        stagedPins = stagedPins.filter((p) => !succSet.has(p.id));
+        succeededIds.forEach((id) => selectedStagedIds.delete(id));
+        if (stagedCountBadge) stagedCountBadge.textContent = String(stagedPins.length);
+        updateBulkBar();
+        renderQueue();
+      }
+    }) as EventListener);
 
     // ==================== DISPATCH HISTORY LOGIC (Ledger) ====================
     let nextCursor: { sent_at: string; id: string } | null = null;
@@ -663,7 +982,6 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
 
       return `
         <tr class="hover:bg-muted/30 transition-colors">
-          <!-- Pin -->
           <td class="py-3 px-4">
             <div class="flex items-center gap-3">
               ${thumbnailHtml}
@@ -681,8 +999,6 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
               </div>
             </div>
           </td>
-
-          <!-- Target Account & Board -->
           <td class="py-3 px-4">
             <div class="space-y-0.5">
               <div class="font-semibold text-foreground flex items-center gap-1.5">
@@ -694,31 +1010,21 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
               </div>
             </div>
           </td>
-
-          <!-- Link Used -->
           <td class="py-3 px-4">
             ${linkHtml}
           </td>
-
-          <!-- Dispatched At -->
           <td class="py-3 px-4">
             <div class="space-y-0.5">
               <div class="font-medium text-foreground whitespace-nowrap">${formatted}</div>
               <div class="text-[10px] text-muted-foreground">${relative}</div>
             </div>
           </td>
-
-          <!-- Batch Status -->
           <td class="py-3 px-4">
             ${renderBatchBadge(item.batch_status)}
           </td>
-
-          <!-- Publishing Status (P1) -->
           <td class="py-3 px-4">
             ${renderPublishBadge(item.publish_status, item.publish_error)}
           </td>
-
-          <!-- P1 Ref -->
           <td class="py-3 px-4 text-right">
             ${item.p1_pin_id ? `
               <a
@@ -771,7 +1077,6 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
         nextCursor = json.next_cursor || null;
         hasMore = Boolean(json.has_more);
 
-        // Degraded Banner Handling
         if (bannerEl) {
           if (json.p1_degraded) {
             bannerEl.classList.remove('hidden');
@@ -819,7 +1124,6 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
           }
         }
 
-        // Setup copy link buttons
         document.querySelectorAll('.copy-link-btn').forEach((btn) => {
           btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -834,7 +1138,6 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
           });
         });
 
-        // Load More button state
         if (loadMoreBtn) {
           if (hasMore) {
             loadMoreBtn.classList.remove('hidden');
@@ -858,7 +1161,6 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
       }
     }
 
-    // Attach Event Listeners
     accountSelect?.addEventListener('change', () => fetchLedger(false));
     timeframeSelect?.addEventListener('change', () => fetchLedger(false));
     batchStatusSelect?.addEventListener('change', () => fetchLedger(false));
@@ -875,7 +1177,6 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
     retryBtn?.addEventListener('click', () => fetchLedger(false));
     loadMoreBtn?.addEventListener('click', () => fetchLedger(true));
 
-    // Initialize Page
     loadAccounts();
     const initialTab = (new URLSearchParams(window.location.search).get('tab') || 'queue') as 'queue' | 'history';
     setActiveTab(initialTab === 'history' ? 'history' : 'queue');

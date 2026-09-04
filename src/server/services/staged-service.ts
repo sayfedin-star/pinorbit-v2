@@ -185,6 +185,67 @@ export async function deleteStagedPin(
  * Dispatch Staged Pin (Step 2): CAS atomic transition from 'staged' to 'dispatched',
  * builds TargetDestination array with per-account links, and invokes executeRepurposeDispatch.
  */
+
+/**
+ * Smart Domain-Swap with Slug Preservation (v2.9).
+ * - If chosen is root/domain (path is '/' or empty with no query/hash), replaces host and keeps original pathname + query + hash.
+ * - If chosen has an explicit specific path, uses chosen as-is.
+ * - If chosen is empty, uses originalLink.
+ */
+export function buildFinalLink(originalLink?: string | null, chosen?: string | null): string {
+  const cleanChosen = (chosen || '').trim();
+  const cleanOriginal = (originalLink || '').trim();
+
+  if (!cleanChosen) {
+    return cleanOriginal;
+  }
+
+  let chosenWithProto = cleanChosen;
+  if (!/^https?:\/\//i.test(chosenWithProto)) {
+    chosenWithProto = `https://${chosenWithProto}`;
+  }
+
+  let chosenUrl: URL;
+  try {
+    chosenUrl = new URL(chosenWithProto);
+  } catch {
+    return cleanChosen;
+  }
+
+  // Check if chosen has an explicit path other than '/' or empty
+  const chosenPath = chosenUrl.pathname.replace(/\/+$/, '');
+  const hasSpecificPath = chosenPath.length > 0;
+
+  if (hasSpecificPath) {
+    // User selected or entered an explicit specific link -> use chosen as-is
+    const safe = validateSafeUrl(chosenUrl.toString());
+    return safe.toString();
+  }
+
+  // Chosen is a domain/root -> swap domain while preserving original slug/path
+  if (!cleanOriginal) {
+    const safe = validateSafeUrl(chosenUrl.origin);
+    return safe.toString();
+  }
+
+  let origUrl: URL;
+  try {
+    const origWithProto = /^https?:\/\//i.test(cleanOriginal) ? cleanOriginal : `https://${cleanOriginal}`;
+    origUrl = new URL(origWithProto);
+  } catch {
+    const safe = validateSafeUrl(chosenUrl.origin);
+    return safe.toString();
+  }
+
+  const finalUrl = new URL(chosenUrl.origin);
+  finalUrl.pathname = origUrl.pathname;
+  finalUrl.search = origUrl.search;
+  finalUrl.hash = origUrl.hash;
+
+  const safe = validateSafeUrl(finalUrl.toString());
+  return safe.toString();
+}
+
 export async function dispatchStagedPin(
   paAdmin: SupabaseClient,
   p1Admin: SupabaseClient,
@@ -221,16 +282,17 @@ export async function dispatchStagedPin(
   // 2. Map assignments to TargetDestination array with individual customLink per account
   const targets: TargetDestination[] = [];
   for (const a of assignments) {
-    let resolvedLink = (a.linkUrl && a.linkUrl.trim().length > 0)
-      ? a.linkUrl.trim()
-      : (casWon.override_link && casWon.override_link.trim().length > 0)
+    const basePinLink = (casWon.override_link && casWon.override_link.trim().length > 0)
       ? casWon.override_link.trim()
       : (casWon.original_link && casWon.original_link.trim().length > 0)
       ? casWon.original_link.trim()
       : '';
 
-    if (resolvedLink) {
-      const safe = validateSafeUrl(resolvedLink);
+    let resolvedLink = '';
+    if (a.linkUrl && a.linkUrl.trim().length > 0) {
+      resolvedLink = buildFinalLink(basePinLink, a.linkUrl.trim());
+    } else if (basePinLink) {
+      const safe = validateSafeUrl(basePinLink);
       resolvedLink = safe.toString();
     }
 
@@ -274,3 +336,121 @@ export async function dispatchStagedPin(
     throw err;
   }
 }
+
+
+export interface BulkDispatchResult {
+  success: boolean;
+  succeeded: string[];
+  failed: Array<{ id: string; error: string }>;
+  total_requested: number;
+}
+
+/**
+ * Bulk Dispatch Staged Pins (v2.9):
+ * Loops through stagedPinIds, applying atomic CAS per pin, building target links with buildFinalLink,
+ * and reporting partial successes and failures.
+ */
+export async function dispatchBulkStagedPins(
+  paAdmin: SupabaseClient,
+  p1Admin: SupabaseClient,
+  workspaceId: string,
+  userId: string,
+  stagedPinIds: string[],
+  assignments: TargetAssignment[],
+  allowDuplicates = true
+): Promise<BulkDispatchResult> {
+  if (!stagedPinIds || stagedPinIds.length === 0) {
+    throw new HttpError(400, 'No staged pin IDs provided for bulk dispatch.');
+  }
+
+  if (!assignments || assignments.length === 0) {
+    throw new HttpError(400, 'Please select at least one target account.');
+  }
+
+  const succeeded: string[] = [];
+  const failed: Array<{ id: string; error: string }> = [];
+
+  for (const pinId of stagedPinIds) {
+    try {
+      // 1. Atomic CAS
+      const { data: casWon, error: casErr } = await paAdmin
+        .from('pa_staged_pins')
+        .update({ status: 'dispatched', updated_at: new Date().toISOString() })
+        .eq('id', pinId)
+        .eq('workspace_id', workspaceId)
+        .eq('status', 'staged')
+        .select('*')
+        .maybeSingle();
+
+      if (casErr) {
+        failed.push({ id: pinId, error: casErr.message });
+        continue;
+      }
+
+      if (!casWon) {
+        failed.push({ id: pinId, error: 'Pin is no longer staged (conflict or already dispatched).' });
+        continue;
+      }
+
+      // 2. Build target destinations with smart domain swap
+      const basePinLink = (casWon.override_link && casWon.override_link.trim().length > 0)
+        ? casWon.override_link.trim()
+        : (casWon.original_link && casWon.original_link.trim().length > 0)
+        ? casWon.original_link.trim()
+        : '';
+
+      const targets: TargetDestination[] = [];
+      for (const a of assignments) {
+        let resolvedLink = '';
+        if (a.linkUrl && a.linkUrl.trim().length > 0) {
+          resolvedLink = buildFinalLink(basePinLink, a.linkUrl.trim());
+        } else if (basePinLink) {
+          const safe = validateSafeUrl(basePinLink);
+          resolvedLink = safe.toString();
+        }
+
+        targets.push({
+          accountId: a.accountId,
+          accountLabel: a.accountLabel || '',
+          boardName: a.boardName || casWon.board_name || '',
+          customLink: resolvedLink,
+        });
+      }
+
+      // 3. Dispatch to P1
+      const batchUuid = crypto.randomUUID();
+      try {
+        await executeRepurposeDispatch(paAdmin, p1Admin, {
+          batchUuid,
+          workspaceId,
+          userId,
+          pinIds: [casWon.pa_pin_id],
+          targets,
+          allowDuplicates,
+        });
+
+        succeeded.push(pinId);
+      } catch (dispErr: any) {
+        // Rollback on failure
+        console.error(`[BulkStagedDispatch] Error dispatching pin ${pinId}. Rolling back to staged:`, dispErr.message);
+        await paAdmin
+          .from('pa_staged_pins')
+          .update({ status: 'staged', updated_at: new Date().toISOString() })
+          .eq('id', pinId)
+          .eq('workspace_id', workspaceId);
+
+        failed.push({ id: pinId, error: dispErr.message || 'Dispatch error' });
+      }
+    } catch (err: any) {
+      failed.push({ id: pinId, error: err.message || 'Unexpected error' });
+    }
+  }
+
+  return {
+    success: true,
+    succeeded,
+    failed,
+    total_requested: stagedPinIds.length,
+  };
+}
+

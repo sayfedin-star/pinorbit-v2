@@ -71,6 +71,85 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
       </button>
     </div>
 
+    <!-- Breadcrumb & Top Bar -->
+    <div class="flex items-center justify-between py-1 text-xs">
+      <div class="flex items-center gap-2">
+        <button type="button" id="breadcrumb-all-btn" class="font-bold text-foreground hover:text-primary cursor-pointer flex items-center gap-1">
+          <span>📁 All Domains</span>
+        </button>
+        <span id="breadcrumb-sep" class="hidden text-muted-foreground">/</span>
+        <span id="breadcrumb-current-domain" class="hidden font-bold text-primary"></span>
+        <button id="breadcrumb-back-link" type="button" class="hidden text-primary hover:underline ml-2 cursor-pointer">
+          (← Back to All Domains)
+        </button>
+      </div>
+
+      <button id="toggle-account-defaults-btn" type="button" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-foreground font-semibold hover:bg-muted transition-colors cursor-pointer">
+        <span>⚙️ Account Default Sites</span>
+      </button>
+    </div>
+
+    <!-- ==================== VIEW 1: DOMAINS OVERVIEW ==================== -->
+    <div id="domains-overview-section" class="space-y-6">
+      <!-- Account Defaults Panel (Collapsible or Open) -->
+      <div id="account-defaults-panel" class="rounded-2xl border border-border bg-card p-5 shadow-xs space-y-4">
+        <div class="flex items-center justify-between border-b border-border pb-3">
+          <div>
+            <h4 class="text-xs font-bold text-foreground flex items-center gap-2">
+              <span>⚙️ Pinterest Account Default Sites</span>
+            </h4>
+            <p class="text-[11px] text-muted-foreground mt-0.5">
+              Assign a default destination website per Pinterest account. The system preserves the original pin slug under this site.
+            </p>
+          </div>
+          <div id="auto-rule-badge" class="hidden px-2.5 py-1 rounded-full text-[11px] font-bold bg-primary/10 text-primary border border-primary/20">
+            AUTO-RULE Active
+          </div>
+        </div>
+
+        <div id="auto-rule-note" class="hidden p-3 rounded-xl bg-primary/5 border border-primary/20 text-xs text-foreground">
+          💡 <strong>Single Domain Detected:</strong> Because exactly one domain (<span id="auto-rule-domain-name" class="font-bold text-primary"></span>) exists in your Link Notebook, it is <strong>automatically applied to all connected accounts</strong> without needing manual assignment.
+        </div>
+
+        <!-- Accounts Table -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-border bg-muted/20 text-muted-foreground font-semibold">
+                <th class="py-2.5 px-3 min-w-[180px]">Pinterest Account</th>
+                <th class="py-2.5 px-3 min-w-[260px]">Default Destination Site / Domain</th>
+                <th class="py-2.5 px-3 min-w-[120px] text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="account-defaults-tbody" class="divide-y divide-border/60">
+              <tr>
+                <td colspan="3" class="py-4 text-center text-muted-foreground">Loading account defaults…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Domains Grid Header -->
+      <div class="flex items-center justify-between">
+        <div>
+          <h4 class="text-xs font-bold text-foreground flex items-center gap-1.5">
+            <span>🌐 Notebook Domains</span>
+            <span id="domains-total-count" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary">0</span>
+          </h4>
+          <p class="text-[11px] text-muted-foreground mt-0.5">Explore links grouped by website domain:</p>
+        </div>
+      </div>
+
+      <!-- Domains Cards Grid -->
+      <div id="domains-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- ==================== VIEW 2: LINKS DRILLDOWN ==================== -->
+    <div id="links-drilldown-section" class="hidden space-y-4">
+
     <!-- Filter & Control Bar -->
     <div class="rounded-2xl border border-border bg-card p-4 shadow-xs space-y-3">
       <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
@@ -555,6 +634,242 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     let searchDebounceTimeout: any = null;
     let selectedIds = new Set<string>();
     let loadedLinks: any[] = [];
+    let detectedDomains: string[] = [];
+    let currentDrilldownDomain: string | null = null;
+    let singleDomainAutoName: string | null = null;
+    let accountDefaultsMap: Record<string, string> = {};
+    let targetAccountsList: any[] = [];
+
+    // Views & Breadcrumbs
+    const domainsOverviewSection = document.getElementById('domains-overview-section');
+    const linksDrilldownSection = document.getElementById('links-drilldown-section');
+    const breadcrumbAllBtn = document.getElementById('breadcrumb-all-btn');
+    const breadcrumbSep = document.getElementById('breadcrumb-sep');
+    const breadcrumbCurrentDomain = document.getElementById('breadcrumb-current-domain');
+    const breadcrumbBackLink = document.getElementById('breadcrumb-back-link');
+    const domainsGrid = document.getElementById('domains-grid');
+    const domainsTotalCount = document.getElementById('domains-total-count');
+
+    // Account Defaults Panel
+    const toggleAccountDefaultsBtn = document.getElementById('toggle-account-defaults-btn');
+    const accountDefaultsPanel = document.getElementById('account-defaults-panel');
+    const autoRuleBadge = document.getElementById('auto-rule-badge');
+    const autoRuleNote = document.getElementById('auto-rule-note');
+    const autoRuleDomainName = document.getElementById('auto-rule-domain-name');
+    const accountDefaultsTbody = document.getElementById('account-defaults-tbody');
+
+    function setDrilldownDomain(dom: string | null) {
+      currentDrilldownDomain = dom;
+      currentDomain = dom || '';
+
+      if (dom) {
+        // Show Drilldown view
+        domainsOverviewSection?.classList.add('hidden');
+        linksDrilldownSection?.classList.remove('hidden');
+
+        breadcrumbSep?.classList.remove('hidden');
+        breadcrumbCurrentDomain?.classList.remove('hidden');
+        breadcrumbBackLink?.classList.remove('hidden');
+        if (breadcrumbCurrentDomain) breadcrumbCurrentDomain.textContent = dom;
+
+        if (domainSelect) domainSelect.value = dom;
+        currentPage = 1;
+        fetchLinks();
+      } else {
+        // Show Domains overview
+        linksDrilldownSection?.classList.add('hidden');
+        domainsOverviewSection?.classList.remove('hidden');
+
+        breadcrumbSep?.classList.add('hidden');
+        breadcrumbCurrentDomain?.classList.add('hidden');
+        breadcrumbBackLink?.classList.add('hidden');
+
+        if (domainSelect) domainSelect.value = '';
+        renderDomainsGrid();
+      }
+    }
+
+    breadcrumbAllBtn?.addEventListener('click', () => setDrilldownDomain(null));
+    breadcrumbBackLink?.addEventListener('click', () => setDrilldownDomain(null));
+
+    toggleAccountDefaultsBtn?.addEventListener('click', () => {
+      accountDefaultsPanel?.classList.toggle('hidden');
+    });
+
+    async function loadAccountDefaultsAndTargets() {
+      try {
+        const [defRes, targetsRes] = await Promise.all([
+          fetch('/api/pinarchive/account-defaults'),
+          fetch('/api/pinarchive/repurpose/targets'),
+        ]);
+
+        const defData = await defRes.json();
+        const targetsData = await targetsRes.json();
+
+        if (defData.success) {
+          accountDefaultsMap = defData.defaults || {};
+          detectedDomains = defData.domains || [];
+          singleDomainAutoName = defData.singleDomain || null;
+
+          if (singleDomainAutoName) {
+            autoRuleBadge?.classList.remove('hidden');
+            autoRuleNote?.classList.remove('hidden');
+            if (autoRuleDomainName) autoRuleDomainName.textContent = singleDomainAutoName;
+          } else {
+            autoRuleBadge?.classList.add('hidden');
+            autoRuleNote?.classList.add('hidden');
+          }
+        }
+
+        if (targetsData.success) {
+          targetAccountsList = targetsData.targets || [];
+        }
+
+        renderAccountDefaults();
+        renderDomainsGrid();
+      } catch (err) {
+        console.error('Failed to load defaults/targets:', err);
+      }
+    }
+
+    function renderAccountDefaults() {
+      if (!accountDefaultsTbody) return;
+
+      if (targetAccountsList.length === 0) {
+        accountDefaultsTbody.innerHTML = '<tr><td colspan="3" class="py-4 text-center text-muted-foreground">No Pinterest accounts connected.</td></tr>';
+        return;
+      }
+
+      accountDefaultsTbody.innerHTML = targetAccountsList.map((acc) => {
+        const configured = accountDefaultsMap[acc.id] || '';
+        const effective = configured || (singleDomainAutoName ? `https://${singleDomainAutoName}/` : '');
+
+        return `
+          <tr class="hover:bg-muted/30 transition-colors">
+            <td class="py-3 px-3">
+              <span class="font-bold text-foreground block text-xs">${escapeHtml(acc.name)}</span>
+              <span class="text-[11px] text-muted-foreground font-mono">@${escapeHtml(acc.username)}</span>
+            </td>
+            <td class="py-3 px-3">
+              <div class="flex items-center gap-2">
+                <input
+                  type="text"
+                  class="acc-default-input rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground font-mono focus:ring-1 focus:ring-primary w-full max-w-sm"
+                  data-account-id="${acc.id}"
+                  value="${escapeHtml(configured)}"
+                  placeholder="${singleDomainAutoName ? `Auto: https://${singleDomainAutoName}/` : 'e.g. https://mysite.com'}"
+                />
+                ${!configured && singleDomainAutoName ? `
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary shrink-0">AUTO</span>
+                ` : ''}
+              </div>
+            </td>
+            <td class="py-3 px-3 text-right">
+              <button
+                type="button"
+                class="save-acc-default-btn px-3 py-1.5 rounded-lg bg-primary text-primary-foreground font-bold text-xs hover:opacity-90 transition-opacity cursor-pointer"
+                data-account-id="${acc.id}"
+              >
+                Save
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      accountDefaultsTbody.querySelectorAll('.save-acc-default-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const accId = btn.getAttribute('data-account-id');
+          if (!accId) return;
+
+          const input = accountDefaultsTbody?.querySelector(`.acc-default-input[data-account-id="${accId}"]`) as HTMLInputElement | null;
+          const val = input?.value?.trim() || '';
+
+          btn.textContent = 'Saving...';
+          try {
+            const res = await fetch('/api/pinarchive/account-defaults', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ accountId: accId, defaultSite: val }),
+            });
+            const data = await res.json();
+            if (data.success) {
+              btn.textContent = '✓ Saved';
+              accountDefaultsMap[accId] = val;
+              setTimeout(() => { btn.textContent = 'Save'; }, 1500);
+            } else {
+              alert(data.error || 'Failed to save');
+              btn.textContent = 'Save';
+            }
+          } catch {
+            btn.textContent = 'Save';
+          }
+        });
+      });
+    }
+
+    function renderDomainsGrid() {
+      if (!domainsGrid) return;
+
+      if (detectedDomains.length === 0) {
+        domainsGrid.innerHTML = `
+          <div class="col-span-full py-12 text-center rounded-2xl border border-dashed border-border p-6 text-xs text-muted-foreground">
+            No domains detected yet. Import destination links to populate your notebook!
+          </div>
+        `;
+        if (domainsTotalCount) domainsTotalCount.textContent = '0';
+        return;
+      }
+
+      if (domainsTotalCount) domainsTotalCount.textContent = String(detectedDomains.length);
+
+      domainsGrid.innerHTML = detectedDomains.map((dom) => {
+        const isSingle = detectedDomains.length === 1;
+
+        return `
+          <div class="rounded-2xl border border-border bg-card p-4 shadow-xs flex flex-col justify-between hover:border-primary/50 transition-all group">
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary font-bold text-sm">
+                    🌐
+                  </div>
+                  <div>
+                    <h4 class="font-bold text-xs text-foreground group-hover:text-primary transition-colors truncate max-w-[180px]" title="${escapeHtml(dom)}">
+                      ${escapeHtml(dom)}
+                    </h4>
+                    <span class="text-[10px] text-muted-foreground font-mono">Website Domain</span>
+                  </div>
+                </div>
+                ${isSingle ? `
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">
+                    ★ Auto-Default
+                  </span>
+                ` : ''}
+              </div>
+            </div>
+
+            <div class="border-t border-border/40 pt-3 mt-3 flex items-center justify-between">
+              <span class="text-[11px] text-muted-foreground font-medium">Domain Links</span>
+              <button
+                type="button"
+                class="explore-domain-btn inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline cursor-pointer"
+                data-domain="${escapeHtml(dom)}"
+              >
+                <span>Explore Links →</span>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      domainsGrid.querySelectorAll('.explore-domain-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const dom = btn.getAttribute('data-domain');
+          if (dom) setDrilldownDomain(dom);
+        });
+      });
+    }
 
     // Elements
     const shelfUserTab = document.getElementById('shelf-user-tab');
@@ -1350,6 +1665,7 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     });
 
     // Initial Load
-    fetchLinks();
+    loadAccountDefaultsAndTargets();
+    setDrilldownDomain(null);
   })();
 </script>

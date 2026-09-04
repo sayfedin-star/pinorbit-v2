@@ -19,8 +19,8 @@ const { id = 'assign-accounts-modal' } = Astro.props;
           <span class="text-xl">🎯</span>
         </div>
         <div>
-          <h3 class="text-base font-bold text-foreground">Assign Accounts & Dispatch</h3>
-          <p class="text-xs text-muted-foreground">Select destination accounts and individualize destination links per account.</p>
+          <h3 id="assign-modal-title" class="text-base font-bold text-foreground">Assign Accounts & Dispatch</h3>
+          <p id="assign-modal-subtitle" class="text-xs text-muted-foreground">Select destination accounts and individualize destination links per account with smart slug preservation.</p>
         </div>
       </div>
       <button
@@ -34,7 +34,7 @@ const { id = 'assign-accounts-modal' } = Astro.props;
     </div>
 
     <!-- Pin Preview Summary Card -->
-    <div class="mb-4 flex items-center gap-3 p-3 rounded-xl border border-border bg-muted/20 text-xs">
+    <div id="assign-pin-preview-container" class="mb-4 flex items-center gap-3 p-3 rounded-xl border border-border bg-muted/20 text-xs">
       <img
         id="assign-pin-preview-img"
         src=""
@@ -51,6 +51,17 @@ const { id = 'assign-accounts-modal' } = Astro.props;
       </div>
     </div>
 
+    <!-- Bulk Mode Summary Banner (Hidden in Single Mode) -->
+    <div id="assign-bulk-summary-banner" class="hidden mb-4 p-3 rounded-xl border border-primary/20 bg-primary/5 text-xs text-foreground">
+      <div class="flex items-center gap-2 font-bold text-primary mb-1">
+        <span>📦 Bulk Dispatch Mode</span>
+        <span id="assign-bulk-count-badge" class="px-2 py-0.5 rounded-full text-[10px] bg-primary text-primary-foreground font-bold">0 pins</span>
+      </div>
+      <p class="text-[11px] text-muted-foreground">
+        Selected accounts will receive all pins. If a root domain is chosen for an account, <strong>each pin will preserve its original slug</strong> on that domain.
+      </p>
+    </div>
+
     <!-- Target Accounts List -->
     <div class="mb-4">
       <div class="flex items-center justify-between mb-2">
@@ -58,8 +69,8 @@ const { id = 'assign-accounts-modal' } = Astro.props;
         <span id="assign-selected-accounts-count" class="text-[11px] text-muted-foreground">0 accounts selected</span>
       </div>
 
-      <div id="assign-targets-list" class="space-y-3 max-h-64 overflow-y-auto pr-1">
-        <div class="p-6 text-center text-xs text-muted-foreground">Loading connected accounts...</div>
+      <div id="assign-targets-list" class="space-y-3 max-h-72 overflow-y-auto pr-1">
+        <div class="p-6 text-center text-xs text-muted-foreground">Loading connected accounts & defaults...</div>
       </div>
     </div>
 
@@ -100,11 +111,15 @@ const { id = 'assign-accounts-modal' } = Astro.props;
 </div>
 
 <script>
-  let activeStagedPin: any = null;
+  let activeStagedPins: any[] = []; // 1 or more pins
   let targetAccounts: any[] = [];
   let notebookLinks: any[] = [];
+  let accountDefaults: Record<string, string> = {};
+  let singleDomainAuto: string | null = null;
 
   const modal = document.getElementById('assign-accounts-modal');
+  const modalTitle = document.getElementById('assign-modal-title');
+  const modalSubtitle = document.getElementById('assign-modal-subtitle');
   const closeBtn = document.getElementById('close-assign-modal-btn');
   const cancelBtn = document.getElementById('cancel-assign-modal-btn');
   const confirmBtn = document.getElementById('confirm-assign-dispatch-btn') as HTMLButtonElement | null;
@@ -114,10 +129,14 @@ const { id = 'assign-accounts-modal' } = Astro.props;
   const allowDupToggle = document.getElementById('assign-allow-duplicates-toggle') as HTMLInputElement | null;
   const statusBanner = document.getElementById('assign-status-banner');
 
+  const previewContainer = document.getElementById('assign-pin-preview-container');
   const previewImg = document.getElementById('assign-pin-preview-img') as HTMLImageElement | null;
   const previewTitle = document.getElementById('assign-pin-preview-title');
   const previewBoard = document.getElementById('assign-pin-preview-board');
   const previewLink = document.getElementById('assign-pin-preview-link');
+
+  const bulkSummaryBanner = document.getElementById('assign-bulk-summary-banner');
+  const bulkCountBadge = document.getElementById('assign-bulk-count-badge');
 
   function escapeHtml(str: string): string {
     return (str || '')
@@ -126,6 +145,52 @@ const { id = 'assign-accounts-modal' } = Astro.props;
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  // Client-side smart domain swap engine
+  function buildFinalLinkClient(originalLink: string, chosen: string): string {
+    const cleanChosen = (chosen || '').trim();
+    const cleanOriginal = (originalLink || '').trim();
+
+    if (!cleanChosen) return cleanOriginal;
+
+    let chosenWithProto = cleanChosen;
+    if (!/^https?:\/\//i.test(chosenWithProto)) {
+      chosenWithProto = `https://${chosenWithProto}`;
+    }
+
+    let chosenUrl: URL;
+    try {
+      chosenUrl = new URL(chosenWithProto);
+    } catch {
+      return cleanChosen;
+    }
+
+    const chosenPath = chosenUrl.pathname.replace(/\/+$/, '');
+    const hasSpecificPath = chosenPath.length > 0;
+
+    if (hasSpecificPath) {
+      return chosenUrl.toString();
+    }
+
+    if (!cleanOriginal) {
+      return chosenUrl.origin;
+    }
+
+    let origUrl: URL;
+    try {
+      const origWithProto = /^https?:\/\//i.test(cleanOriginal) ? cleanOriginal : `https://${cleanOriginal}`;
+      origUrl = new URL(origWithProto);
+    } catch {
+      return chosenUrl.origin;
+    }
+
+    const finalUrl = new URL(chosenUrl.origin);
+    finalUrl.pathname = origUrl.pathname;
+    finalUrl.search = origUrl.search;
+    finalUrl.hash = origUrl.hash;
+
+    return finalUrl.toString();
   }
 
   function showStatus(htmlContent: string, type: 'error' | 'warning' | 'success') {
@@ -142,16 +207,18 @@ const { id = 'assign-accounts-modal' } = Astro.props;
 
   async function loadData() {
     if (!targetsList) return;
-    targetsList.innerHTML = '<div class="p-6 text-center text-xs text-muted-foreground">Loading connected accounts...</div>';
+    targetsList.innerHTML = '<div class="p-6 text-center text-xs text-muted-foreground">Loading connected accounts & defaults...</div>';
 
     try {
-      const [targetsRes, linksRes] = await Promise.all([
+      const [targetsRes, linksRes, defaultsRes] = await Promise.all([
         fetch('/api/pinarchive/repurpose/targets'),
         fetch('/api/links'),
+        fetch('/api/pinarchive/account-defaults'),
       ]);
 
       const tData = await targetsRes.json();
       const lData = await linksRes.json();
+      const dData = await defaultsRes.json();
 
       if (tData.success) {
         targetAccounts = tData.targets || [];
@@ -164,6 +231,11 @@ const { id = 'assign-accounts-modal' } = Astro.props;
         const u = (lData.user_links || []).map((x: any) => ({ ...x, scope: 'user' }));
         const w = (lData.workspace_links || []).map((x: any) => ({ ...x, scope: 'workspace' }));
         notebookLinks = [...u, ...w];
+      }
+
+      if (dData.success) {
+        accountDefaults = dData.defaults || {};
+        singleDomainAuto = dData.singleDomain || null;
       }
 
       renderTargetAccounts();
@@ -179,15 +251,22 @@ const { id = 'assign-accounts-modal' } = Astro.props;
       return;
     }
 
-    const baseLink = activeStagedPin?.override_link || activeStagedPin?.original_link || '';
+    const firstPin = activeStagedPins[0];
+    const baseLink = firstPin ? (firstPin.override_link || firstPin.original_link || '') : '';
+    const defaultStarLink = notebookLinks.find((l) => l.is_default)?.url || '';
 
     targetsList.innerHTML = targetAccounts.map((acc) => {
       const boards = acc.boards || [];
       const hasBoards = boards.length > 0;
 
-      // Check if staged pin board matches any board
-      const matchingBoard = boards.find((b: any) => b.board_name === activeStagedPin?.board_name);
+      const matchingBoard = boards.find((b: any) => b.board_name === firstPin?.board_name);
       const defaultBoard = matchingBoard ? matchingBoard.board_name : (boards[0]?.board_name || '');
+
+      // Resolve initial default choice
+      const explicitAccDefault = accountDefaults[acc.id];
+      const effectiveDefault = explicitAccDefault || singleDomainAuto || defaultStarLink || baseLink;
+      const hasAccountDefault = Boolean(explicitAccDefault || singleDomainAuto);
+      const isAuto = !explicitAccDefault && Boolean(singleDomainAuto);
 
       return `
         <div class="p-3.5 rounded-xl border border-border bg-card/70 space-y-2.5 transition-colors" data-account-card="${acc.id}">
@@ -198,7 +277,7 @@ const { id = 'assign-accounts-modal' } = Astro.props;
                 class="account-assign-cb rounded border-border text-primary h-4 w-4 cursor-pointer"
                 data-account-id="${acc.id}"
                 data-account-label="${escapeHtml(acc.name)}"
-                ${hasBoards ? '' : 'disabled'}
+                ${hasBoards ? 'checked' : 'disabled'}
               />
               <span>${escapeHtml(acc.name)} <span class="text-[11px] font-normal text-muted-foreground">(@${escapeHtml(acc.username)})</span></span>
             </label>
@@ -220,25 +299,45 @@ const { id = 'assign-accounts-modal' } = Astro.props;
           </div>
 
           <!-- Per-Account Destination Link Section -->
-          <div class="account-link-config hidden pl-6 space-y-2 border-t border-border/40 pt-2 text-xs" data-account-link-section="${acc.id}">
-            <div class="flex items-center gap-3">
+          <div class="account-link-config pl-6 space-y-2 border-t border-border/40 pt-2 text-xs" data-account-link-section="${acc.id}">
+            <div class="flex flex-wrap items-center gap-3">
               <span class="text-[11px] font-semibold text-muted-foreground">Destination Link:</span>
+
+              ${hasAccountDefault ? `
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" name="link-source-${acc.id}" value="account-default" checked class="link-source-radio text-primary" data-account-id="${acc.id}" />
+                  <span class="text-[11px] font-medium text-foreground">
+                    ★ ${isAuto ? 'Auto Site' : 'Account Default'}
+                  </span>
+                </label>
+              ` : ''}
+
               <label class="flex items-center gap-1.5 cursor-pointer">
-                <input type="radio" name="link-source-${acc.id}" value="staged" checked class="link-source-radio text-primary" data-account-id="${acc.id}" />
-                <span class="text-[11px]">Use Staged Link</span>
+                <input type="radio" name="link-source-${acc.id}" value="staged" ${hasAccountDefault ? '' : 'checked'} class="link-source-radio text-primary" data-account-id="${acc.id}" />
+                <span class="text-[11px]">Staged Link</span>
               </label>
+
               <label class="flex items-center gap-1.5 cursor-pointer">
                 <input type="radio" name="link-source-${acc.id}" value="notebook" class="link-source-radio text-primary" data-account-id="${acc.id}" />
                 <span class="text-[11px]">Link Notebook</span>
               </label>
+
               <label class="flex items-center gap-1.5 cursor-pointer">
                 <input type="radio" name="link-source-${acc.id}" value="custom" class="link-source-radio text-primary" data-account-id="${acc.id}" />
-                <span class="text-[11px]">Custom URL</span>
+                <span class="text-[11px]">Custom Domain/URL</span>
               </label>
             </div>
 
+            <!-- Account default display -->
+            ${hasAccountDefault ? `
+              <div class="account-default-display text-[11px] font-mono text-muted-foreground flex items-center gap-1.5" data-account-default-disp="${acc.id}">
+                <span class="px-1.5 py-0.2 rounded bg-primary/10 text-primary text-[10px] font-bold">${isAuto ? 'AUTO-RULE' : 'DEFAULT'}</span>
+                <span class="truncate">${escapeHtml(effectiveDefault)}</span>
+              </div>
+            ` : ''}
+
             <!-- Staged link display -->
-            <div class="staged-link-display text-[11px] font-mono text-muted-foreground truncate" data-display="${acc.id}">
+            <div class="staged-link-display ${hasAccountDefault ? 'hidden' : ''} text-[11px] font-mono text-muted-foreground truncate" data-display="${acc.id}">
               ${baseLink ? escapeHtml(baseLink) : '<span class="italic text-muted-foreground/60">None (will use original)</span>'}
             </div>
 
@@ -257,11 +356,18 @@ const { id = 'assign-accounts-modal' } = Astro.props;
             <!-- Custom URL input -->
             <div class="custom-link-container hidden" data-custom-container="${acc.id}">
               <input
-                type="url"
-                placeholder="https://mysite.com/specific-page"
+                type="text"
+                placeholder="https://customdomain1.com or full URL"
                 class="account-custom-link-input w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:ring-1 focus:ring-primary"
                 data-account-id="${acc.id}"
               />
+              <p class="text-[10px] text-muted-foreground mt-0.5">Enter a domain root (e.g. customdomain1.com) to swap host with original slug preserved.</p>
+            </div>
+
+            <!-- LIVE PREVIEW BADGE -->
+            <div class="mt-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] flex items-center justify-between gap-2" data-preview-box="${acc.id}">
+              <span class="text-emerald-700 dark:text-emerald-400 font-semibold shrink-0">Live URL Preview:</span>
+              <span class="font-mono text-emerald-800 dark:text-emerald-300 truncate final-preview-url" data-preview-text="${acc.id}">—</span>
             </div>
           </div>
         </div>
@@ -287,25 +393,87 @@ const { id = 'assign-accounts-modal' } = Astro.props;
       radio.addEventListener('change', (e) => {
         const r = e.target as HTMLInputElement;
         const accId = r.getAttribute('data-account-id');
+        const accDefDisp = targetsList?.querySelector(`[data-account-default-disp="${accId}"]`);
         const stagedDisp = targetsList?.querySelector(`[data-display="${accId}"]`);
         const nbCont = targetsList?.querySelector(`[data-notebook-container="${accId}"]`);
         const customCont = targetsList?.querySelector(`[data-custom-container="${accId}"]`);
 
+        accDefDisp?.classList.add('hidden');
         stagedDisp?.classList.add('hidden');
         nbCont?.classList.add('hidden');
         customCont?.classList.add('hidden');
 
-        if (r.value === 'staged') stagedDisp?.classList.remove('hidden');
+        if (r.value === 'account-default') accDefDisp?.classList.remove('hidden');
+        else if (r.value === 'staged') stagedDisp?.classList.remove('hidden');
         else if (r.value === 'notebook') nbCont?.classList.remove('hidden');
         else if (r.value === 'custom') customCont?.classList.remove('hidden');
+
+        updateAccountPreview(accId || '');
       });
     });
 
+    targetsList.querySelectorAll('.account-custom-link-input').forEach((input) => {
+      input.addEventListener('input', (e) => {
+        const accId = (e.target as HTMLElement).getAttribute('data-account-id');
+        updateAccountPreview(accId || '');
+      });
+    });
+
+    targetsList.querySelectorAll('.account-notebook-select').forEach((sel) => {
+      sel.addEventListener('change', (e) => {
+        const accId = (e.target as HTMLElement).getAttribute('data-account-id');
+        updateAccountPreview(accId || '');
+      });
+    });
+
+    // Run initial preview computation for all accounts
+    targetAccounts.forEach((acc) => updateAccountPreview(acc.id));
     updateSelectedCount();
+  }
+
+  function getEffectiveChoiceForAccount(accId: string): string {
+    const radioVal = (targetsList?.querySelector(`input[name="link-source-${accId}"]:checked`) as HTMLInputElement)?.value;
+    const firstPin = activeStagedPins[0];
+    const basePinLink = firstPin ? (firstPin.override_link || firstPin.original_link || '') : '';
+
+    if (radioVal === 'account-default') {
+      return accountDefaults[accId] || singleDomainAuto || '';
+    }
+    if (radioVal === 'staged') {
+      return basePinLink;
+    }
+    if (radioVal === 'notebook') {
+      const nbSelect = targetsList?.querySelector(`.account-notebook-select[data-account-id="${accId}"]`) as HTMLSelectElement | null;
+      return nbSelect?.value || '';
+    }
+    if (radioVal === 'custom') {
+      const customInput = targetsList?.querySelector(`.account-custom-link-input[data-account-id="${accId}"]`) as HTMLInputElement | null;
+      return customInput?.value?.trim() || '';
+    }
+    return '';
+  }
+
+  function updateAccountPreview(accId: string) {
+    const previewEl = targetsList?.querySelector(`[data-preview-text="${accId}"]`);
+    if (!previewEl) return;
+
+    const chosen = getEffectiveChoiceForAccount(accId);
+    const firstPin = activeStagedPins[0];
+    const basePinLink = firstPin ? (firstPin.override_link || firstPin.original_link || '') : '';
+
+    if (!chosen && !basePinLink) {
+      previewEl.textContent = 'None set';
+      return;
+    }
+
+    const finalUrl = buildFinalLinkClient(basePinLink, chosen);
+    previewEl.textContent = finalUrl;
   }
 
   function updateSelectedCount() {
     const checked = targetsList?.querySelectorAll('.account-assign-cb:checked') || [];
+    const isBulk = activeStagedPins.length > 1;
+
     if (countSpan) {
       countSpan.textContent = `${checked.length} account${checked.length === 1 ? '' : 's'} selected`;
     }
@@ -313,39 +481,32 @@ const { id = 'assign-accounts-modal' } = Astro.props;
       confirmBtn.disabled = checked.length === 0;
     }
     if (submitText) {
-      submitText.textContent = `🚀 Dispatch Pin to ${checked.length} Account${checked.length === 1 ? '' : 's'}`;
+      if (isBulk) {
+        submitText.textContent = `🚀 Dispatch ${activeStagedPins.length} Pins to ${checked.length} Account${checked.length === 1 ? '' : 's'}`;
+      } else {
+        submitText.textContent = `🚀 Dispatch Pin to ${checked.length} Account${checked.length === 1 ? '' : 's'}`;
+      }
     }
   }
 
-  // Submit dispatch
+  // Submit dispatch (Single or Bulk)
   confirmBtn?.addEventListener('click', async () => {
-    if (!activeStagedPin) return;
+    if (activeStagedPins.length === 0) return;
 
     const assignments: any[] = [];
     targetsList?.querySelectorAll('.account-assign-cb:checked').forEach((cb) => {
       const accId = cb.getAttribute('data-account-id');
       const accLabel = cb.getAttribute('data-account-label') || '';
       const boardSelect = targetsList?.querySelector(`.account-board-select[data-account-id="${accId}"]`) as HTMLSelectElement | null;
-      const boardName = boardSelect?.value || activeStagedPin.board_name || '';
+      const boardName = boardSelect?.value || '';
 
-      const radioVal = (targetsList?.querySelector(`input[name="link-source-${accId}"]:checked`) as HTMLInputElement)?.value;
-      let finalLink = '';
-
-      if (radioVal === 'staged') {
-        finalLink = activeStagedPin.override_link || activeStagedPin.original_link || '';
-      } else if (radioVal === 'notebook') {
-        const nbSelect = targetsList?.querySelector(`.account-notebook-select[data-account-id="${accId}"]`) as HTMLSelectElement | null;
-        finalLink = nbSelect?.value || '';
-      } else if (radioVal === 'custom') {
-        const customInput = targetsList?.querySelector(`.account-custom-link-input[data-account-id="${accId}"]`) as HTMLInputElement | null;
-        finalLink = customInput?.value?.trim() || '';
-      }
+      const chosenLink = getEffectiveChoiceForAccount(accId || '');
 
       assignments.push({
         accountId: accId,
         accountLabel: accLabel,
         boardName,
-        linkUrl: finalLink || undefined,
+        linkUrl: chosenLink || undefined,
       });
     });
 
@@ -355,43 +516,79 @@ const { id = 'assign-accounts-modal' } = Astro.props;
     }
 
     if (confirmBtn) confirmBtn.disabled = true;
-    if (submitText) submitText.textContent = 'Dispatching pin...';
+    if (submitText) submitText.textContent = 'Dispatching pins...';
     statusBanner?.classList.add('hidden');
 
+    const isBulk = activeStagedPins.length > 1;
+
     try {
-      const res = await fetch('/api/pinarchive/staged/dispatch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          stagedPinId: activeStagedPin.id,
-          assignments,
-          allowDuplicates: allowDupToggle?.checked ?? true,
-        }),
-      });
+      if (isBulk) {
+        // Bulk dispatch
+        const res = await fetch('/api/pinarchive/staged/dispatch-bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            stagedPinIds: activeStagedPins.map((p) => p.id),
+            assignments,
+            allowDuplicates: allowDupToggle?.checked ?? true,
+          }),
+        });
 
-      const data = await res.json();
+        const data = await res.json();
+        if (data.success) {
+          showStatus(
+            `✅ Dispatched ${data.succeeded.length} of ${data.total_requested} pins successfully!`,
+            'success'
+          );
 
-      if (data.success) {
-        showStatus(
-          `✅ Dispatched pin successfully! Total stamps created: ${data.summary.total_stamps}.`,
-          'success'
-        );
+          window.dispatchEvent(new CustomEvent('staged-pins-bulk-dispatched', { detail: data }));
 
-        window.dispatchEvent(new CustomEvent('staged-pin-dispatched', { detail: { ...data, stagedPinId: activeStagedPin.id } }));
-
-        setTimeout(() => {
-          modal?.classList.add('hidden');
-          modal?.classList.remove('flex');
-        }, 1800);
+          setTimeout(() => {
+            modal?.classList.add('hidden');
+            modal?.classList.remove('flex');
+          }, 1800);
+        } else {
+          showStatus(data.error || 'Failed to dispatch pins.', 'error');
+          if (confirmBtn) confirmBtn.disabled = false;
+          updateSelectedCount();
+        }
       } else {
-        showStatus(data.error || 'Failed to dispatch staged pin.', 'error');
-        if (confirmBtn) confirmBtn.disabled = false;
-        if (submitText) submitText.textContent = '🚀 Dispatch Pin';
+        // Single pin dispatch
+        const stagedPinId = activeStagedPins[0]?.id;
+        const res = await fetch('/api/pinarchive/staged/dispatch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            stagedPinId,
+            assignments,
+            allowDuplicates: allowDupToggle?.checked ?? true,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          showStatus(
+            `✅ Dispatched pin successfully! Total stamps created: ${data.summary.total_stamps}.`,
+            'success'
+          );
+
+          window.dispatchEvent(new CustomEvent('staged-pin-dispatched', { detail: { ...data, stagedPinId } }));
+
+          setTimeout(() => {
+            modal?.classList.add('hidden');
+            modal?.classList.remove('flex');
+          }, 1800);
+        } else {
+          showStatus(data.error || 'Failed to dispatch staged pin.', 'error');
+          if (confirmBtn) confirmBtn.disabled = false;
+          updateSelectedCount();
+        }
       }
     } catch (e: any) {
       showStatus(e.message || 'Network error.', 'error');
       if (confirmBtn) confirmBtn.disabled = false;
-      if (submitText) submitText.textContent = '🚀 Dispatch Pin';
+      updateSelectedCount();
     }
   });
 
@@ -403,15 +600,41 @@ const { id = 'assign-accounts-modal' } = Astro.props;
   closeBtn?.addEventListener('click', closeModal);
   cancelBtn?.addEventListener('click', closeModal);
 
-  // Custom Event to open modal
+  // Custom Event listener: open modal for single or bulk
   window.addEventListener('open-assign-modal', ((e: CustomEvent) => {
-    activeStagedPin = e.detail?.stagedPin || null;
-    if (!activeStagedPin) return;
+    const pin = e.detail?.stagedPin;
+    const pins = e.detail?.stagedPins;
 
-    if (previewImg) previewImg.src = activeStagedPin.image_url || '';
-    if (previewTitle) previewTitle.textContent = activeStagedPin.title || 'Untitled Pin';
-    if (previewBoard) previewBoard.textContent = activeStagedPin.board_name || 'None';
-    if (previewLink) previewLink.textContent = activeStagedPin.override_link || activeStagedPin.original_link || 'None';
+    if (pins && Array.isArray(pins) && pins.length > 0) {
+      activeStagedPins = pins;
+    } else if (pin) {
+      activeStagedPins = [pin];
+    } else {
+      return;
+    }
+
+    const isBulk = activeStagedPins.length > 1;
+
+    if (isBulk) {
+      if (modalTitle) modalTitle.textContent = `🎯 Assign Accounts & Dispatch (${activeStagedPins.length} Pins)`;
+      if (modalSubtitle) modalSubtitle.textContent = 'Individualize destination links per account. Original slugs will be preserved under each account\'s domain.';
+      if (previewContainer) previewContainer.classList.add('hidden');
+      if (bulkSummaryBanner) {
+        bulkSummaryBanner.classList.remove('hidden');
+        if (bulkCountBadge) bulkCountBadge.textContent = `${activeStagedPins.length} pins selected`;
+      }
+    } else {
+      const singlePin = activeStagedPins[0];
+      if (modalTitle) modalTitle.textContent = '🎯 Assign Accounts & Dispatch';
+      if (modalSubtitle) modalSubtitle.textContent = 'Select destination accounts and individualize destination links per account with smart slug preservation.';
+      if (bulkSummaryBanner) bulkSummaryBanner.classList.add('hidden');
+      if (previewContainer) previewContainer.classList.remove('hidden');
+
+      if (previewImg) previewImg.src = singlePin.image_url || '';
+      if (previewTitle) previewTitle.textContent = singlePin.title || 'Untitled Pin';
+      if (previewBoard) previewBoard.textContent = singlePin.board_name || 'None';
+      if (previewLink) previewLink.textContent = singlePin.override_link || singlePin.original_link || 'None';
+    }
 
     modal?.classList.remove('hidden');
     modal?.classList.add('flex');
