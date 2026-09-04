@@ -111,11 +111,14 @@ const { id = 'assign-accounts-modal' } = Astro.props;
 </div>
 
 <script>
+  import { createNotebookCombobox } from '../../scripts/notebook-combobox';
   let activeStagedPins: any[] = []; // 1 or more pins
   let targetAccounts: any[] = [];
   let notebookLinks: any[] = [];
   let accountDefaults: Record<string, string> = {};
   let singleDomainAuto: string | null = null;
+  let notebookComboboxes: Record<string, any> = {};
+  let accountLinkChoice: Record<string, any> = {};
 
   const modal = document.getElementById('assign-accounts-modal');
   const modalTitle = document.getElementById('assign-modal-title');
@@ -341,16 +344,8 @@ const { id = 'assign-accounts-modal' } = Astro.props;
               ${baseLink ? escapeHtml(baseLink) : '<span class="italic text-muted-foreground/60">None (will use original)</span>'}
             </div>
 
-            <!-- Notebook select -->
-            <div class="notebook-link-select-container hidden" data-notebook-container="${acc.id}">
-              <select class="account-notebook-select w-full rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:ring-1 focus:ring-primary" data-account-id="${acc.id}">
-                <option value="">-- Choose from Link Notebook --</option>
-                ${notebookLinks.map((l: any) => `
-                  <option value="${escapeHtml(l.url)}" ${l.is_default ? 'selected' : ''}>
-                    ${l.is_default ? '⭐ ' : ''}${escapeHtml(l.label)} (${escapeHtml(l.domain || 'web')}) — ${escapeHtml(l.url)}
-                  </option>
-                `).join('')}
-              </select>
+            <!-- Notebook Combobox Container -->
+            <div class="notebook-link-combobox-container hidden" data-notebook-container="${acc.id}">
             </div>
 
             <!-- Custom URL input -->
@@ -365,9 +360,14 @@ const { id = 'assign-accounts-modal' } = Astro.props;
             </div>
 
             <!-- LIVE PREVIEW BADGE -->
-            <div class="mt-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] flex items-center justify-between gap-2" data-preview-box="${acc.id}">
-              <span class="text-emerald-700 dark:text-emerald-400 font-semibold shrink-0">Live URL Preview:</span>
-              <span class="font-mono text-emerald-800 dark:text-emerald-300 truncate final-preview-url" data-preview-text="${acc.id}">—</span>
+            <div class="mt-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-1.5" data-preview-box="${acc.id}">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-emerald-700 dark:text-emerald-400 font-semibold shrink-0">Live URL Preview:</span>
+                <span class="font-mono text-emerald-800 dark:text-emerald-300 truncate final-preview-url" data-preview-text="${acc.id}">—</span>
+              </div>
+              <span class="hidden px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-600 border border-amber-500/30 shrink-0" data-preview-warning="${acc.id}">
+                ⚠️ No slug to preserve — root URL will be used
+              </span>
             </div>
           </div>
         </div>
@@ -419,11 +419,32 @@ const { id = 'assign-accounts-modal' } = Astro.props;
       });
     });
 
-    targetsList.querySelectorAll('.account-notebook-select').forEach((sel) => {
-      sel.addEventListener('change', (e) => {
-        const accId = (e.target as HTMLElement).getAttribute('data-account-id');
-        updateAccountPreview(accId || '');
-      });
+    // Clean up previous combobox instances
+    Object.values(notebookComboboxes).forEach((cb: any) => {
+      try { cb.destroy(); } catch {}
+    });
+    notebookComboboxes = {};
+    accountLinkChoice = {};
+
+    // Initialize createNotebookCombobox for each account
+    targetAccounts.forEach((acc) => {
+      const nbContainer = targetsList?.querySelector(`[data-notebook-container="${acc.id}"]`) as HTMLElement | null;
+      if (nbContainer) {
+        const defStar = notebookLinks.find((l) => l.is_default);
+        const cb = createNotebookCombobox({
+          container: nbContainer,
+          links: notebookLinks,
+          selectedUrl: defStar?.url,
+          onSelect: (link) => {
+            accountLinkChoice[acc.id] = link;
+            updateAccountPreview(acc.id);
+          },
+        });
+        notebookComboboxes[acc.id] = cb;
+        if (defStar) {
+          accountLinkChoice[acc.id] = defStar;
+        }
+      }
     });
 
     // Run initial preview computation for all accounts
@@ -443,8 +464,7 @@ const { id = 'assign-accounts-modal' } = Astro.props;
       return basePinLink;
     }
     if (radioVal === 'notebook') {
-      const nbSelect = targetsList?.querySelector(`.account-notebook-select[data-account-id="${accId}"]`) as HTMLSelectElement | null;
-      return nbSelect?.value || '';
+      return accountLinkChoice[accId]?.url || '';
     }
     if (radioVal === 'custom') {
       const customInput = targetsList?.querySelector(`.account-custom-link-input[data-account-id="${accId}"]`) as HTMLInputElement | null;
@@ -455,6 +475,7 @@ const { id = 'assign-accounts-modal' } = Astro.props;
 
   function updateAccountPreview(accId: string) {
     const previewEl = targetsList?.querySelector(`[data-preview-text="${accId}"]`);
+    const previewWarning = targetsList?.querySelector(`[data-preview-warning="${accId}"]`);
     if (!previewEl) return;
 
     const chosen = getEffectiveChoiceForAccount(accId);
@@ -463,11 +484,36 @@ const { id = 'assign-accounts-modal' } = Astro.props;
 
     if (!chosen && !basePinLink) {
       previewEl.textContent = 'None set';
+      if (previewWarning) previewWarning.classList.add('hidden');
       return;
     }
 
     const finalUrl = buildFinalLinkClient(basePinLink, chosen);
     previewEl.textContent = finalUrl;
+
+    if (previewWarning) {
+      let hasOriginalSlug = false;
+      if (basePinLink) {
+        try {
+          const u = new URL(/^https?:\/\//i.test(basePinLink) ? basePinLink : `https://${basePinLink}`);
+          hasOriginalSlug = u.pathname.replace(/\/+$/, '').length > 0;
+        } catch {}
+      }
+
+      let isRootChosen = false;
+      if (chosen) {
+        try {
+          const cu = new URL(/^https?:\/\//i.test(chosen) ? chosen : `https://${chosen}`);
+          isRootChosen = cu.pathname.replace(/\/+$/, '').length === 0;
+        } catch {}
+      }
+
+      if ((!basePinLink || !hasOriginalSlug) && isRootChosen) {
+        previewWarning.classList.remove('hidden');
+      } else {
+        previewWarning.classList.add('hidden');
+      }
+    }
   }
 
   function updateSelectedCount() {
@@ -492,6 +538,26 @@ const { id = 'assign-accounts-modal' } = Astro.props;
   // Submit dispatch (Single or Bulk)
   confirmBtn?.addEventListener('click', async () => {
     if (activeStagedPins.length === 0) return;
+
+    // F2: Validate that notebook selection is not empty if radio=notebook
+    let missingNotebookAccount: string | null = null;
+    targetsList?.querySelectorAll('.account-assign-cb:checked').forEach((cb) => {
+      const accId = cb.getAttribute('data-account-id') || '';
+      const accLabel = cb.getAttribute('data-account-label') || accId;
+      const radioVal = (targetsList?.querySelector(`input[name="link-source-${accId}"]:checked`) as HTMLInputElement)?.value;
+
+      if (radioVal === 'notebook') {
+        const link = accountLinkChoice[accId];
+        if (!link || !link.url) {
+          missingNotebookAccount = accLabel;
+        }
+      }
+    });
+
+    if (missingNotebookAccount) {
+      showStatus(`Please choose a destination link from the notebook for account "${missingNotebookAccount}".`, 'warning');
+      return;
+    }
 
     const assignments: any[] = [];
     targetsList?.querySelectorAll('.account-assign-cb:checked').forEach((cb) => {

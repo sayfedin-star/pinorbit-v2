@@ -130,14 +130,16 @@ export const GET: APIRoute = async ({ locals, url }) => {
       .select('*')
       .eq('user_id', user.id)
       .order('is_default', { ascending: false })
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(5000);
 
     const { data: wsLinks } = await paAdmin
       .from('workspace_links')
       .select('*')
       .eq('workspace_id', workspaceId)
       .order('is_default', { ascending: false })
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(5000);
 
     return json({
       success: true,

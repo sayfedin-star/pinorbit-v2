@@ -49,6 +49,12 @@ describe('Smart Domain-Swap & Account Defaults Suite (v2.9)', () => {
         buildFinalLink('https://40aprons.com/tuna', 'http://localhost:8080')
       ).toThrow();
     });
+
+    it('Gate 6: Fallbacks to root domain URL when originalLink is empty or null', () => {
+      expect(buildFinalLink('', 'test.com')).toBe('https://test.com/');
+      expect(buildFinalLink(null, 'test.com')).toBe('https://test.com/');
+      expect(buildFinalLink('', 'https://customdomain1.com/')).toBe('https://customdomain1.com/');
+    });
   });
 
   describe('Account Defaults Service (AUTO-RULE)', () => {
@@ -62,14 +68,20 @@ describe('Smart Domain-Swap & Account Defaults Suite (v2.9)', () => {
             };
           }
           if (table === 'user_links') {
+            const userQueryResult: any = {
+              data: [
+                { url: 'https://40aprons.com/recipe-1' },
+                { url: 'https://40aprons.com/recipe-2' },
+              ],
+              count: 2,
+              error: null,
+            };
+            const queryObj: any = {
+              eq: vi.fn().mockResolvedValue(userQueryResult),
+              then: (resolve: any) => resolve(userQueryResult),
+            };
             return {
-              select: vi.fn().mockResolvedValue({
-                data: [
-                  { url: 'https://40aprons.com/recipe-1' },
-                  { url: 'https://40aprons.com/recipe-2' },
-                ],
-                error: null,
-              }),
+              select: vi.fn().mockReturnValue(queryObj),
             };
           }
           if (table === 'workspace_links') {
@@ -85,10 +97,12 @@ describe('Smart Domain-Swap & Account Defaults Suite (v2.9)', () => {
         }),
       } as any;
 
-      const res = await getAccountDefaults(mockPaAdmin, workspaceId);
+      const res = await getAccountDefaults(mockPaAdmin, workspaceId, userId);
       expect(res.domains).toEqual(['40aprons.com']);
       expect(res.singleDomain).toBe('40aprons.com');
       expect(res.defaults).toEqual({});
+      expect(res.user_count).toBe(2);
+      expect(res.domain_counts).toEqual({ '40aprons.com': 3 });
     });
 
     it('does not set singleDomain if multiple domains exist', async () => {
@@ -101,14 +115,20 @@ describe('Smart Domain-Swap & Account Defaults Suite (v2.9)', () => {
             };
           }
           if (table === 'user_links') {
+            const userQueryResult: any = {
+              data: [
+                { url: 'https://site1.com/a' },
+                { url: 'https://site2.com/b' },
+              ],
+              count: 2,
+              error: null,
+            };
+            const queryObj: any = {
+              eq: vi.fn().mockResolvedValue(userQueryResult),
+              then: (resolve: any) => resolve(userQueryResult),
+            };
             return {
-              select: vi.fn().mockResolvedValue({
-                data: [
-                  { url: 'https://site1.com/a' },
-                  { url: 'https://site2.com/b' },
-                ],
-                error: null,
-              }),
+              select: vi.fn().mockReturnValue(queryObj),
             };
           }
           if (table === 'workspace_links') {

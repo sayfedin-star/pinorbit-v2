@@ -27,13 +27,16 @@ export const GET: APIRoute = async ({ locals }) => {
   try {
     await assertWorkspaceAccess(p1Admin, workspaceId, user.id, 'member');
 
-    const result = await getAccountDefaults(paAdmin, workspaceId);
+    const result = await getAccountDefaults(paAdmin, workspaceId, user.id);
 
     return json({
       success: true,
       defaults: result.defaults,
       domains: result.domains,
       singleDomain: result.singleDomain,
+      user_count: result.user_count || 0,
+      workspace_count: result.workspace_count || 0,
+      domain_counts: result.domain_counts || {},
     });
   } catch (err: any) {
     if (err instanceof HttpError) {

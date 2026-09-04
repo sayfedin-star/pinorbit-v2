@@ -6,16 +6,20 @@ export interface AccountDefaultsResult {
   defaults: Record<string, string>;
   domains: string[];
   singleDomain: string | null;
+  user_count?: number;
+  workspace_count?: number;
+  domain_counts?: Record<string, number>;
 }
 
 /**
- * Get account default sites for a workspace, along with all known notebook domains.
+ * Get account default sites for a workspace, along with all known notebook domains and aggregate counts.
  * Implements AUTO-RULE: If exactly 1 domain exists in the notebook, it acts as the default
  * for all accounts without an explicit override.
  */
 export async function getAccountDefaults(
   paAdmin: SupabaseClient,
-  workspaceId: string
+  workspaceId: string,
+  userId?: string
 ): Promise<AccountDefaultsResult> {
   // 1. Fetch configured defaults
   const { data: configuredRows, error: confErr } = await paAdmin
@@ -34,19 +38,28 @@ export async function getAccountDefaults(
     }
   }
 
-  // 2. Fetch distinct domains from user_links and workspace_links
+  // 2. Fetch distinct domains and counts from user_links and workspace_links
+  let userQuery = paAdmin.from('user_links').select('url', { count: 'exact' });
+  if (userId) {
+    userQuery = userQuery.eq('user_id', userId);
+  }
+
   const [userLinksRes, wsLinksRes] = await Promise.all([
-    paAdmin.from('user_links').select('url'),
-    paAdmin.from('workspace_links').select('url').eq('workspace_id', workspaceId),
+    userQuery,
+    paAdmin.from('workspace_links').select('url', { count: 'exact' }).eq('workspace_id', workspaceId),
   ]);
 
+  const domainCounts: Record<string, number> = {};
   const domainSet = new Set<string>();
   const collectDomains = (rows: any[] | null) => {
     for (const r of rows || []) {
       if (r?.url) {
         try {
           const u = new URL(r.url);
-          if (u.hostname) domainSet.add(u.hostname);
+          if (u.hostname) {
+            domainSet.add(u.hostname);
+            domainCounts[u.hostname] = (domainCounts[u.hostname] || 0) + 1;
+          }
         } catch {}
       }
     }
@@ -62,6 +75,9 @@ export async function getAccountDefaults(
     defaults,
     domains,
     singleDomain,
+    user_count: userLinksRes.count ?? (userLinksRes.data?.length || 0),
+    workspace_count: wsLinksRes.count ?? (wsLinksRes.data?.length || 0),
+    domain_counts: domainCounts,
   };
 }
 

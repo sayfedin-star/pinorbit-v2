@@ -639,6 +639,7 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     let singleDomainAutoName: string | null = null;
     let accountDefaultsMap: Record<string, string> = {};
     let targetAccountsList: any[] = [];
+    let domainCountsMap: Record<string, number> = {};
 
     // Views & Breadcrumbs
     const domainsOverviewSection = document.getElementById('domains-overview-section');
@@ -710,6 +711,14 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
           accountDefaultsMap = defData.defaults || {};
           detectedDomains = defData.domains || [];
           singleDomainAutoName = defData.singleDomain || null;
+          domainCountsMap = defData.domain_counts || {};
+
+          if (userCountBadge && defData.user_count !== undefined) {
+            userCountBadge.textContent = String(defData.user_count);
+          }
+          if (workspaceCountBadge && defData.workspace_count !== undefined) {
+            workspaceCountBadge.textContent = String(defData.workspace_count);
+          }
 
           if (singleDomainAutoName) {
             autoRuleBadge?.classList.remove('hidden');
@@ -825,6 +834,7 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
 
       domainsGrid.innerHTML = detectedDomains.map((dom) => {
         const isSingle = detectedDomains.length === 1;
+        const domCount = domainCountsMap[dom] ?? 0;
 
         return `
           <div class="rounded-2xl border border-border bg-card p-4 shadow-xs flex flex-col justify-between hover:border-primary/50 transition-all group">
@@ -850,7 +860,7 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
             </div>
 
             <div class="border-t border-border/40 pt-3 mt-3 flex items-center justify-between">
-              <span class="text-[11px] text-muted-foreground font-medium">Domain Links</span>
+              <span class="text-[11px] text-muted-foreground font-medium">${domCount.toLocaleString()} Link${domCount === 1 ? '' : 's'}</span>
               <button
                 type="button"
                 class="explore-domain-btn inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline cursor-pointer"
