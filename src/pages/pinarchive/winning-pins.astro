@@ -3,7 +3,6 @@ export const prerender = false;
 import Layout from '../../layouts/Layout.astro';
 import SectionHeader from '../../components/ui/SectionHeader.astro';
 import RepurposeModal from '../../components/pinarchive/RepurposeModal.astro';
-import LinkNotebookModal from '../../components/pinarchive/LinkNotebookModal.astro';
 ---
 
 <Layout title="Winning Pins Intelligence — PinArchive" description="Cross-account high-velocity winners, delta growth analytics (24h/3d/7d), evergreen strategy matrix, and keyword mining.">
@@ -111,15 +110,15 @@ import LinkNotebookModal from '../../components/pinarchive/LinkNotebookModal.ast
           <span>Refresh</span>
         </button>
 
-        <!-- Link Notebook Modal Trigger -->
-        <button
+        <!-- Link Notebook Page Link -->
+        <a
           id="open-link-notebook-btn"
-          type="button"
+          href="/pinarchive/links"
           title="Manage Link Notebook"
           class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-xs hover:bg-muted transition-all cursor-pointer"
         >
           <span>📖 Links</span>
-        </button>
+        </a>
       </div>
     </div>
   </div>
@@ -658,7 +657,6 @@ import LinkNotebookModal from '../../components/pinarchive/LinkNotebookModal.ast
 
   <!-- Modals -->
   <RepurposeModal />
-  <LinkNotebookModal />
 </Layout>
 
 <script>
@@ -2397,14 +2395,6 @@ TASK:
         window.dispatchEvent(new CustomEvent('open-repurpose-modal', {
           detail: { pinIds: ids }
         }));
-      });
-    }
-
-    // Link Notebook Trigger
-    const openNotebookBtn = document.getElementById('open-link-notebook-btn');
-    if (openNotebookBtn) {
-      openNotebookBtn.addEventListener('click', () => {
-        window.dispatchEvent(new CustomEvent('open-link-notebook-modal'));
       });
     }
 

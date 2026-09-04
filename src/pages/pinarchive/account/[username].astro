@@ -3,7 +3,6 @@ export const prerender = false;
 import Layout from '../../../layouts/Layout.astro';
 import SectionHeader from '../../../components/ui/SectionHeader.astro';
 import RepurposeModal from '../../../components/pinarchive/RepurposeModal.astro';
-import LinkNotebookModal from '../../../components/pinarchive/LinkNotebookModal.astro';
 import { dbClients } from '../../../server/db/clients';
 
 const { username } = Astro.params;
@@ -111,15 +110,15 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
           <span>Refresh Pins</span>
         </button>
 
-        <!-- Link Notebook -->
-        <button
+        <!-- Link Notebook Page Link -->
+        <a
           id="open-link-notebook-btn"
-          type="button"
+          href="/pinarchive/links"
           class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground shadow-sm hover:bg-muted transition-all cursor-pointer"
           title="Manage Link Notebook"
         >
           <span>📖 Links</span>
-        </button>
+        </a>
       </div>
     </div>
   </div>
@@ -486,7 +485,6 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
 
   <!-- Modals -->
   <RepurposeModal />
-  <LinkNotebookModal />
 </Layout>
 
 <script>
@@ -1223,13 +1221,6 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
         window.dispatchEvent(new CustomEvent('open-repurpose-modal', {
           detail: { pinIds: ids }
         }));
-      });
-    }
-
-    const openNotebookBtn = document.getElementById('open-link-notebook-btn');
-    if (openNotebookBtn) {
-      openNotebookBtn.addEventListener('click', () => {
-        window.dispatchEvent(new CustomEvent('open-link-notebook-modal'));
       });
     }
 

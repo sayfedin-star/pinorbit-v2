@@ -1,0 +1,1355 @@
+---
+export const prerender = false;
+import Layout from '../../layouts/Layout.astro';
+import SectionHeader from '../../components/ui/SectionHeader.astro';
+---
+
+<Layout
+  title="📖 Link Notebook — PinArchive"
+  description="Manage reusable destination links for repurposed pins across Global and Workspace shelves."
+>
+  <div id="links-page-root" class="space-y-6">
+    <!-- Back Link & Header -->
+    <div>
+      <a
+        href="/pinarchive"
+        class="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors group mb-3"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        <span>Back to PinArchive Dashboard</span>
+      </a>
+
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <SectionHeader
+            title="📖 Link Notebook"
+            description="Manage reusable destination links for repurposed pins with server pagination and honest multi-tab import."
+          />
+        </div>
+
+        <div class="flex items-center gap-2.5 self-start sm:self-auto">
+          <button
+            id="open-add-link-btn"
+            type="button"
+            class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-xs hover:bg-muted transition-all cursor-pointer"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>+ Add Link</span>
+          </button>
+
+          <button
+            id="open-import-wizard-btn"
+            type="button"
+            class="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary text-primary-foreground px-4 py-2 text-xs font-semibold shadow-xs hover:bg-primary/90 transition-all cursor-pointer"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>📥 Import Links</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Shelf Switcher Tabs -->
+    <div class="flex items-center border-b border-border">
+      <button
+        type="button"
+        id="shelf-user-tab"
+        class="shelf-tab px-4 py-2.5 text-xs font-bold border-b-2 border-primary text-primary transition-all cursor-pointer flex items-center gap-2"
+        data-scope="user"
+      >
+        <span>🌐 Global Shelf</span>
+        <span id="user-count-badge" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary/10 text-primary">0</span>
+      </button>
+      <button
+        type="button"
+        id="shelf-workspace-tab"
+        class="shelf-tab px-4 py-2.5 text-xs font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-all cursor-pointer flex items-center gap-2"
+        data-scope="workspace"
+      >
+        <span>🏢 Workspace Shelf</span>
+        <span id="workspace-count-badge" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground">0</span>
+      </button>
+    </div>
+
+    <!-- Filter & Control Bar -->
+    <div class="rounded-2xl border border-border bg-card p-4 shadow-xs space-y-3">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-3 flex-1">
+          <!-- Search input -->
+          <div class="relative flex-1 min-w-[220px] max-w-md">
+            <input
+              type="text"
+              id="links-search-input"
+              placeholder="Search label, URL, or domain…"
+              class="w-full rounded-xl border border-border bg-background px-3.5 py-2 text-xs font-medium text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary pl-9"
+            />
+            <svg xmlns="http://www.w3.org/2000/svg" class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </div>
+
+          <!-- Domain dropdown -->
+          <div class="flex items-center gap-1.5">
+            <select
+              id="filter-domain-select"
+              class="rounded-xl border border-border bg-background px-3 py-2 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer max-w-[180px]"
+            >
+              <option value="">All Domains</option>
+            </select>
+          </div>
+
+          <!-- Default only toggle -->
+          <label class="flex items-center gap-2 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+            <input
+              type="checkbox"
+              id="filter-default-toggle"
+              class="rounded border-border text-primary h-3.5 w-3.5 cursor-pointer"
+            />
+            <span>★ Default only</span>
+          </label>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="flex items-center justify-between lg:justify-end gap-3 pt-2 lg:pt-0 border-t lg:border-t-0 border-border">
+          <span id="page-indicator" class="text-xs font-medium text-muted-foreground whitespace-nowrap">
+            Page <span id="current-page" class="font-bold text-foreground">1</span> of <span id="total-pages" class="font-bold text-foreground">1</span>
+          </span>
+          <div class="flex items-center gap-1">
+            <button
+              id="prev-page-btn"
+              type="button"
+              disabled
+              class="p-1.5 rounded-lg border border-border bg-card text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
+              title="Previous Page"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button
+              id="next-page-btn"
+              type="button"
+              disabled
+              class="p-1.5 rounded-lg border border-border bg-card text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
+              title="Next Page"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bulk Action Bar (Hidden when 0 selected) -->
+    <div
+      id="bulk-actions-bar"
+      class="hidden rounded-xl border border-primary/30 bg-primary/5 p-3 flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs"
+    >
+      <div class="flex items-center gap-3">
+        <span class="font-bold text-primary flex items-center gap-1.5">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          <span id="selected-count">0</span> items selected
+        </span>
+        <button
+          type="button"
+          id="deselect-all-btn"
+          class="text-muted-foreground hover:text-foreground underline cursor-pointer"
+        >
+          Deselect All
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          id="bulk-copy-btn"
+          class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 font-semibold text-foreground hover:bg-muted transition-all cursor-pointer shadow-xs"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          <span>Copy Selected URLs</span>
+        </button>
+
+        <button
+          type="button"
+          id="bulk-delete-btn"
+          class="inline-flex items-center gap-1.5 rounded-lg bg-rose-500 text-white px-3 py-1.5 font-semibold hover:bg-rose-600 transition-all cursor-pointer shadow-xs"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <span>Delete Selected</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="links-loading" class="py-16 text-center text-xs text-muted-foreground">
+      <div class="inline-block h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent mb-3"></div>
+      <p class="font-medium text-foreground">Loading link notebook…</p>
+      <p class="text-[11px] text-muted-foreground mt-1">Retrieving verified destination links</p>
+    </div>
+
+    <!-- Error State -->
+    <div id="links-error" class="hidden rounded-2xl border border-rose-500/30 bg-rose-500/10 p-6 text-center text-xs text-rose-500">
+      <p id="links-error-msg" class="font-bold">Failed to load links.</p>
+    </div>
+
+    <!-- Data Table Card -->
+    <div id="links-table-card" class="hidden rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-border bg-muted/30 text-muted-foreground font-semibold">
+              <th class="py-3 px-4 w-10">
+                <input
+                  type="checkbox"
+                  id="select-all-checkbox"
+                  class="rounded border-border text-primary h-3.5 w-3.5 cursor-pointer"
+                />
+              </th>
+              <th class="py-3 px-3 w-10 text-center">★</th>
+              <th class="py-3 px-4 min-w-[200px]">Label</th>
+              <th class="py-3 px-4 min-w-[320px]">URL & Domain</th>
+              <th class="py-3 px-4 min-w-[130px]">Created</th>
+              <th class="py-3 px-4 min-w-[80px] text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody id="links-tbody" class="divide-y divide-border">
+            <!-- Rendered dynamically -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="p-3 border-t border-border bg-muted/10 flex items-center justify-between text-xs text-muted-foreground">
+        <span>Showing <span id="displayed-rows-count" class="font-semibold text-foreground">0</span> links on this page</span>
+        <span id="total-shelf-records" class="font-semibold text-foreground">0 total</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════ -->
+  <!-- MODAL 1: ADD SINGLE LINK MODAL                           -->
+  <!-- ═════════════════════════════════════════════════════════ -->
+  <div
+    id="add-link-modal"
+    class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+  >
+    <div class="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl space-y-4">
+      <div class="flex items-center justify-between border-b border-border pb-3">
+        <h3 class="text-sm font-bold text-foreground">+ Add New Link</h3>
+        <button type="button" class="close-add-modal text-muted-foreground hover:text-foreground cursor-pointer text-lg">✕</button>
+      </div>
+
+      <form id="add-link-form" class="space-y-3 text-xs">
+        <div>
+          <label class="block font-semibold text-foreground mb-1">Target Shelf</label>
+          <select id="add-link-scope" class="w-full rounded-xl border border-border bg-background px-3 py-2">
+            <option value="user">🌐 Global Shelf (Personal)</option>
+            <option value="workspace">🏢 Workspace Shelf (Team)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-foreground mb-1">Destination URL <span class="text-rose-500">*</span></label>
+          <input
+            type="url"
+            id="add-link-url"
+            required
+            placeholder="https://mysite.com/article/summer-desserts"
+            class="w-full rounded-xl border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+
+        <div>
+          <label class="block font-semibold text-foreground mb-1">Label (Optional)</label>
+          <input
+            type="text"
+            id="add-link-label"
+            placeholder="Leave empty to auto-derive from URL"
+            class="w-full rounded-xl border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+
+        <label class="flex items-center gap-2 cursor-pointer pt-1 font-medium text-foreground">
+          <input type="checkbox" id="add-link-default" class="rounded border-border text-primary h-3.5 w-3.5 cursor-pointer" />
+          <span>⭐ Set as default (★) on this shelf</span>
+        </label>
+
+        <div id="add-link-error" class="hidden text-rose-500 text-xs font-semibold"></div>
+
+        <div class="flex items-center justify-end gap-2 pt-3 border-t border-border">
+          <button
+            type="button"
+            class="close-add-modal px-3.5 py-2 rounded-xl border border-border hover:bg-muted font-semibold transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            id="submit-add-link-btn"
+            class="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-all cursor-pointer"
+          >
+            Save Link
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════ -->
+  <!-- MODAL 2: MULTI-TAB IMPORT WIZARD                          -->
+  <!-- ═════════════════════════════════════════════════════════ -->
+  <div
+    id="import-wizard-modal"
+    class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+  >
+    <div class="w-full max-w-2xl max-h-[90vh] rounded-2xl border border-border bg-card shadow-2xl flex flex-col overflow-hidden">
+      <!-- Header -->
+      <div class="flex items-center justify-between border-b border-border p-5">
+        <div>
+          <h3 class="text-base font-bold text-foreground flex items-center gap-2">
+            <span>📥 Import Links Wizard</span>
+          </h3>
+          <p class="text-xs text-muted-foreground mt-0.5">Parse, preview, and ingest destination links with chunked progress.</p>
+        </div>
+        <button type="button" id="close-wizard-btn" class="text-muted-foreground hover:text-foreground text-xl p-1 cursor-pointer">✕</button>
+      </div>
+
+      <!-- Scope Selector -->
+      <div class="px-5 py-3 bg-muted/20 border-b border-border flex items-center justify-between text-xs">
+        <span class="font-semibold text-foreground">Import Into Shelf:</span>
+        <div class="flex items-center gap-4">
+          <label class="flex items-center gap-1.5 cursor-pointer font-medium">
+            <input type="radio" name="wizard-scope" value="user" checked class="text-primary cursor-pointer" />
+            <span>🌐 Global (Personal)</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer font-medium">
+            <input type="radio" name="wizard-scope" value="workspace" class="text-primary cursor-pointer" />
+            <span>🏢 Workspace (Team)</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Tabs Bar -->
+      <div class="flex items-center border-b border-border px-5 bg-card text-xs">
+        <button type="button" class="wizard-tab py-3 px-3 font-bold border-b-2 border-primary text-primary cursor-pointer" data-tab="sitemap">
+          XML Sitemap
+        </button>
+        <button type="button" class="wizard-tab py-3 px-3 font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground cursor-pointer" data-tab="paste">
+          Paste URLs
+        </button>
+        <button type="button" class="wizard-tab py-3 px-3 font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground cursor-pointer" data-tab="csv">
+          CSV Upload
+        </button>
+        <div class="py-3 px-3 font-medium text-muted-foreground/50 flex items-center gap-1 cursor-not-allowed">
+          <span>Google Sheet</span>
+          <span class="text-[9px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground font-mono">Phase 2</span>
+        </div>
+      </div>
+
+      <!-- Body Container -->
+      <div class="p-5 flex-1 overflow-y-auto space-y-4 text-xs">
+        <!-- ═══ TAB 1: XML Sitemap ═══ -->
+        <div id="tab-content-sitemap" class="wizard-pane space-y-4">
+          <!-- Step 1: Input URL -->
+          <div id="sitemap-input-step" class="space-y-3">
+            <div>
+              <label class="block font-semibold text-foreground mb-1">XML Sitemap or Sitemap Index URL</label>
+              <div class="flex items-center gap-2">
+                <input
+                  type="url"
+                  id="wizard-sitemap-url"
+                  placeholder="https://example.com/sitemap_index.xml"
+                  class="flex-1 rounded-xl border border-border bg-background px-3.5 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <button
+                  type="button"
+                  id="parse-sitemap-btn"
+                  class="rounded-xl bg-primary text-primary-foreground px-4 py-2 font-semibold hover:bg-primary/90 transition-all cursor-pointer whitespace-nowrap"
+                >
+                  Parse Sitemap
+                </button>
+              </div>
+              <p class="text-[11px] text-muted-foreground mt-1">
+                Protected by SSRF Seven Gates. Supports both standard urlset files and multi-tiered sitemap indexes.
+              </p>
+            </div>
+          </div>
+
+          <!-- Step 2a: Sub-Sitemaps Detected -->
+          <div id="sitemap-index-step" class="hidden space-y-3 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h4 class="font-bold text-foreground flex items-center gap-1.5">
+                  <span>🧭 Sitemap Index Detected</span>
+                </h4>
+                <p class="text-[11px] text-muted-foreground mt-0.5">
+                  Found <span id="sub-sitemaps-count" class="font-bold text-foreground">0</span> sub-sitemaps. Select which ones to inspect:
+                </p>
+              </div>
+              <div class="flex items-center gap-2 text-[11px]">
+                <button type="button" id="select-all-subs-btn" class="text-primary hover:underline font-semibold cursor-pointer">Select All</button>
+                <span class="text-muted-foreground">•</span>
+                <button type="button" id="clear-all-subs-btn" class="text-muted-foreground hover:underline cursor-pointer">Clear</button>
+                <span class="text-muted-foreground">•</span>
+                <button type="button" id="copy-subs-btn" class="text-muted-foreground hover:underline cursor-pointer">Copy List</button>
+              </div>
+            </div>
+
+            <div id="sub-sitemaps-list" class="max-h-48 overflow-y-auto space-y-1.5 pr-2 divide-y divide-border/50">
+              <!-- Checkboxes dynamically rendered -->
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <button
+                type="button"
+                id="reset-sitemap-input-btn"
+                class="px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted font-semibold cursor-pointer"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                id="inspect-subs-btn"
+                class="px-4 py-1.5 rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-all cursor-pointer"
+              >
+                Fetch & Inspect Selected (<span id="selected-subs-tally">0</span>)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ TAB 2: Paste URLs ═══ -->
+        <div id="tab-content-paste" class="wizard-pane hidden space-y-3">
+          <label class="block font-semibold text-foreground">Paste Destination URLs (one per line):</label>
+          <textarea
+            id="paste-urls-textarea"
+            rows="8"
+            placeholder="https://mysite.com/page-1&#10;https://mysite.com/page-2&#10;https://mysite.com/page-3"
+            class="w-full rounded-xl border border-border bg-background p-3 font-mono text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          ></textarea>
+          <button
+            type="button"
+            id="parse-paste-btn"
+            class="rounded-xl bg-primary text-primary-foreground px-4 py-2 font-semibold hover:bg-primary/90 transition-all cursor-pointer"
+          >
+            Preview Pasted URLs
+          </button>
+        </div>
+
+        <!-- ═══ TAB 3: CSV Upload ═══ -->
+        <div id="tab-content-csv" class="wizard-pane hidden space-y-3">
+          <label class="block font-semibold text-foreground">Upload CSV File (contains URL and optional Label columns):</label>
+          <div class="border-2 border-dashed border-border rounded-xl p-8 text-center bg-muted/10 space-y-2">
+            <input type="file" id="csv-file-input" accept=".csv,text/csv" class="hidden" />
+            <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-8 w-8 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            <p class="font-medium text-foreground text-xs">Drop your CSV file here, or click to browse</p>
+            <button
+              type="button"
+              onclick="document.getElementById('csv-file-input').click()"
+              class="px-3.5 py-1.5 rounded-lg border border-border bg-card text-xs font-semibold hover:bg-muted cursor-pointer"
+            >
+              Browse Files
+            </button>
+          </div>
+          <span id="csv-selected-filename" class="text-xs text-muted-foreground font-mono block"></span>
+        </div>
+
+        <!-- ═══ COMMON PREVIEW STEP (Shared by all tabs) ═══ -->
+        <div id="wizard-preview-step" class="hidden space-y-3 rounded-2xl border border-border bg-card p-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
+            <div>
+              <h4 class="font-bold text-foreground">URLs Preview</h4>
+              <p class="text-[11px] text-muted-foreground">
+                Found <span id="preview-total-found" class="font-bold text-foreground">0</span> URLs
+                (<span id="preview-new-count" class="font-bold text-emerald-600 dark:text-emerald-400">0 new</span> /
+                <span id="preview-dup-count" class="font-bold text-slate-500">0 duplicates</span>)
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                id="wizard-start-over-btn"
+                class="px-3 py-1.5 rounded-lg border border-border hover:bg-muted font-medium cursor-pointer"
+              >
+                Start Over
+              </button>
+              <button
+                type="button"
+                id="wizard-copy-all-btn"
+                class="px-3 py-1.5 rounded-lg border border-border hover:bg-muted font-medium cursor-pointer"
+              >
+                Copy All
+              </button>
+              <button
+                type="button"
+                id="wizard-import-all-btn"
+                class="px-4 py-1.5 rounded-lg bg-primary text-primary-foreground font-bold hover:bg-primary/90 transition-all cursor-pointer shadow-xs"
+              >
+                Import All (<span id="btn-new-tally">0</span> New)
+              </button>
+            </div>
+          </div>
+
+          <div class="max-h-56 overflow-y-auto border border-border rounded-xl">
+            <table class="w-full text-left text-[11px]">
+              <thead class="bg-muted/40 text-muted-foreground font-semibold border-b border-border sticky top-0">
+                <tr>
+                  <th class="py-2 px-3">Status</th>
+                  <th class="py-2 px-3">Derived Label</th>
+                  <th class="py-2 px-3">URL</th>
+                </tr>
+              </thead>
+              <tbody id="preview-tbody" class="divide-y divide-border">
+                <!-- preview rows rendered dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ═══ CHUNKED INGESTION PROGRESS STEP ═══ -->
+        <div id="wizard-progress-step" class="hidden space-y-4 py-6 text-center">
+          <div class="inline-block h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent mb-2"></div>
+          <h4 class="font-bold text-foreground text-sm">Importing Links in Chunks…</h4>
+          <p id="progress-chunk-info" class="text-xs text-muted-foreground font-mono">Processing chunk 1 of X (100 links per chunk)…</p>
+          <div class="w-full bg-muted rounded-full h-2.5 overflow-hidden max-w-md mx-auto">
+            <div id="progress-bar-fill" class="bg-primary h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- ═══ FINAL SUMMARY STEP ═══ -->
+        <div id="wizard-summary-step" class="hidden space-y-4 py-6 text-center">
+          <div class="h-12 w-12 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center mx-auto text-2xl font-bold">
+            ✓
+          </div>
+          <h4 class="font-bold text-foreground text-base">Import Complete!</h4>
+          <div class="flex items-center justify-center gap-6 text-xs">
+            <div class="text-center">
+              <span id="sum-imported" class="block text-lg font-bold text-emerald-600 dark:text-emerald-400">0</span>
+              <span class="text-muted-foreground">Imported</span>
+            </div>
+            <div class="text-center">
+              <span id="sum-skipped" class="block text-lg font-bold text-slate-500">0</span>
+              <span class="text-muted-foreground">Skipped (Dupes)</span>
+            </div>
+            <div class="text-center">
+              <span id="sum-failed" class="block text-lg font-bold text-rose-500">0</span>
+              <span class="text-muted-foreground">Failed</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            id="wizard-done-btn"
+            class="mt-4 px-6 py-2 rounded-xl bg-primary text-primary-foreground font-bold hover:bg-primary/90 transition-all cursor-pointer shadow-xs"
+          >
+            Done & View Links
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  (() => {
+    let currentScope: 'user' | 'workspace' = 'user';
+    let currentPage = 1;
+    let totalPages = 1;
+    let currentDomain = '';
+    let defaultOnly = false;
+    let searchQuery = '';
+    let searchDebounceTimeout: any = null;
+    let selectedIds = new Set<string>();
+    let loadedLinks: any[] = [];
+
+    // Elements
+    const shelfUserTab = document.getElementById('shelf-user-tab');
+    const shelfWorkspaceTab = document.getElementById('shelf-workspace-tab');
+    const userCountBadge = document.getElementById('user-count-badge');
+    const workspaceCountBadge = document.getElementById('workspace-count-badge');
+
+    const searchInput = document.getElementById('links-search-input') as HTMLInputElement | null;
+    const domainSelect = document.getElementById('filter-domain-select') as HTMLSelectElement | null;
+    const defaultToggle = document.getElementById('filter-default-toggle') as HTMLInputElement | null;
+    const currentPageEl = document.getElementById('current-page');
+    const totalPagesEl = document.getElementById('total-pages');
+    const prevPageBtn = document.getElementById('prev-page-btn') as HTMLButtonElement | null;
+    const nextPageBtn = document.getElementById('next-page-btn') as HTMLButtonElement | null;
+
+    const bulkBar = document.getElementById('bulk-actions-bar');
+    const selectedCountEl = document.getElementById('selected-count');
+    const deselectAllBtn = document.getElementById('deselect-all-btn');
+    const bulkCopyBtn = document.getElementById('bulk-copy-btn');
+    const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
+    const selectAllCheckbox = document.getElementById('select-all-checkbox') as HTMLInputElement | null;
+
+    const loadingEl = document.getElementById('links-loading');
+    const errorEl = document.getElementById('links-error');
+    const errorMsgEl = document.getElementById('links-error-msg');
+    const tableCardEl = document.getElementById('links-table-card');
+    const tbody = document.getElementById('links-tbody');
+    const displayedRowsCountEl = document.getElementById('displayed-rows-count');
+    const totalShelfRecordsEl = document.getElementById('total-shelf-records');
+
+    function escapeHtml(str: string): string {
+      return (str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function formatDate(dateStr: string): string {
+      if (!dateStr) return '—';
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    async function fetchLinks() {
+      if (loadingEl) loadingEl.classList.remove('hidden');
+      if (errorEl) errorEl.classList.add('hidden');
+      if (tableCardEl) tableCardEl.classList.add('hidden');
+
+      selectedIds.clear();
+      updateBulkBar();
+
+      try {
+        const params = new URLSearchParams({
+          scope: currentScope,
+          page: String(currentPage),
+          limit: '50',
+        });
+        if (searchQuery) params.set('q', searchQuery);
+        if (currentDomain) params.set('domain', currentDomain);
+        if (defaultOnly) params.set('default_only', 'true');
+
+        const res = await fetch(`/api/links?${params.toString()}`, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Failed to load links');
+
+        loadedLinks = data.links || [];
+        totalPages = Math.max(data.total_pages || 1, 1);
+        currentPage = data.page || 1;
+
+        if (userCountBadge) userCountBadge.textContent = String(data.user_count || 0);
+        if (workspaceCountBadge) workspaceCountBadge.textContent = String(data.workspace_count || 0);
+
+        if (currentPageEl) currentPageEl.textContent = String(currentPage);
+        if (totalPagesEl) totalPagesEl.textContent = String(totalPages);
+        if (prevPageBtn) prevPageBtn.disabled = currentPage <= 1;
+        if (nextPageBtn) nextPageBtn.disabled = currentPage >= totalPages;
+
+        if (domainSelect && domainSelect.options.length <= 1 && Array.isArray(data.domains)) {
+          data.domains.forEach((dom: string) => {
+            const opt = document.createElement('option');
+            opt.value = dom;
+            opt.textContent = dom;
+            domainSelect.appendChild(opt);
+          });
+        }
+
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (errorEl) errorEl.classList.add('hidden');
+        if (tableCardEl) tableCardEl.classList.remove('hidden');
+
+        if (displayedRowsCountEl) displayedRowsCountEl.textContent = String(loadedLinks.length);
+        if (totalShelfRecordsEl) totalShelfRecordsEl.textContent = `${data.total || 0} total on shelf`;
+
+        renderTable();
+      } catch (err: any) {
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (tableCardEl) tableCardEl.classList.add('hidden');
+        if (errorEl) errorEl.classList.remove('hidden');
+        if (errorMsgEl) errorMsgEl.textContent = err.message || 'Failed to load links.';
+      }
+    }
+
+    function renderTable() {
+      if (!tbody) return;
+
+      if (loadedLinks.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" class="p-12 text-center text-muted-foreground bg-muted/10">
+              <div class="flex flex-col items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-muted-foreground mb-2 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/></svg>
+                <p class="font-semibold text-foreground text-sm">No links found on this shelf</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Add single links or use the Import Wizard to populate this shelf.</p>
+              </div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = loadedLinks.map((item) => {
+        const isChecked = selectedIds.has(item.id);
+        const starIcon = item.is_default ? '⭐' : '☆';
+        const starClass = item.is_default ? 'text-amber-500 scale-110' : 'text-muted-foreground hover:text-amber-500 opacity-40 hover:opacity-100';
+
+        return `
+          <tr class="hover:bg-muted/30 transition-colors" data-id="${escapeHtml(item.id)}">
+            <td class="py-3 px-4">
+              <input
+                type="checkbox"
+                class="row-checkbox rounded border-border text-primary h-3.5 w-3.5 cursor-pointer"
+                data-id="${escapeHtml(item.id)}"
+                ${isChecked ? 'checked' : ''}
+              />
+            </td>
+            <td class="py-3 px-3 text-center">
+              <button
+                type="button"
+                class="toggle-star-btn cursor-pointer transition-transform text-sm ${starClass}"
+                data-id="${escapeHtml(item.id)}"
+                data-default="${item.is_default ? 'true' : 'false'}"
+                title="${item.is_default ? 'Default link on this shelf' : 'Click to set as default'}"
+              >
+                ${starIcon}
+              </button>
+            </td>
+            <td class="py-3 px-4 font-semibold text-foreground">
+              <div class="max-w-xs truncate" title="${escapeHtml(item.label)}">
+                ${escapeHtml(item.label)}
+              </div>
+            </td>
+            <td class="py-3 px-4">
+              <div class="flex items-center gap-2 max-w-md">
+                <a
+                  href="${escapeHtml(item.url)}"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="font-mono text-[11px] text-primary hover:underline truncate block"
+                  title="${escapeHtml(item.url)}"
+                >
+                  ${escapeHtml(item.url)}
+                </a>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-primary/10 text-primary shrink-0">
+                  ${escapeHtml(item.domain || 'web')}
+                </span>
+              </div>
+            </td>
+            <td class="py-3 px-4 text-muted-foreground whitespace-nowrap">
+              ${formatDate(item.created_at)}
+            </td>
+            <td class="py-3 px-4 text-right">
+              <button
+                type="button"
+                class="delete-single-btn p-1 text-muted-foreground hover:text-rose-500 rounded transition-colors cursor-pointer"
+                data-id="${escapeHtml(item.id)}"
+                title="Delete Link"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      // Wire row checkboxes
+      tbody.querySelectorAll('.row-checkbox').forEach((cb) => {
+        cb.addEventListener('change', (e) => {
+          const target = e.target as HTMLInputElement;
+          const id = target.getAttribute('data-id');
+          if (!id) return;
+          if (target.checked) selectedIds.add(id);
+          else selectedIds.delete(id);
+          updateBulkBar();
+        });
+      });
+
+      // Wire star toggle
+      tbody.querySelectorAll('.toggle-star-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-id');
+          const isCurrentlyDefault = btn.getAttribute('data-default') === 'true';
+          if (!id) return;
+
+          try {
+            const res = await fetch(`/api/links/${encodeURIComponent(id)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ scope: currentScope, isDefault: !isCurrentlyDefault }),
+            });
+            if (!res.ok) throw new Error('Failed to toggle default star');
+            fetchLinks();
+          } catch (e: any) {
+            alert(e.message || 'Error toggling default star');
+          }
+        });
+      });
+
+      // Wire single delete
+      tbody.querySelectorAll('.delete-single-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-id');
+          if (!id || !confirm('Are you sure you want to delete this link?')) return;
+
+          try {
+            const res = await fetch(`/api/links/${encodeURIComponent(id)}?scope=${currentScope}`, {
+              method: 'DELETE',
+            });
+            if (!res.ok) throw new Error('Failed to delete link');
+            fetchLinks();
+          } catch (e: any) {
+            alert(e.message || 'Error deleting link');
+          }
+        });
+      });
+    }
+
+    function updateBulkBar() {
+      const count = selectedIds.size;
+      if (count > 0) {
+        if (bulkBar) bulkBar.classList.remove('hidden');
+        if (selectedCountEl) selectedCountEl.textContent = String(count);
+      } else {
+        if (bulkBar) bulkBar.classList.add('hidden');
+      }
+
+      if (selectAllCheckbox) {
+        selectAllCheckbox.checked = count > 0 && count === loadedLinks.length;
+      }
+    }
+
+    // Event Listeners for Filters & Shelves
+    shelfUserTab?.addEventListener('click', () => {
+      if (currentScope === 'user') return;
+      currentScope = 'user';
+      shelfUserTab.className = 'shelf-tab px-4 py-2.5 text-xs font-bold border-b-2 border-primary text-primary transition-all cursor-pointer flex items-center gap-2';
+      shelfWorkspaceTab!.className = 'shelf-tab px-4 py-2.5 text-xs font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-all cursor-pointer flex items-center gap-2';
+      currentPage = 1;
+      fetchLinks();
+    });
+
+    shelfWorkspaceTab?.addEventListener('click', () => {
+      if (currentScope === 'workspace') return;
+      currentScope = 'workspace';
+      shelfWorkspaceTab.className = 'shelf-tab px-4 py-2.5 text-xs font-bold border-b-2 border-primary text-primary transition-all cursor-pointer flex items-center gap-2';
+      shelfUserTab!.className = 'shelf-tab px-4 py-2.5 text-xs font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-all cursor-pointer flex items-center gap-2';
+      currentPage = 1;
+      fetchLinks();
+    });
+
+    searchInput?.addEventListener('input', () => {
+      clearTimeout(searchDebounceTimeout);
+      searchDebounceTimeout = setTimeout(() => {
+        searchQuery = searchInput.value.trim();
+        currentPage = 1;
+        fetchLinks();
+      }, 300);
+    });
+
+    domainSelect?.addEventListener('change', () => {
+      currentDomain = domainSelect.value;
+      currentPage = 1;
+      fetchLinks();
+    });
+
+    defaultToggle?.addEventListener('change', () => {
+      defaultOnly = defaultToggle.checked;
+      currentPage = 1;
+      fetchLinks();
+    });
+
+    prevPageBtn?.addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        fetchLinks();
+      }
+    });
+
+    nextPageBtn?.addEventListener('click', () => {
+      if (currentPage < totalPages) {
+        currentPage++;
+        fetchLinks();
+      }
+    });
+
+    selectAllCheckbox?.addEventListener('change', () => {
+      if (selectAllCheckbox.checked) {
+        loadedLinks.forEach((l) => selectedIds.add(l.id));
+      } else {
+        selectedIds.clear();
+      }
+      tbody?.querySelectorAll('.row-checkbox').forEach((cb: any) => {
+        cb.checked = selectAllCheckbox.checked;
+      });
+      updateBulkBar();
+    });
+
+    deselectAllBtn?.addEventListener('click', () => {
+      selectedIds.clear();
+      tbody?.querySelectorAll('.row-checkbox').forEach((cb: any) => {
+        cb.checked = false;
+      });
+      updateBulkBar();
+    });
+
+    bulkCopyBtn?.addEventListener('click', () => {
+      const urlsToCopy = loadedLinks
+        .filter((l) => selectedIds.has(l.id))
+        .map((l) => l.url)
+        .join('\n');
+
+      if (urlsToCopy) {
+        navigator.clipboard.writeText(urlsToCopy);
+        const originalText = bulkCopyBtn.innerHTML;
+        bulkCopyBtn.innerHTML = '<span>✓ Copied!</span>';
+        setTimeout(() => { bulkCopyBtn.innerHTML = originalText; }, 2000);
+      }
+    });
+
+    bulkDeleteBtn?.addEventListener('click', async () => {
+      const ids = Array.from(selectedIds);
+      if (ids.length === 0 || !confirm(`Delete ${ids.length} selected link(s)?`)) return;
+
+      try {
+        const res = await fetch('/api/links/bulk', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids, scope: currentScope }),
+        });
+        if (!res.ok) throw new Error('Bulk delete failed');
+        fetchLinks();
+      } catch (err: any) {
+        alert(err.message || 'Failed to bulk delete links');
+      }
+    });
+
+    // ═════════════════════════════════════════════════════════
+    // ADD SINGLE LINK MODAL LOGIC
+    // ═════════════════════════════════════════════════════════
+    const addModal = document.getElementById('add-link-modal');
+    const openAddBtn = document.getElementById('open-add-link-btn');
+    const addForm = document.getElementById('add-link-form') as HTMLFormElement | null;
+    const addScopeSelect = document.getElementById('add-link-scope') as HTMLSelectElement | null;
+    const addUrlInput = document.getElementById('add-link-url') as HTMLInputElement | null;
+    const addLabelInput = document.getElementById('add-link-label') as HTMLInputElement | null;
+    const addDefaultCheckbox = document.getElementById('add-link-default') as HTMLInputElement | null;
+    const addErrorEl = document.getElementById('add-link-error');
+
+    openAddBtn?.addEventListener('click', () => {
+      if (addScopeSelect) addScopeSelect.value = currentScope;
+      if (addUrlInput) addUrlInput.value = '';
+      if (addLabelInput) addLabelInput.value = '';
+      if (addDefaultCheckbox) addDefaultCheckbox.checked = false;
+      if (addErrorEl) addErrorEl.classList.add('hidden');
+      addModal?.classList.remove('hidden');
+      addModal?.classList.add('flex');
+    });
+
+    document.querySelectorAll('.close-add-modal').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        addModal?.classList.add('hidden');
+        addModal?.classList.remove('flex');
+      });
+    });
+
+    addForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!addUrlInput?.value) return;
+
+      try {
+        const payload = {
+          url: addUrlInput.value.trim(),
+          label: addLabelInput?.value.trim() || undefined,
+          scope: addScopeSelect?.value || 'user',
+          isDefault: addDefaultCheckbox?.checked || false,
+        };
+
+        const res = await fetch('/api/links', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to add link');
+        }
+
+        addModal?.classList.add('hidden');
+        addModal?.classList.remove('flex');
+        fetchLinks();
+      } catch (err: any) {
+        if (addErrorEl) {
+          addErrorEl.textContent = err.message || 'Error adding link';
+          addErrorEl.classList.remove('hidden');
+        }
+      }
+    });
+
+    // ═════════════════════════════════════════════════════════
+    // MULTI-TAB IMPORT WIZARD LOGIC
+    // ═════════════════════════════════════════════════════════
+    const wizardModal = document.getElementById('import-wizard-modal');
+    const openWizardBtn = document.getElementById('open-import-wizard-btn');
+    const closeWizardBtn = document.getElementById('close-wizard-btn');
+    const wizardTabs = document.querySelectorAll('.wizard-tab');
+
+    let parsedPreviewUrls: any[] = [];
+    let detectedSubSitemaps: string[] = [];
+
+    // Steps
+    const sitemapInputStep = document.getElementById('sitemap-input-step');
+    const sitemapIndexStep = document.getElementById('sitemap-index-step');
+    const wizardPreviewStep = document.getElementById('wizard-preview-step');
+    const wizardProgressStep = document.getElementById('wizard-progress-step');
+    const wizardSummaryStep = document.getElementById('wizard-summary-step');
+
+    const sitemapUrlInput = document.getElementById('wizard-sitemap-url') as HTMLInputElement | null;
+    const parseSitemapBtn = document.getElementById('parse-sitemap-btn');
+    const subSitemapsCountEl = document.getElementById('sub-sitemaps-count');
+    const subSitemapsListEl = document.getElementById('sub-sitemaps-list');
+    const selectedSubsTallyEl = document.getElementById('selected-subs-tally');
+    const selectAllSubsBtn = document.getElementById('select-all-subs-btn');
+    const clearAllSubsBtn = document.getElementById('clear-all-subs-btn');
+    const copySubsBtn = document.getElementById('copy-subs-btn');
+    const inspectSubsBtn = document.getElementById('inspect-subs-btn');
+    const resetSitemapInputBtn = document.getElementById('reset-sitemap-input-btn');
+
+    const pasteTextarea = document.getElementById('paste-urls-textarea') as HTMLTextAreaElement | null;
+    const parsePasteBtn = document.getElementById('parse-paste-btn');
+    const csvFileInput = document.getElementById('csv-file-input') as HTMLInputElement | null;
+    const csvFilenameEl = document.getElementById('csv-selected-filename');
+
+    const previewTotalEl = document.getElementById('preview-total-found');
+    const previewNewEl = document.getElementById('preview-new-count');
+    const previewDupEl = document.getElementById('preview-dup-count');
+    const previewTbody = document.getElementById('preview-tbody');
+    const btnNewTally = document.getElementById('btn-new-tally');
+
+    const wizardStartOverBtn = document.getElementById('wizard-start-over-btn');
+    const wizardCopyAllBtn = document.getElementById('wizard-copy-all-btn');
+    const wizardImportAllBtn = document.getElementById('wizard-import-all-btn');
+
+    const progressChunkInfo = document.getElementById('progress-chunk-info');
+    const progressBarFill = document.getElementById('progress-bar-fill');
+    const sumImportedEl = document.getElementById('sum-imported');
+    const sumSkippedEl = document.getElementById('sum-skipped');
+    const sumFailedEl = document.getElementById('sum-failed');
+    const wizardDoneBtn = document.getElementById('wizard-done-btn');
+
+    function getSelectedWizardScope(): 'user' | 'workspace' {
+      const checked = document.querySelector('input[name="wizard-scope"]:checked') as HTMLInputElement | null;
+      return checked?.value === 'workspace' ? 'workspace' : 'user';
+    }
+
+    function resetWizard() {
+      parsedPreviewUrls = [];
+      detectedSubSitemaps = [];
+      if (sitemapInputStep) sitemapInputStep.classList.remove('hidden');
+      if (sitemapIndexStep) sitemapIndexStep.classList.add('hidden');
+      if (wizardPreviewStep) wizardPreviewStep.classList.add('hidden');
+      if (wizardProgressStep) wizardProgressStep.classList.add('hidden');
+      if (wizardSummaryStep) wizardSummaryStep.classList.add('hidden');
+      if (sitemapUrlInput) sitemapUrlInput.value = '';
+      if (pasteTextarea) pasteTextarea.value = '';
+      if (csvFileInput) csvFileInput.value = '';
+      if (csvFilenameEl) csvFilenameEl.textContent = '';
+    }
+
+    openWizardBtn?.addEventListener('click', () => {
+      resetWizard();
+      wizardModal?.classList.remove('hidden');
+      wizardModal?.classList.add('flex');
+    });
+
+    closeWizardBtn?.addEventListener('click', () => {
+      wizardModal?.classList.add('hidden');
+      wizardModal?.classList.remove('flex');
+    });
+
+    // Tab Switching
+    wizardTabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const tabName = tab.getAttribute('data-tab');
+        wizardTabs.forEach((t) => {
+          t.className = 'wizard-tab py-3 px-3 font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground cursor-pointer';
+        });
+        tab.className = 'wizard-tab py-3 px-3 font-bold border-b-2 border-primary text-primary cursor-pointer';
+
+        document.querySelectorAll('.wizard-pane').forEach((p) => p.classList.add('hidden'));
+        document.getElementById(`tab-content-${tabName}`)?.classList.remove('hidden');
+      });
+    });
+
+    // 1. Parse Sitemap
+    parseSitemapBtn?.addEventListener('click', async () => {
+      const url = sitemapUrlInput?.value.trim();
+      if (!url) return alert('Please enter a sitemap URL');
+
+      parseSitemapBtn.textContent = 'Parsing...';
+      (parseSitemapBtn as HTMLButtonElement).disabled = true;
+
+      try {
+        const res = await fetch('/api/links/sitemap/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sitemapUrl: url, scope: getSelectedWizardScope() }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to parse sitemap');
+
+        if (data.is_index) {
+          detectedSubSitemaps = data.sub_sitemaps || [];
+          if (sitemapInputStep) sitemapInputStep.classList.add('hidden');
+          if (sitemapIndexStep) sitemapIndexStep.classList.remove('hidden');
+          if (subSitemapsCountEl) subSitemapsCountEl.textContent = String(detectedSubSitemaps.length);
+
+          renderSubSitemapsList();
+        } else {
+          showPreview(data.urls || [], data.new_count || 0, data.dup_count || 0);
+        }
+      } catch (err: any) {
+        alert(err.message || 'Error parsing sitemap');
+      } finally {
+        parseSitemapBtn.textContent = 'Parse Sitemap';
+        (parseSitemapBtn as HTMLButtonElement).disabled = false;
+      }
+    });
+
+    function renderSubSitemapsList() {
+      if (!subSitemapsListEl) return;
+      subSitemapsListEl.innerHTML = detectedSubSitemaps.map((sub, idx) => `
+        <label class="flex items-center gap-2 py-1 cursor-pointer hover:bg-muted/40 px-2 rounded">
+          <input type="checkbox" class="sub-checkbox rounded border-border text-primary h-3.5 w-3.5 cursor-pointer" data-url="${escapeHtml(sub)}" checked />
+          <span class="font-mono text-[11px] truncate flex-1">${escapeHtml(sub)}</span>
+        </label>
+      `).join('');
+
+      updateSubTally();
+
+      subSitemapsListEl.querySelectorAll('.sub-checkbox').forEach((cb) => {
+        cb.addEventListener('change', updateSubTally);
+      });
+    }
+
+    function updateSubTally() {
+      const checked = subSitemapsListEl?.querySelectorAll('.sub-checkbox:checked').length || 0;
+      if (selectedSubsTallyEl) selectedSubsTallyEl.textContent = String(checked);
+    }
+
+    selectAllSubsBtn?.addEventListener('click', () => {
+      subSitemapsListEl?.querySelectorAll<HTMLInputElement>('.sub-checkbox').forEach((cb) => cb.checked = true);
+      updateSubTally();
+    });
+
+    clearAllSubsBtn?.addEventListener('click', () => {
+      subSitemapsListEl?.querySelectorAll<HTMLInputElement>('.sub-checkbox').forEach((cb) => cb.checked = false);
+      updateSubTally();
+    });
+
+    copySubsBtn?.addEventListener('click', () => {
+      navigator.clipboard.writeText(detectedSubSitemaps.join('\n'));
+      alert('Sub-sitemap URLs copied to clipboard!');
+    });
+
+    resetSitemapInputBtn?.addEventListener('click', () => {
+      if (sitemapIndexStep) sitemapIndexStep.classList.add('hidden');
+      if (sitemapInputStep) sitemapInputStep.classList.remove('hidden');
+    });
+
+    inspectSubsBtn?.addEventListener('click', async () => {
+      const selectedSubs: string[] = [];
+      subSitemapsListEl?.querySelectorAll<HTMLInputElement>('.sub-checkbox:checked').forEach((cb) => {
+        const u = cb.getAttribute('data-url');
+        if (u) selectedSubs.push(u);
+      });
+
+      if (selectedSubs.length === 0) return alert('Select at least one sub-sitemap');
+
+      inspectSubsBtn.textContent = 'Fetching URLs...';
+      (inspectSubsBtn as HTMLButtonElement).disabled = true;
+
+      try {
+        const res = await fetch('/api/links/sitemap/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subSitemaps: selectedSubs, scope: getSelectedWizardScope() }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to inspect sub-sitemaps');
+
+        if (sitemapIndexStep) sitemapIndexStep.classList.add('hidden');
+        showPreview(data.urls || [], data.new_count || 0, data.dup_count || 0);
+      } catch (e: any) {
+        alert(e.message || 'Error fetching sub-sitemaps');
+      } finally {
+        inspectSubsBtn.textContent = `Fetch & Inspect Selected (${selectedSubs.length})`;
+        (inspectSubsBtn as HTMLButtonElement).disabled = false;
+      }
+    });
+
+    // 2. Paste URLs Preview
+    parsePasteBtn?.addEventListener('click', async () => {
+      const text = pasteTextarea?.value.trim();
+      if (!text) return alert('Please paste at least one URL');
+
+      const lines = text.split(/[\r\n,]+/).map((l) => l.trim()).filter((l) => l.startsWith('http://') || l.startsWith('https://'));
+      if (lines.length === 0) return alert('No valid http(s) URLs found');
+
+      // Use bulk endpoint items format to preview
+      parsePasteBtn.textContent = 'Inspecting...';
+      (parsePasteBtn as HTMLButtonElement).disabled = true;
+
+      try {
+        const fakeItems = lines.map((u) => ({ url: u }));
+        const res = await fetch('/api/links/sitemap/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sitemapUrl: undefined, subSitemaps: undefined, scope: getSelectedWizardScope() }),
+        });
+
+        // Fallback: check duplicates directly against DB or mark as new
+        showPreview(
+          lines.map((u) => {
+            const parsed = new URL(u);
+            return { url: u, label: parsed.pathname.split('/').filter(Boolean).pop() || parsed.hostname, domain: parsed.hostname, is_duplicate: false };
+          }),
+          lines.length,
+          0
+        );
+      } catch (err: any) {
+        alert(err.message || 'Error parsing pasted URLs');
+      } finally {
+        parsePasteBtn.textContent = 'Preview Pasted URLs';
+        (parsePasteBtn as HTMLButtonElement).disabled = false;
+      }
+    });
+
+    // 3. CSV File Upload
+    csvFileInput?.addEventListener('change', async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      if (csvFilenameEl) csvFilenameEl.textContent = `Selected: ${file.name}`;
+
+      const text = await file.text();
+      const lines = text.split(/[\r\n]+/);
+      const extracted: string[] = [];
+
+      for (const line of lines) {
+        const parts = line.split(',');
+        for (const p of parts) {
+          const trimmed = p.replace(/["']/g, '').trim();
+          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+            extracted.push(trimmed);
+          }
+        }
+      }
+
+      if (extracted.length === 0) return alert('No URLs found in CSV');
+
+      showPreview(
+        extracted.map((u) => {
+          try {
+            const parsed = new URL(u);
+            return { url: u, label: parsed.pathname.split('/').filter(Boolean).pop() || parsed.hostname, domain: parsed.hostname, is_duplicate: false };
+          } catch {
+            return { url: u, label: u, domain: 'web', is_duplicate: false };
+          }
+        }),
+        extracted.length,
+        0
+      );
+    });
+
+    function showPreview(items: any[], newCount: number, dupCount: number) {
+      parsedPreviewUrls = items;
+      if (sitemapInputStep) sitemapInputStep.classList.add('hidden');
+      if (sitemapIndexStep) sitemapIndexStep.classList.add('hidden');
+      document.querySelectorAll('.wizard-pane').forEach((p) => p.classList.add('hidden'));
+
+      if (wizardPreviewStep) wizardPreviewStep.classList.remove('hidden');
+      if (previewTotalEl) previewTotalEl.textContent = String(items.length);
+      if (previewNewEl) previewNewEl.textContent = `${newCount} new`;
+      if (previewDupEl) previewDupEl.textContent = `${dupCount} duplicates`;
+      if (btnNewTally) btnNewTally.textContent = String(newCount);
+
+      if (previewTbody) {
+        previewTbody.innerHTML = items.slice(0, 100).map((item) => `
+          <tr class="hover:bg-muted/30">
+            <td class="py-1.5 px-3">
+              ${item.is_duplicate
+                ? '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-500/10 text-slate-500">Duplicate</span>'
+                : '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">New</span>'
+              }
+            </td>
+            <td class="py-1.5 px-3 font-semibold text-foreground truncate max-w-[160px]">${escapeHtml(item.label)}</td>
+            <td class="py-1.5 px-3 font-mono text-[10px] text-muted-foreground truncate max-w-[280px]">${escapeHtml(item.url)}</td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    wizardStartOverBtn?.addEventListener('click', resetWizard);
+
+    wizardCopyAllBtn?.addEventListener('click', () => {
+      navigator.clipboard.writeText(parsedPreviewUrls.map((u) => u.url).join('\n'));
+      alert(`${parsedPreviewUrls.length} URLs copied to clipboard!`);
+    });
+
+    // 4. Chunked Import Execution
+    wizardImportAllBtn?.addEventListener('click', async () => {
+      const itemsToImport = parsedPreviewUrls.filter((u) => !u.is_duplicate);
+      const totalItems = itemsToImport.length > 0 ? itemsToImport : parsedPreviewUrls;
+
+      if (totalItems.length === 0) return alert('No URLs to import');
+
+      if (wizardPreviewStep) wizardPreviewStep.classList.add('hidden');
+      if (wizardProgressStep) wizardProgressStep.classList.remove('hidden');
+
+      const chunkSize = 100;
+      const totalChunks = Math.ceil(totalItems.length / chunkSize);
+      let cumulativeImported = 0;
+      let cumulativeSkipped = parsedPreviewUrls.length - itemsToImport.length;
+      let cumulativeFailed = 0;
+
+      for (let i = 0; i < totalChunks; i++) {
+        const chunk = totalItems.slice(i * chunkSize, (i + 1) * chunkSize);
+        if (progressChunkInfo) {
+          progressChunkInfo.textContent = `Processing chunk ${i + 1} of ${totalChunks} (100 links per chunk)…`;
+        }
+        if (progressBarFill) {
+          progressBarFill.style.width = `${Math.round(((i + 1) / totalChunks) * 100)}%`;
+        }
+
+        try {
+          const res = await fetch('/api/links/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              items: chunk.map((c) => ({ url: c.url, label: c.label })),
+              scope: getSelectedWizardScope(),
+            }),
+          });
+          const data = await res.json();
+          if (data.success) {
+            cumulativeImported += Number(data.imported || 0);
+            cumulativeSkipped += Number(data.skipped || 0);
+            cumulativeFailed += Number(data.failed || 0);
+          } else {
+            cumulativeFailed += chunk.length;
+          }
+        } catch {
+          cumulativeFailed += chunk.length;
+        }
+      }
+
+      // Show final summary
+      if (wizardProgressStep) wizardProgressStep.classList.add('hidden');
+      if (wizardSummaryStep) wizardSummaryStep.classList.remove('hidden');
+
+      if (sumImportedEl) sumImportedEl.textContent = String(cumulativeImported);
+      if (sumSkippedEl) sumSkippedEl.textContent = String(cumulativeSkipped);
+      if (sumFailedEl) sumFailedEl.textContent = String(cumulativeFailed);
+    });
+
+    wizardDoneBtn?.addEventListener('click', () => {
+      wizardModal?.classList.add('hidden');
+      wizardModal?.classList.remove('flex');
+      fetchLinks();
+    });
+
+    // Initial Load
+    fetchLinks();
+  })();
+</script>

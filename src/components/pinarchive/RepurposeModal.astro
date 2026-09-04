@@ -1,4 +1,4 @@
-﻿---
+---
 export interface Props {
   id?: string;
 }
@@ -55,9 +55,9 @@ const { id = 'repurpose-modal' } = Astro.props;
     <div class="mb-5 border-t border-border pt-4">
       <h4 class="text-xs font-bold text-foreground mb-2 flex items-center justify-between">
         <span>2. Destination Link Options</span>
-        <button type="button" id="open-notebook-link-btn" class="text-[11px] text-primary hover:underline font-semibold cursor-pointer">
+        <a href="/pinarchive/links" target="_blank" rel="noopener noreferrer" class="text-[11px] text-primary hover:underline font-semibold cursor-pointer">
           Manage Link Notebook ↗
-        </button>
+        </a>
       </h4>
 
       <div class="space-y-2.5 text-xs">
@@ -405,11 +405,6 @@ const { id = 'repurpose-modal' } = Astro.props;
   };
   closeBtn?.addEventListener('click', closeModal);
   cancelBtn?.addEventListener('click', closeModal);
-
-  openNotebookBtn?.addEventListener('click', () => {
-    closeModal();
-    window.dispatchEvent(new CustomEvent('open-link-notebook'));
-  });
 
   // Custom Event to open modal
   window.addEventListener('open-repurpose-modal', ((e: CustomEvent) => {

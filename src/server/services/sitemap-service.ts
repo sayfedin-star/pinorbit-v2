@@ -9,6 +9,12 @@ export interface ExtractedLink {
   label: string;
 }
 
+export interface ParsedSitemapResult {
+  isIndex: boolean;
+  subSitemaps: string[];
+  links: ExtractedLink[];
+}
+
 export function extractDomainAndSlug(rawUrl: string): ExtractedLink {
   const parsed = new URL(rawUrl);
   const domain = parsed.hostname;
@@ -36,9 +42,7 @@ export function extractDomainAndSlug(rawUrl: string): ExtractedLink {
   };
 }
 
-export async function fetchAndParseSitemap(sitemapUrl: string, maxLinks: number = 500): Promise<ExtractedLink[]> {
-  const xmlText = await safeFetchText(sitemapUrl);
-  
+export function parseSitemapXml(xmlText: string): ParsedSitemapResult {
   const parser = new XMLParser({
     ignoreAttributes: false,
     parseTagValue: true,
@@ -49,16 +53,34 @@ export async function fetchAndParseSitemap(sitemapUrl: string, maxLinks: number 
   try {
     parsed = parser.parse(xmlText);
   } catch (err: any) {
-    throw new HttpError(422, `Failed to parse XML sitemap: ${err.message}`);
+    return { isIndex: false, subSitemaps: [], links: [] };
   }
 
-  const linksMap = new Map<string, ExtractedLink>();
+  if (!parsed || typeof parsed !== 'object') {
+    return { isIndex: false, subSitemaps: [], links: [] };
+  }
 
-  // 1. Direct urlset (<urlset><url><loc>...</loc></url></urlset>)
+  // 1. Sitemap index (<sitemapindex><sitemap><loc>...</loc></sitemap></sitemapindex>)
+  if (parsed.sitemapindex && parsed.sitemapindex.sitemap) {
+    const rawSitemaps = Array.isArray(parsed.sitemapindex.sitemap)
+      ? parsed.sitemapindex.sitemap
+      : [parsed.sitemapindex.sitemap];
+
+    const subSitemaps: string[] = [];
+    for (const item of rawSitemaps) {
+      const loc = typeof item === 'string' ? item : item?.loc;
+      if (loc && typeof loc === 'string' && loc.trim().length > 0) {
+        subSitemaps.push(loc.trim());
+      }
+    }
+    return { isIndex: true, subSitemaps, links: [] };
+  }
+
+  // 2. Direct urlset (<urlset><url><loc>...</loc></url></urlset>)
+  const linksMap = new Map<string, ExtractedLink>();
   if (parsed.urlset && parsed.urlset.url) {
     const urls = Array.isArray(parsed.urlset.url) ? parsed.urlset.url : [parsed.urlset.url];
     for (const item of urls) {
-      if (linksMap.size >= maxLinks) break;
       const loc = typeof item === 'string' ? item : item?.loc;
       if (loc && typeof loc === 'string') {
         try {
@@ -71,28 +93,46 @@ export async function fetchAndParseSitemap(sitemapUrl: string, maxLinks: number 
     }
   }
 
-  // 2. Sitemap index (<sitemapindex><sitemap><loc>...</loc></sitemap></sitemapindex>)
-  if (parsed.sitemapindex && parsed.sitemapindex.sitemap && linksMap.size < maxLinks) {
-    const sitemaps = Array.isArray(parsed.sitemapindex.sitemap)
-      ? parsed.sitemapindex.sitemap
-      : [parsed.sitemapindex.sitemap];
+  return { isIndex: false, subSitemaps: [], links: Array.from(linksMap.values()) };
+}
 
-    // Fetch up to 3 child sitemaps to prevent excessive execution
-    const childSitemaps = sitemaps.slice(0, 3);
-    for (const child of childSitemaps) {
-      if (linksMap.size >= maxLinks) break;
-      const childLoc = typeof child === 'string' ? child : child?.loc;
-      if (childLoc && typeof childLoc === 'string') {
-        try {
-          const childLinks = await fetchAndParseSitemap(childLoc.trim(), maxLinks - linksMap.size);
-          for (const l of childLinks) {
-            linksMap.set(l.url, l);
-            if (linksMap.size >= maxLinks) break;
-          }
-        } catch (childErr) {
-          console.warn(`[Sitemap] Skipping child sitemap ${childLoc}:`, childErr);
-        }
+export async function fetchAndInspectSitemap(url: string): Promise<ParsedSitemapResult> {
+  const xmlText = await safeFetchText(url);
+  return parseSitemapXml(xmlText);
+}
+
+export async function fetchMultipleSubSitemaps(subUrls: string[]): Promise<ExtractedLink[]> {
+  const linksMap = new Map<string, ExtractedLink>();
+  for (const subUrl of subUrls) {
+    try {
+      const inspected = await fetchAndInspectSitemap(subUrl);
+      for (const link of inspected.links) {
+        linksMap.set(link.url, link);
       }
+    } catch (err) {
+      console.warn(`[Sitemap] Skipping sub-sitemap ${subUrl}:`, err);
+    }
+  }
+  return Array.from(linksMap.values());
+}
+
+export async function fetchAndParseSitemap(sitemapUrl: string, maxLinks: number = 500): Promise<ExtractedLink[]> {
+  const inspected = await fetchAndInspectSitemap(sitemapUrl);
+  if (!inspected.isIndex) {
+    return inspected.links.slice(0, maxLinks);
+  }
+
+  const linksMap = new Map<string, ExtractedLink>();
+  for (const childLoc of inspected.subSitemaps) {
+    if (linksMap.size >= maxLinks) break;
+    try {
+      const childLinks = await fetchAndParseSitemap(childLoc, maxLinks - linksMap.size);
+      for (const l of childLinks) {
+        linksMap.set(l.url, l);
+        if (linksMap.size >= maxLinks) break;
+      }
+    } catch (childErr) {
+      console.warn(`[Sitemap] Skipping child sitemap ${childLoc}:`, childErr);
     }
   }
 
