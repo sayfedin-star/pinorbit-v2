@@ -248,7 +248,7 @@ export async function executeRepurposeDispatch(
     .insert({
       id: batchUuid,
       workspace_id: workspaceId,
-      created_by: userId,
+      user_id: userId,
       pins_count: validPins.length,
       targets_count: targets.length,
       status: 'in_progress',
