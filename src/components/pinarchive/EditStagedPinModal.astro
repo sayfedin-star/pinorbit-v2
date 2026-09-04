@@ -1,0 +1,178 @@
+---
+export interface Props {
+  id?: string;
+}
+const { id = 'edit-staged-pin-modal' } = Astro.props;
+---
+
+<div
+  id={id}
+  class="fixed inset-0 z-50 hidden items-center justify-center bg-background/80 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto"
+  role="dialog"
+  aria-modal="true"
+>
+  <div class="relative w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-xl transition-all my-8">
+    <!-- Header -->
+    <div class="flex items-center justify-between border-b border-border pb-4 mb-4">
+      <div class="flex items-center gap-3">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <span class="text-xl">✏️</span>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-foreground">Edit Staged Pin</h3>
+          <p class="text-xs text-muted-foreground">Modify details before dispatching to target accounts.</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        id="close-edit-modal-btn"
+        class="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        aria-label="Close"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Edit Form -->
+    <form id="edit-staged-pin-form" class="space-y-4 text-xs">
+      <input type="hidden" id="edit-staged-id" value="" />
+
+      <div>
+        <label class="block font-semibold text-foreground mb-1.5">Pin Title</label>
+        <input
+          type="text"
+          id="edit-staged-title"
+          class="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-primary"
+          required
+        />
+      </div>
+
+      <div>
+        <label class="block font-semibold text-foreground mb-1.5">Board Name</label>
+        <input
+          type="text"
+          id="edit-staged-board"
+          class="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-primary"
+          placeholder="e.g. Modern Kitchens"
+        />
+      </div>
+
+      <div>
+        <label class="block font-semibold text-foreground mb-1.5">Destination Link Override (Safe URL)</label>
+        <input
+          type="url"
+          id="edit-staged-link"
+          placeholder="https://example.com/target-landing-page"
+          class="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-primary"
+        />
+        <p class="text-[11px] text-muted-foreground mt-1">Leave empty to use the original archived pin's link.</p>
+      </div>
+
+      <!-- Status Banner -->
+      <div id="edit-status-banner" class="hidden p-3 rounded-xl text-xs font-medium"></div>
+
+      <!-- Footer Buttons -->
+      <div class="flex items-center justify-end gap-2 border-t border-border pt-4">
+        <button
+          type="button"
+          id="cancel-edit-modal-btn"
+          class="rounded-xl border border-border bg-background px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          id="save-edit-btn"
+          class="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+        >
+          <span>Save Changes</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  const modal = document.getElementById('edit-staged-pin-modal');
+  const closeBtn = document.getElementById('close-edit-modal-btn');
+  const cancelBtn = document.getElementById('cancel-edit-modal-btn');
+  const form = document.getElementById('edit-staged-pin-form') as HTMLFormElement | null;
+  const idInput = document.getElementById('edit-staged-id') as HTMLInputElement | null;
+  const titleInput = document.getElementById('edit-staged-title') as HTMLInputElement | null;
+  const boardInput = document.getElementById('edit-staged-board') as HTMLInputElement | null;
+  const linkInput = document.getElementById('edit-staged-link') as HTMLInputElement | null;
+  const saveBtn = document.getElementById('save-edit-btn') as HTMLButtonElement | null;
+  const statusBanner = document.getElementById('edit-status-banner');
+
+  function showStatus(msg: string, type: 'error' | 'success') {
+    if (!statusBanner) return;
+    statusBanner.textContent = msg;
+    const styles = {
+      error: 'p-3 rounded-xl text-xs font-medium bg-rose-500/10 text-rose-600 border border-rose-500/20',
+      success: 'p-3 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',
+    };
+    statusBanner.className = styles[type];
+    statusBanner.classList.remove('hidden');
+  }
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const stagedId = idInput?.value;
+    if (!stagedId) return;
+
+    if (saveBtn) saveBtn.disabled = true;
+    statusBanner?.classList.add('hidden');
+
+    try {
+      const res = await fetch(`/api/pinarchive/staged/${encodeURIComponent(stagedId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: titleInput?.value,
+          board_name: boardInput?.value,
+          override_link: linkInput?.value,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        showStatus('✅ Pin updated successfully!', 'success');
+        window.dispatchEvent(new CustomEvent('staged-pin-updated', { detail: data.stagedPin }));
+        setTimeout(() => {
+          modal?.classList.add('hidden');
+          modal?.classList.remove('flex');
+        }, 1200);
+      } else {
+        showStatus(data.error || 'Failed to update staged pin.', 'error');
+        if (saveBtn) saveBtn.disabled = false;
+      }
+    } catch (err: any) {
+      showStatus(err.message || 'Network error.', 'error');
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  });
+
+  const closeModal = () => {
+    modal?.classList.add('hidden');
+    modal?.classList.remove('flex');
+    statusBanner?.classList.add('hidden');
+  };
+  closeBtn?.addEventListener('click', closeModal);
+  cancelBtn?.addEventListener('click', closeModal);
+
+  window.addEventListener('open-edit-staged-modal', ((e: CustomEvent) => {
+    const pin = e.detail?.stagedPin;
+    if (!pin) return;
+
+    if (idInput) idInput.value = pin.id;
+    if (titleInput) titleInput.value = pin.title || '';
+    if (boardInput) boardInput.value = pin.board_name || '';
+    if (linkInput) linkInput.value = pin.override_link || '';
+
+    modal?.classList.remove('hidden');
+    modal?.classList.add('flex');
+    statusBanner?.classList.add('hidden');
+    if (saveBtn) saveBtn.disabled = false;
+  }) as EventListener);
+</script>

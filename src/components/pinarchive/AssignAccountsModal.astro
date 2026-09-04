@@ -1,0 +1,422 @@
+---
+export interface Props {
+  id?: string;
+}
+const { id = 'assign-accounts-modal' } = Astro.props;
+---
+
+<div
+  id={id}
+  class="fixed inset-0 z-50 hidden items-center justify-center bg-background/80 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto"
+  role="dialog"
+  aria-modal="true"
+>
+  <div class="relative w-full max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-xl transition-all my-8">
+    <!-- Header -->
+    <div class="flex items-center justify-between border-b border-border pb-4 mb-4">
+      <div class="flex items-center gap-3">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <span class="text-xl">🎯</span>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-foreground">Assign Accounts & Dispatch</h3>
+          <p class="text-xs text-muted-foreground">Select destination accounts and individualize destination links per account.</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        id="close-assign-modal-btn"
+        class="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        aria-label="Close"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Pin Preview Summary Card -->
+    <div class="mb-4 flex items-center gap-3 p-3 rounded-xl border border-border bg-muted/20 text-xs">
+      <img
+        id="assign-pin-preview-img"
+        src=""
+        alt="Pin Preview"
+        class="h-14 w-11 rounded-lg object-cover border border-border bg-muted shrink-0"
+      />
+      <div class="min-w-0 flex-1 space-y-1">
+        <div id="assign-pin-preview-title" class="font-bold text-foreground truncate text-xs">Loading pin...</div>
+        <div class="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <span>Board: <span id="assign-pin-preview-board" class="font-medium text-foreground">—</span></span>
+          <span>•</span>
+          <span class="truncate max-w-xs">Base Link: <span id="assign-pin-preview-link" class="font-mono text-primary truncate">—</span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Target Accounts List -->
+    <div class="mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <h4 class="text-xs font-bold text-foreground">Target Accounts & Destination Links *</h4>
+        <span id="assign-selected-accounts-count" class="text-[11px] text-muted-foreground">0 accounts selected</span>
+      </div>
+
+      <div id="assign-targets-list" class="space-y-3 max-h-64 overflow-y-auto pr-1">
+        <div class="p-6 text-center text-xs text-muted-foreground">Loading connected accounts...</div>
+      </div>
+    </div>
+
+    <!-- Allow Duplicates Checkbox -->
+    <div class="mb-4 p-3 rounded-xl border border-border bg-muted/20 text-xs">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          id="assign-allow-duplicates-toggle"
+          checked
+          class="rounded border-border text-primary h-4 w-4 cursor-pointer"
+        />
+        <span class="font-medium text-foreground">Allow duplicate dispatch if previously sent to selected accounts</span>
+      </label>
+    </div>
+
+    <!-- Status Banner -->
+    <div id="assign-status-banner" class="hidden mb-4 p-3 rounded-xl text-xs font-medium"></div>
+
+    <!-- Footer Controls -->
+    <div class="flex items-center justify-end gap-2 border-t border-border pt-4">
+      <button
+        type="button"
+        id="cancel-assign-modal-btn"
+        class="rounded-xl border border-border bg-background px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        id="confirm-assign-dispatch-btn"
+        class="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+      >
+        <span id="assign-dispatch-submit-text">🚀 Dispatch Pin</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let activeStagedPin: any = null;
+  let targetAccounts: any[] = [];
+  let notebookLinks: any[] = [];
+
+  const modal = document.getElementById('assign-accounts-modal');
+  const closeBtn = document.getElementById('close-assign-modal-btn');
+  const cancelBtn = document.getElementById('cancel-assign-modal-btn');
+  const confirmBtn = document.getElementById('confirm-assign-dispatch-btn') as HTMLButtonElement | null;
+  const submitText = document.getElementById('assign-dispatch-submit-text');
+  const targetsList = document.getElementById('assign-targets-list');
+  const countSpan = document.getElementById('assign-selected-accounts-count');
+  const allowDupToggle = document.getElementById('assign-allow-duplicates-toggle') as HTMLInputElement | null;
+  const statusBanner = document.getElementById('assign-status-banner');
+
+  const previewImg = document.getElementById('assign-pin-preview-img') as HTMLImageElement | null;
+  const previewTitle = document.getElementById('assign-pin-preview-title');
+  const previewBoard = document.getElementById('assign-pin-preview-board');
+  const previewLink = document.getElementById('assign-pin-preview-link');
+
+  function escapeHtml(str: string): string {
+    return (str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function showStatus(htmlContent: string, type: 'error' | 'warning' | 'success') {
+    if (!statusBanner) return;
+    statusBanner.innerHTML = htmlContent;
+    const styles = {
+      error: 'mb-4 p-3 rounded-xl text-xs font-medium bg-rose-500/10 text-rose-600 border border-rose-500/20',
+      warning: 'mb-4 p-3 rounded-xl text-xs font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20',
+      success: 'mb-4 p-3 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',
+    };
+    statusBanner.className = styles[type];
+    statusBanner.classList.remove('hidden');
+  }
+
+  async function loadData() {
+    if (!targetsList) return;
+    targetsList.innerHTML = '<div class="p-6 text-center text-xs text-muted-foreground">Loading connected accounts...</div>';
+
+    try {
+      const [targetsRes, linksRes] = await Promise.all([
+        fetch('/api/pinarchive/repurpose/targets'),
+        fetch('/api/links'),
+      ]);
+
+      const tData = await targetsRes.json();
+      const lData = await linksRes.json();
+
+      if (tData.success) {
+        targetAccounts = tData.targets || [];
+      } else {
+        targetsList.innerHTML = `<div class="p-4 text-center text-xs text-rose-500">${tData.error || 'Failed to load accounts'}</div>`;
+        return;
+      }
+
+      if (lData.success) {
+        const u = (lData.user_links || []).map((x: any) => ({ ...x, scope: 'user' }));
+        const w = (lData.workspace_links || []).map((x: any) => ({ ...x, scope: 'workspace' }));
+        notebookLinks = [...u, ...w];
+      }
+
+      renderTargetAccounts();
+    } catch (e: any) {
+      targetsList.innerHTML = `<div class="p-4 text-center text-xs text-rose-500">${e.message || 'Error'}</div>`;
+    }
+  }
+
+  function renderTargetAccounts() {
+    if (!targetsList) return;
+    if (targetAccounts.length === 0) {
+      targetsList.innerHTML = '<div class="p-6 text-center text-xs text-muted-foreground">No accounts with publishable boards found.</div>';
+      return;
+    }
+
+    const baseLink = activeStagedPin?.override_link || activeStagedPin?.original_link || '';
+
+    targetsList.innerHTML = targetAccounts.map((acc) => {
+      const boards = acc.boards || [];
+      const hasBoards = boards.length > 0;
+
+      // Check if staged pin board matches any board
+      const matchingBoard = boards.find((b: any) => b.board_name === activeStagedPin?.board_name);
+      const defaultBoard = matchingBoard ? matchingBoard.board_name : (boards[0]?.board_name || '');
+
+      return `
+        <div class="p-3.5 rounded-xl border border-border bg-card/70 space-y-2.5 transition-colors" data-account-card="${acc.id}">
+          <div class="flex items-center justify-between gap-2">
+            <label class="flex items-center gap-2 text-xs font-bold text-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                class="account-assign-cb rounded border-border text-primary h-4 w-4 cursor-pointer"
+                data-account-id="${acc.id}"
+                data-account-label="${escapeHtml(acc.name)}"
+                ${hasBoards ? '' : 'disabled'}
+              />
+              <span>${escapeHtml(acc.name)} <span class="text-[11px] font-normal text-muted-foreground">(@${escapeHtml(acc.username)})</span></span>
+            </label>
+
+            ${hasBoards ? `
+              <div class="flex items-center gap-1.5 text-xs">
+                <span class="text-muted-foreground text-[11px]">Board:</span>
+                <select class="account-board-select rounded-lg border border-border bg-background px-2 py-1 text-xs text-foreground focus:ring-1 focus:ring-primary" data-account-id="${acc.id}">
+                  ${boards.map((b: any) => `
+                    <option value="${escapeHtml(b.board_name)}" ${b.board_name === defaultBoard ? 'selected' : ''}>
+                      ${escapeHtml(b.board_name)}
+                    </option>
+                  `).join('')}
+                </select>
+              </div>
+            ` : `
+              <span class="text-[11px] text-rose-500 font-medium">No boards</span>
+            `}
+          </div>
+
+          <!-- Per-Account Destination Link Section -->
+          <div class="account-link-config hidden pl-6 space-y-2 border-t border-border/40 pt-2 text-xs" data-account-link-section="${acc.id}">
+            <div class="flex items-center gap-3">
+              <span class="text-[11px] font-semibold text-muted-foreground">Destination Link:</span>
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="link-source-${acc.id}" value="staged" checked class="link-source-radio text-primary" data-account-id="${acc.id}" />
+                <span class="text-[11px]">Use Staged Link</span>
+              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="link-source-${acc.id}" value="notebook" class="link-source-radio text-primary" data-account-id="${acc.id}" />
+                <span class="text-[11px]">Link Notebook</span>
+              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="link-source-${acc.id}" value="custom" class="link-source-radio text-primary" data-account-id="${acc.id}" />
+                <span class="text-[11px]">Custom URL</span>
+              </label>
+            </div>
+
+            <!-- Staged link display -->
+            <div class="staged-link-display text-[11px] font-mono text-muted-foreground truncate" data-display="${acc.id}">
+              ${baseLink ? escapeHtml(baseLink) : '<span class="italic text-muted-foreground/60">None (will use original)</span>'}
+            </div>
+
+            <!-- Notebook select -->
+            <div class="notebook-link-select-container hidden" data-notebook-container="${acc.id}">
+              <select class="account-notebook-select w-full rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:ring-1 focus:ring-primary" data-account-id="${acc.id}">
+                <option value="">-- Choose from Link Notebook --</option>
+                ${notebookLinks.map((l: any) => `
+                  <option value="${escapeHtml(l.url)}" ${l.is_default ? 'selected' : ''}>
+                    ${l.is_default ? '⭐ ' : ''}${escapeHtml(l.label)} (${escapeHtml(l.domain || 'web')}) — ${escapeHtml(l.url)}
+                  </option>
+                `).join('')}
+              </select>
+            </div>
+
+            <!-- Custom URL input -->
+            <div class="custom-link-container hidden" data-custom-container="${acc.id}">
+              <input
+                type="url"
+                placeholder="https://mysite.com/specific-page"
+                class="account-custom-link-input w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:ring-1 focus:ring-primary"
+                data-account-id="${acc.id}"
+              />
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Attach listeners
+    targetsList.querySelectorAll('.account-assign-cb').forEach((cb) => {
+      cb.addEventListener('change', (e) => {
+        const input = e.target as HTMLInputElement;
+        const accId = input.getAttribute('data-account-id');
+        const linkSec = targetsList?.querySelector(`[data-account-link-section="${accId}"]`);
+        if (input.checked) {
+          linkSec?.classList.remove('hidden');
+        } else {
+          linkSec?.classList.add('hidden');
+        }
+        updateSelectedCount();
+      });
+    });
+
+    targetsList.querySelectorAll('.link-source-radio').forEach((radio) => {
+      radio.addEventListener('change', (e) => {
+        const r = e.target as HTMLInputElement;
+        const accId = r.getAttribute('data-account-id');
+        const stagedDisp = targetsList?.querySelector(`[data-display="${accId}"]`);
+        const nbCont = targetsList?.querySelector(`[data-notebook-container="${accId}"]`);
+        const customCont = targetsList?.querySelector(`[data-custom-container="${accId}"]`);
+
+        stagedDisp?.classList.add('hidden');
+        nbCont?.classList.add('hidden');
+        customCont?.classList.add('hidden');
+
+        if (r.value === 'staged') stagedDisp?.classList.remove('hidden');
+        else if (r.value === 'notebook') nbCont?.classList.remove('hidden');
+        else if (r.value === 'custom') customCont?.classList.remove('hidden');
+      });
+    });
+
+    updateSelectedCount();
+  }
+
+  function updateSelectedCount() {
+    const checked = targetsList?.querySelectorAll('.account-assign-cb:checked') || [];
+    if (countSpan) {
+      countSpan.textContent = `${checked.length} account${checked.length === 1 ? '' : 's'} selected`;
+    }
+    if (confirmBtn) {
+      confirmBtn.disabled = checked.length === 0;
+    }
+    if (submitText) {
+      submitText.textContent = `🚀 Dispatch Pin to ${checked.length} Account${checked.length === 1 ? '' : 's'}`;
+    }
+  }
+
+  // Submit dispatch
+  confirmBtn?.addEventListener('click', async () => {
+    if (!activeStagedPin) return;
+
+    const assignments: any[] = [];
+    targetsList?.querySelectorAll('.account-assign-cb:checked').forEach((cb) => {
+      const accId = cb.getAttribute('data-account-id');
+      const accLabel = cb.getAttribute('data-account-label') || '';
+      const boardSelect = targetsList?.querySelector(`.account-board-select[data-account-id="${accId}"]`) as HTMLSelectElement | null;
+      const boardName = boardSelect?.value || activeStagedPin.board_name || '';
+
+      const radioVal = (targetsList?.querySelector(`input[name="link-source-${accId}"]:checked`) as HTMLInputElement)?.value;
+      let finalLink = '';
+
+      if (radioVal === 'staged') {
+        finalLink = activeStagedPin.override_link || activeStagedPin.original_link || '';
+      } else if (radioVal === 'notebook') {
+        const nbSelect = targetsList?.querySelector(`.account-notebook-select[data-account-id="${accId}"]`) as HTMLSelectElement | null;
+        finalLink = nbSelect?.value || '';
+      } else if (radioVal === 'custom') {
+        const customInput = targetsList?.querySelector(`.account-custom-link-input[data-account-id="${accId}"]`) as HTMLInputElement | null;
+        finalLink = customInput?.value?.trim() || '';
+      }
+
+      assignments.push({
+        accountId: accId,
+        accountLabel: accLabel,
+        boardName,
+        linkUrl: finalLink || undefined,
+      });
+    });
+
+    if (assignments.length === 0) {
+      showStatus('Please select at least one account.', 'warning');
+      return;
+    }
+
+    if (confirmBtn) confirmBtn.disabled = true;
+    if (submitText) submitText.textContent = 'Dispatching pin...';
+    statusBanner?.classList.add('hidden');
+
+    try {
+      const res = await fetch('/api/pinarchive/staged/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stagedPinId: activeStagedPin.id,
+          assignments,
+          allowDuplicates: allowDupToggle?.checked ?? true,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        showStatus(
+          `✅ Dispatched pin successfully! Total stamps created: ${data.summary.total_stamps}.`,
+          'success'
+        );
+
+        window.dispatchEvent(new CustomEvent('staged-pin-dispatched', { detail: { ...data, stagedPinId: activeStagedPin.id } }));
+
+        setTimeout(() => {
+          modal?.classList.add('hidden');
+          modal?.classList.remove('flex');
+        }, 1800);
+      } else {
+        showStatus(data.error || 'Failed to dispatch staged pin.', 'error');
+        if (confirmBtn) confirmBtn.disabled = false;
+        if (submitText) submitText.textContent = '🚀 Dispatch Pin';
+      }
+    } catch (e: any) {
+      showStatus(e.message || 'Network error.', 'error');
+      if (confirmBtn) confirmBtn.disabled = false;
+      if (submitText) submitText.textContent = '🚀 Dispatch Pin';
+    }
+  });
+
+  const closeModal = () => {
+    modal?.classList.add('hidden');
+    modal?.classList.remove('flex');
+    statusBanner?.classList.add('hidden');
+  };
+  closeBtn?.addEventListener('click', closeModal);
+  cancelBtn?.addEventListener('click', closeModal);
+
+  // Custom Event to open modal
+  window.addEventListener('open-assign-modal', ((e: CustomEvent) => {
+    activeStagedPin = e.detail?.stagedPin || null;
+    if (!activeStagedPin) return;
+
+    if (previewImg) previewImg.src = activeStagedPin.image_url || '';
+    if (previewTitle) previewTitle.textContent = activeStagedPin.title || 'Untitled Pin';
+    if (previewBoard) previewBoard.textContent = activeStagedPin.board_name || 'None';
+    if (previewLink) previewLink.textContent = activeStagedPin.override_link || activeStagedPin.original_link || 'None';
+
+    modal?.classList.remove('hidden');
+    modal?.classList.add('flex');
+    statusBanner?.classList.add('hidden');
+
+    loadData();
+  }) as EventListener);
+</script>
