@@ -43,14 +43,21 @@ describe('Repurpose Bidirectional Compensation Suite', () => {
     const p1PinsDeleted: string[][] = [];
     const paBatchesDeleted: string[] = [];
 
+    let batchInserted = false;
     const mockPaAdmin: any = {
       from: vi.fn((table: string) => {
         if (table === 'pa_repurpose_batches') {
           return {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
-            maybeSingle: vi.fn().mockResolvedValue({ data: null }),
-            insert: vi.fn().mockResolvedValue({ error: null }),
+            maybeSingle: vi.fn().mockImplementation(() => {
+              if (!batchInserted) return Promise.resolve({ data: null });
+              return Promise.resolve({ data: { status: 'in_progress' } });
+            }),
+            insert: vi.fn().mockImplementation(() => {
+              batchInserted = true;
+              return Promise.resolve({ error: null });
+            }),
             update: vi.fn().mockReturnThis(),
             delete: vi.fn().mockReturnValue({
               eq: vi.fn((col: string, val: string) => {

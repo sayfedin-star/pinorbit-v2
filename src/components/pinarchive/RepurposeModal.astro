@@ -71,10 +71,67 @@ const { id = 'repurpose-modal' } = Astro.props;
           <span class="font-medium text-foreground">Choose from Link Notebook (★ default preselected if set)</span>
         </label>
 
-        <div id="notebook-link-selector-container" class="hidden pl-6">
-          <select id="notebook-link-select" class="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
-            <option value="">Select a link...</option>
-          </select>
+        <div id="notebook-link-selector-container" class="hidden pl-6 space-y-2.5">
+          <!-- Selected Link Chip (compact summary) -->
+          <div id="notebook-selected-chip" class="hidden items-center justify-between gap-2 p-2.5 rounded-xl border border-primary/30 bg-primary/5 text-xs">
+            <div class="flex items-center gap-2 min-w-0">
+              <span id="chip-star" class="text-amber-500 font-bold text-sm shrink-0">⭐</span>
+              <div class="min-w-0">
+                <div id="chip-label" class="font-semibold text-foreground truncate">Selected Title</div>
+                <div id="chip-url" class="font-mono text-[10px] text-muted-foreground truncate">https://...</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button type="button" id="chip-change-btn" class="text-[11px] text-primary hover:underline font-semibold cursor-pointer">Change</button>
+              <button type="button" id="chip-clear-btn" class="text-muted-foreground hover:text-rose-500 p-1 cursor-pointer" title="Clear selection">✕</button>
+            </div>
+          </div>
+
+          <!-- Combobox Picker Card -->
+          <div id="notebook-combobox-picker" class="space-y-2 rounded-xl border border-border bg-card p-3 shadow-xs">
+            <!-- Filter inputs bar -->
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="relative flex-1 min-w-[130px]">
+                <input
+                  type="text"
+                  id="notebook-search-input"
+                  placeholder="Search label, url, or slug…"
+                  class="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary pl-7"
+                />
+                <svg xmlns="http://www.w3.org/2000/svg" class="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </div>
+
+              <select
+                id="notebook-domain-filter"
+                class="rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer max-w-[130px]"
+              >
+                <option value="">All Domains</option>
+              </select>
+
+              <select
+                id="notebook-shelf-filter"
+                class="rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+              >
+                <option value="all">All Shelves</option>
+                <option value="user">🌐 Global</option>
+                <option value="workspace">🏢 Workspace</option>
+              </select>
+            </div>
+
+            <!-- Results info -->
+            <div class="flex items-center justify-between text-[11px] text-muted-foreground px-1">
+              <span id="combobox-results-count">0 links available</span>
+              <span id="combobox-cap-notice" class="hidden text-amber-500 font-medium text-[10px]">Showing first 50 — narrow search</span>
+            </div>
+
+            <!-- Results scrollable list -->
+            <div id="notebook-combobox-results" class="max-h-48 overflow-y-auto space-y-1 divide-y divide-border/40 pr-1">
+              <!-- Rendered items (max 50) -->
+            </div>
+          </div>
+
+          <!-- Hidden input for selected link URL -->
+          <input type="hidden" id="chosen-notebook-url" value="" />
         </div>
 
         <label class="flex items-center gap-2 cursor-pointer">
@@ -146,7 +203,142 @@ const { id = 'repurpose-modal' } = Astro.props;
   const pinCountBadge = document.getElementById('repurpose-pin-count-badge');
   const accountsListContainer = document.getElementById('target-accounts-list');
   const notebookSelectContainer = document.getElementById('notebook-link-selector-container');
-  const notebookSelect = document.getElementById('notebook-link-select') as HTMLSelectElement;
+  const selectedChip = document.getElementById('notebook-selected-chip');
+  const chipStar = document.getElementById('chip-star');
+  const chipLabel = document.getElementById('chip-label');
+  const chipUrl = document.getElementById('chip-url');
+  const chipChangeBtn = document.getElementById('chip-change-btn');
+  const chipClearBtn = document.getElementById('chip-clear-btn');
+
+  const comboboxPicker = document.getElementById('notebook-combobox-picker');
+  const searchInput = document.getElementById('notebook-search-input') as HTMLInputElement | null;
+  const domainFilter = document.getElementById('notebook-domain-filter') as HTMLSelectElement | null;
+  const shelfFilter = document.getElementById('notebook-shelf-filter') as HTMLSelectElement | null;
+  const resultsCountEl = document.getElementById('combobox-results-count');
+  const capNoticeEl = document.getElementById('combobox-cap-notice');
+  const resultsListEl = document.getElementById('notebook-combobox-results');
+  const chosenUrlInput = document.getElementById('chosen-notebook-url') as HTMLInputElement | null;
+
+  let selectedLinkObj: any = null;
+
+  function escapeHtml(str: string): string {
+    return (str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function selectLink(link: any) {
+    selectedLinkObj = link;
+    if (chosenUrlInput) chosenUrlInput.value = link ? link.url : '';
+
+    if (link) {
+      if (chipStar) chipStar.textContent = link.is_default ? '⭐' : '🔗';
+      if (chipLabel) chipLabel.textContent = link.label || 'Link';
+      if (chipUrl) chipUrl.textContent = `${link.url} (${link.domain || 'web'})`;
+
+      if (selectedChip) {
+        selectedChip.classList.remove('hidden');
+        selectedChip.classList.add('flex');
+      }
+      if (comboboxPicker) comboboxPicker.classList.add('hidden');
+    } else {
+      if (selectedChip) {
+        selectedChip.classList.add('hidden');
+        selectedChip.classList.remove('flex');
+      }
+      if (comboboxPicker) comboboxPicker.classList.remove('hidden');
+    }
+  }
+
+  chipChangeBtn?.addEventListener('click', () => {
+    if (comboboxPicker) comboboxPicker.classList.remove('hidden');
+    searchInput?.focus();
+  });
+
+  chipClearBtn?.addEventListener('click', () => {
+    selectLink(null);
+    renderComboboxResults();
+  });
+
+  function renderComboboxResults() {
+    if (!resultsListEl) return;
+
+    const q = (searchInput?.value || '').trim().toLowerCase().replace(/\.html$/i, '');
+    const dom = (domainFilter?.value || '').trim().toLowerCase();
+    const shelf = (shelfFilter?.value || 'all').toLowerCase();
+
+    let filtered = notebookLinks.filter((item) => {
+      if (shelf !== 'all' && item.scope !== shelf) return false;
+      if (dom && (item.domain || '').toLowerCase() !== dom) return false;
+
+      if (q) {
+        const normLabel = (item.label || '').toLowerCase().replace(/\.html$/i, '');
+        const normUrl = (item.url || '').toLowerCase().replace(/\.html$/i, '');
+        const normSlug = (item.slug || '').toLowerCase().replace(/\.html$/i, '');
+        if (!normLabel.includes(q) && !normUrl.includes(q) && !normSlug.includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    filtered.sort((a, b) => {
+      if (a.is_default && !b.is_default) return -1;
+      if (!a.is_default && b.is_default) return 1;
+      return (a.label || '').localeCompare(b.label || '');
+    });
+
+    const totalMatches = filtered.length;
+    const capped = filtered.slice(0, 50);
+
+    if (resultsCountEl) {
+      resultsCountEl.textContent = `${capped.length} of ${totalMatches} links`;
+    }
+    if (capNoticeEl) {
+      if (totalMatches > 50) capNoticeEl.classList.remove('hidden');
+      else capNoticeEl.classList.add('hidden');
+    }
+
+    if (capped.length === 0) {
+      resultsListEl.innerHTML = '<div class="p-3 text-center text-xs text-muted-foreground">No matching links found.</div>';
+      return;
+    }
+
+    resultsListEl.innerHTML = capped.map((item) => {
+      const isSelected = selectedLinkObj && selectedLinkObj.url === item.url;
+      return `
+        <div
+          class="p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer flex items-center justify-between gap-2 ${isSelected ? 'bg-primary/10' : ''}"
+          data-url="${escapeHtml(item.url)}"
+        >
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+              ${item.is_default ? '<span class="text-amber-500 font-bold text-xs shrink-0">⭐</span>' : ''}
+              <span class="font-semibold text-foreground truncate text-xs">${escapeHtml(item.label)}</span>
+              <span class="text-[10px] px-1.5 py-0.2 rounded font-mono bg-muted text-muted-foreground shrink-0">${escapeHtml(item.domain || 'web')}</span>
+            </div>
+            <div class="font-mono text-[10px] text-muted-foreground truncate">${escapeHtml(item.url)}</div>
+          </div>
+          <button type="button" class="text-[11px] font-semibold text-primary shrink-0 hover:underline">Select</button>
+        </div>
+      `;
+    }).join('');
+
+    resultsListEl.querySelectorAll('[data-url]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const u = el.getAttribute('data-url');
+        const match = notebookLinks.find((l) => l.url === u);
+        if (match) selectLink(match);
+      });
+    });
+  }
+
+  searchInput?.addEventListener('input', renderComboboxResults);
+  domainFilter?.addEventListener('change', renderComboboxResults);
+  shelfFilter?.addEventListener('change', renderComboboxResults);
   const customLinkContainer = document.getElementById('custom-link-container');
   const customLinkInput = document.getElementById('custom-link-input') as HTMLInputElement;
   const duplicateBanner = document.getElementById('duplicate-warning-banner');
@@ -188,8 +380,8 @@ const { id = 'repurpose-modal' } = Astro.props;
       }
 
       if (linksData.success) {
-        const uLinks = linksData.user_links || [];
-        const wLinks = linksData.workspace_links || [];
+        const uLinks = (linksData.user_links || []).map((l: any) => ({ ...l, scope: 'user' }));
+        const wLinks = (linksData.workspace_links || []).map((l: any) => ({ ...l, scope: 'workspace' }));
         notebookLinks = [...uLinks, ...wLinks];
         populateNotebookSelect();
       }
@@ -243,20 +435,30 @@ const { id = 'repurpose-modal' } = Astro.props;
   }
 
   function populateNotebookSelect() {
-    if (!notebookSelect) return;
-    notebookSelect.innerHTML = '<option value="">-- Select a link from notebook --</option>';
-    let defaultVal = '';
-
-    for (const l of notebookLinks) {
-      const opt = document.createElement('option');
-      opt.value = l.url;
-      opt.textContent = `${l.is_default ? '⭐ ' : ''}${l.label} (${l.domain})`;
-      if (l.is_default && !defaultVal) {
-        defaultVal = l.url;
-        opt.selected = true;
+    // Populate domain filter options
+    if (domainFilter) {
+      domainFilter.innerHTML = '<option value="">All Domains</option>';
+      const domSet = new Set<string>();
+      for (const l of notebookLinks) {
+        if (l.domain) domSet.add(l.domain);
       }
-      notebookSelect.appendChild(opt);
+      Array.from(domSet).sort().forEach((d) => {
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = d;
+        domainFilter.appendChild(opt);
+      });
     }
+
+    // Auto-select default star link if exists, otherwise reset
+    const defaultLink = notebookLinks.find((l) => l.is_default);
+    if (defaultLink) {
+      selectLink(defaultLink);
+    } else {
+      selectLink(null);
+    }
+
+    renderComboboxResults();
   }
 
   async function triggerDuplicateCheck() {
@@ -330,7 +532,7 @@ const { id = 'repurpose-modal' } = Astro.props;
     let finalLinkOverride: string | undefined = undefined;
 
     if (linkChoice === 'notebook') {
-      finalLinkOverride = notebookSelect?.value;
+      finalLinkOverride = chosenUrlInput?.value || selectedLinkObj?.url;
       if (!finalLinkOverride) {
         showStatus('Please select a destination link from the notebook.', 'warning');
         return;

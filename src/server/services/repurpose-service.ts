@@ -180,14 +180,15 @@ export async function executeRepurposeDispatch(
         .eq('workspace_id', workspaceId)
         .eq('source_ref', batchUuid);
 
-      if (p1Pins && p1Pins.length >= existingBatch.pins_count * existingBatch.targets_count) {
+      if (p1Pins && p1Pins.length > 0) {
         // Pins exist in P1! Finalize as completed
+        const totalExpected = (existingBatch.targets_count || 0) * (existingBatch.pins_count || 0);
         const recoveredSummary: RepurposeSummary = existingBatch.result_summary || {
           batch_uuid: batchUuid,
           total_stamps: p1Pins.length,
           accounts_count: existingBatch.targets_count,
           pins_count: existingBatch.pins_count,
-          skipped_duplicates: 0,
+          skipped_duplicates: Math.max(0, totalExpected - p1Pins.length),
           excluded_no_image: 0,
           link_used: linkOverride || '',
           completed_at: new Date().toISOString(),
@@ -359,6 +360,28 @@ export async function executeRepurposeDispatch(
       const p1Chunk = pinPayloads.slice(i, i + CHUNK_SIZE);
       const stampChunk = dispatchStamps.slice(i, i + CHUNK_SIZE);
 
+      // F2: Re-check batch status before every chunk: abort + self-compensate if status != 'in_progress'
+      const { data: currentBatchState } = await paAdmin
+        .from('pa_repurpose_batches')
+        .select('status')
+        .eq('id', batchUuid)
+        .maybeSingle();
+
+      if (!currentBatchState || currentBatchState.status !== 'in_progress') {
+        console.warn(`[Repurpose] Batch ${batchUuid} lost ownership (status: ${currentBatchState?.status}). Aborting dispatch.`);
+        if (insertedP1PinIds.length > 0) {
+          try {
+            await p1Admin.from('pins').delete().in('id', insertedP1PinIds).eq('workspace_id', workspaceId);
+            await paAdmin.from('pa_pin_dispatches').delete().in('p1_pin_id', insertedP1PinIds).eq('workspace_id', workspaceId);
+          } catch (compErr) {
+            console.error(`[Repurpose] Compensation error for batch ${batchUuid}:`, compErr);
+          }
+        }
+        throw new HttpError(409, `Batch status changed to ${currentBatchState?.status || 'unknown'}. Dispatch aborted.`, {
+          code: 'batch_ownership_lost',
+        });
+      }
+
       // Heartbeat pulse before inserting chunk
       await paAdmin
         .from('pa_repurpose_batches')
@@ -403,6 +426,9 @@ export async function executeRepurposeDispatch(
 
     return { success: true, summary };
   } catch (err: any) {
+    if (err instanceof HttpError) {
+      throw err;
+    }
     // Condition (6): Bidirectional compensation upon failure
     console.error(`[Repurpose] Failure during dispatch. Triggering bidirectional compensation for ${batchUuid}: ${err.message}`);
     await executeBidirectionalCompensation(p1Admin, paAdmin, workspaceId, batchUuid, insertedP1PinIds);

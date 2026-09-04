@@ -138,3 +138,10 @@ All migrations must be applied sequentially in chronological order matching the 
 4. **External Network Timeouts:**
    - *Risk:* Downstream Make.com or Pinterest latency could block worker threads.
    - *Mitigation:* All outgoing HTTP requests employ strict `AbortSignal.timeout(8000)` timeouts wrapped in `try/catch` fallbacks to ensure fail-safe operation.
+5. **Multi-Tier SSRF Defense for Sitemap & Link Notebook Inspection:**
+   - *Risk:* User-supplied URLs for sitemap import could target cloud internal metadata services (e.g., `169.254.169.254`) or loopback interfaces (`127.0.0.1`, `::1`).
+   - *Mitigation:* PinOrbit runs on Cloudflare Pages / Workers edge infrastructure. Outbound `fetch()` requests are filtered by Cloudflare's platform networking layer, which strictly blocks resolution to private RFC 1918, RFC 3927 (link-local), and loopback IP spaces by default. Additionally, application-level URL validation ensures strictly `http:` / `https:` schemes and valid hostnames, preventing SSRF attacks against internal network endpoints.
+6. **Concurrent Cross-Batch Duplicate Dispatch Race (Accepted-by-Design):**
+   - *Risk:* Two independent batches initiated simultaneously with different `batchUuid`s targeting the exact same pin and account could both pass the initial `checkPriorDispatches` read check and insert duplicate draft pins into P1 before either batch finishes recording stamps to P4 (`pa_pin_dispatches`).
+   - *Decision:* Cross-batch distributed locking between P1 and P4 for arbitrary concurrent dispatches is deliberately omitted to prevent distributed lock contention, network partitioning deadlocks, and latency spikes across database boundaries. Pin dispatches are user-initiated with frontend idempotency guards (disabling submit buttons and displaying active state). In the rare event of a concurrent race, P1 pins are created in `draft` status, allowing harmless manual cleanup by the user. Once stamps are committed in P4, all subsequent batches and zombie recovery CAS passes deterministically detect and deduplicate against existing stamps.
+
