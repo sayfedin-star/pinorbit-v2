@@ -102,8 +102,9 @@ export async function fetchAndInspectSitemap(url: string): Promise<ParsedSitemap
 }
 
 export async function fetchMultipleSubSitemaps(subUrls: string[]): Promise<ExtractedLink[]> {
+  const safeUrls = (subUrls || []).slice(0, 50);
   const linksMap = new Map<string, ExtractedLink>();
-  for (const subUrl of subUrls) {
+  for (const subUrl of safeUrls) {
     try {
       const inspected = await fetchAndInspectSitemap(subUrl);
       for (const link of inspected.links) {
@@ -116,7 +117,8 @@ export async function fetchMultipleSubSitemaps(subUrls: string[]): Promise<Extra
   return Array.from(linksMap.values());
 }
 
-export async function fetchAndParseSitemap(sitemapUrl: string, maxLinks: number = 500): Promise<ExtractedLink[]> {
+export async function fetchAndParseSitemap(sitemapUrl: string, maxLinks: number = 500, depth: number = 0): Promise<ExtractedLink[]> {
+  if (depth > 3) return []; // Prevent infinite recursion / stack overflow
   const inspected = await fetchAndInspectSitemap(sitemapUrl);
   if (!inspected.isIndex) {
     return inspected.links.slice(0, maxLinks);
@@ -126,7 +128,7 @@ export async function fetchAndParseSitemap(sitemapUrl: string, maxLinks: number 
   for (const childLoc of inspected.subSitemaps) {
     if (linksMap.size >= maxLinks) break;
     try {
-      const childLinks = await fetchAndParseSitemap(childLoc, maxLinks - linksMap.size);
+      const childLinks = await fetchAndParseSitemap(childLoc, maxLinks - linksMap.size, depth + 1);
       for (const l of childLinks) {
         linksMap.set(l.url, l);
         if (linksMap.size >= maxLinks) break;

@@ -48,11 +48,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Mode A: User selected specific sub-sitemaps from an index
     if (Array.isArray(subSitemaps) && subSitemaps.length > 0) {
-      for (const subUrl of subSitemaps) {
+      const safeSubs = subSitemaps.slice(0, 50); // Cap at 50 to prevent DoS
+      for (const subUrl of safeSubs) {
         validateSafeUrl(subUrl);
       }
 
-      const extractedLinks = await fetchMultipleSubSitemaps(subSitemaps);
+      const extractedLinks = await fetchMultipleSubSitemaps(safeSubs);
       const duplicateInfo = await checkDuplicates(paAdmin, targetTable, filterCol, filterVal, extractedLinks);
 
       return json({

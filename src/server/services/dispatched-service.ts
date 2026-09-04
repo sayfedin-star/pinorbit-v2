@@ -62,7 +62,7 @@ export async function fetchDispatchesLedger(
 
   if (cursor && cursor.sent_at && cursor.id) {
     // Keyset condition: sent_at < cursorSentAt OR (sent_at = cursorSentAt AND id < cursorId)
-    query = query.or(`sent_at.lt.${cursor.sent_at},and(sent_at.eq.${cursor.sent_at},id.lt.${cursor.id})`);
+    query = query.or(`sent_at.lt."${cursor.sent_at}",and(sent_at.eq."${cursor.sent_at}",id.lt."${cursor.id}")`);
   }
 
   query = query

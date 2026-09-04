@@ -352,7 +352,7 @@ describe('Dispatched Ledger Service Suite', () => {
       limit: 5,
     });
 
-    expect(orClauseCalled).toContain(`sent_at.lt.${page1.next_cursor!.sent_at}`);
-    expect(orClauseCalled).toContain(`id.lt.${page1.next_cursor!.id}`);
+    expect(orClauseCalled).toContain(`sent_at.lt."${page1.next_cursor!.sent_at}"`);
+    expect(orClauseCalled).toContain(`id.lt."${page1.next_cursor!.id}"`);
   });
 });

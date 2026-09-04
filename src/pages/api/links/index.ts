@@ -58,12 +58,16 @@ export const GET: APIRoute = async ({ locals, url }) => {
         .select('*', { count: 'exact' })
         .eq(filterCol, filterVal);
 
+      const escapeLike = (s: string) => s.replace(/[%_\\]/g, '\\$&').replace(/"/g, '""');
+
       if (q) {
-        query = query.or(`label.ilike.%${q}%,url.ilike.%${q}%`);
+        const eq = escapeLike(q);
+        query = query.or(`label.ilike."%${eq}%",url.ilike."%${eq}%"`);
       }
 
       if (domain) {
-        query = query.ilike('url', `%${domain}%`);
+        const ed = escapeLike(domain);
+        query = query.ilike('url', `%${ed}%`);
       }
 
       if (defaultOnly) {

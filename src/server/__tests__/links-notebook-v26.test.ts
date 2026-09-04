@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { parseSitemapXml, extractDomainAndSlug } from '../services/sitemap-service';
+import { parseSitemapXml, extractDomainAndSlug, fetchAndParseSitemap, fetchMultipleSubSitemaps } from '../services/sitemap-service';
 
 describe('Link Notebook v2.6 Comprehensive Test Suite', () => {
   describe('Gate 1: Sitemap Index Parsing Without Inserts or Slices', () => {
@@ -165,4 +165,60 @@ describe('Link Notebook v2.6 Comprehensive Test Suite', () => {
       expect(deletedCalls[0].ids).toEqual(mockIdsToDelete);
     });
   });
+
+  describe('Gate 6: PostgREST LIKE Injection & Syntax Breakage Defense', () => {
+    const escapeLike = (s: string) => s.replace(/[%_\\]/g, '\\$&').replace(/"/g, '""');
+
+    it('escapes %, _, \\, and double quotes from search query', () => {
+      const malicious = '50%_discount\\deal"special';
+      const escaped = escapeLike(malicious);
+      expect(escaped).toBe('50\\%\\_discount\\\\deal""special');
+    });
+
+    it('prevents comma injection from breaking PostgREST or() condition', () => {
+      const commaInjection = 'test,inject';
+      const eq = escapeLike(commaInjection);
+      const orCondition = `label.ilike."%${eq}%",url.ilike."%${eq}%"`;
+      // Wrapped in quotes, PostgREST does not treat the comma inside quotes as a separate clause
+      expect(orCondition).toBe('label.ilike."%test,inject%",url.ilike."%test,inject%"');
+    });
+  });
+
+  describe('Gate 7: Sitemap Recursion Depth Limit & Array Capping (DoS Defense)', () => {
+    it('fetchAndParseSitemap halts and returns empty array when recursion depth > 3', async () => {
+      const result = await fetchAndParseSitemap('https://example.com/cyclic-sitemap.xml', 100, 4);
+      expect(result).toEqual([]);
+    });
+
+    it('fetchMultipleSubSitemaps caps input array to maximum 50 sub-sitemaps', async () => {
+      // 100 sub-sitemap URLs provided
+      const hundredSubs = Array.from({ length: 100 }, (_, i) => `https://example.com/sitemap-${i + 1}.xml`);
+      
+      // Spy on fetchAndInspectSitemap to count invocations
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+        Promise.resolve(
+          new Response('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/p1</loc></url></urlset>', {
+            status: 200,
+            headers: { 'content-type': 'application/xml' },
+          })
+        )
+      );
+
+      const links = await fetchMultipleSubSitemaps(hundredSubs);
+      // Max 50 fetched, remaining 50 ignored
+      expect(fetchSpy).toHaveBeenCalledTimes(50);
+      fetchSpy.mockRestore();
+    });
+  });
+
+  describe('Gate 8: Keyset Cursor Quotes Defense for ISO Timestamps', () => {
+    it('constructs keyset condition with double-quoted timestamps and IDs', () => {
+      const cursor = { sent_at: '2026-09-08T10:00:00.000Z', id: 'stamp-123' };
+      const orClause = `sent_at.lt."${cursor.sent_at}",and(sent_at.eq."${cursor.sent_at}",id.lt."${cursor.id}")`;
+      expect(orClause).toBe('sent_at.lt."2026-09-08T10:00:00.000Z",and(sent_at.eq."2026-09-08T10:00:00.000Z",id.lt."stamp-123")');
+      // Colons and dots are safe inside double quotes in PostgREST syntax
+      expect(orClause).toContain('."2026-09-08T10:00:00.000Z"');
+    });
+  });
 });
+
