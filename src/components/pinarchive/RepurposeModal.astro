@@ -1,0 +1,429 @@
+﻿---
+export interface Props {
+  id?: string;
+}
+const { id = 'repurpose-modal' } = Astro.props;
+---
+
+<div
+  id={id}
+  class="fixed inset-0 z-50 hidden items-center justify-center bg-background/80 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto"
+  role="dialog"
+  aria-modal="true"
+>
+  <div class="relative w-full max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-xl transition-all my-8">
+    <!-- Header -->
+    <div class="flex items-center justify-between border-b border-border pb-4 mb-5">
+      <div class="flex items-center gap-3">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <span class="text-xl">📤</span>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-foreground">Repurpose Pins to Scheduling (P1)</h3>
+          <p class="text-xs text-muted-foreground">Send winning archived pins to active Pinterest accounts and publishable boards.</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        id="close-repurpose-btn"
+        class="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        aria-label="Close"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Selected Count Banner -->
+    <div class="mb-5 flex items-center justify-between p-3.5 rounded-xl border border-border bg-muted/30 text-xs">
+      <span class="font-medium text-muted-foreground">Selected Pins to Repurpose:</span>
+      <span id="repurpose-pin-count-badge" class="font-bold text-primary px-2.5 py-0.5 rounded-full bg-primary/10 border border-primary/20">
+        0 pins selected
+      </span>
+    </div>
+
+    <!-- Section 1: Target Accounts & Boards -->
+    <div class="mb-5">
+      <h4 class="text-xs font-bold text-foreground mb-2 flex items-center gap-1.5">
+        <span>1. Select Target Accounts & Publishable Boards *</span>
+      </h4>
+      <div id="target-accounts-list" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+        <div class="p-4 text-center text-xs text-muted-foreground">Loading accounts...</div>
+      </div>
+    </div>
+
+    <!-- Section 2: Destination Link Choice -->
+    <div class="mb-5 border-t border-border pt-4">
+      <h4 class="text-xs font-bold text-foreground mb-2 flex items-center justify-between">
+        <span>2. Destination Link Options</span>
+        <button type="button" id="open-notebook-link-btn" class="text-[11px] text-primary hover:underline font-semibold cursor-pointer">
+          Manage Link Notebook ↗
+        </button>
+      </h4>
+
+      <div class="space-y-2.5 text-xs">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="radio" name="link-choice" value="original" checked class="text-primary focus:ring-primary" />
+          <span class="font-medium text-foreground">Keep original pin link from archive</span>
+        </label>
+
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="radio" name="link-choice" value="notebook" class="text-primary focus:ring-primary" />
+          <span class="font-medium text-foreground">Choose from Link Notebook (★ default preselected if set)</span>
+        </label>
+
+        <div id="notebook-link-selector-container" class="hidden pl-6">
+          <select id="notebook-link-select" class="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
+            <option value="">Select a link...</option>
+          </select>
+        </div>
+
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="radio" name="link-choice" value="custom" class="text-primary focus:ring-primary" />
+          <span class="font-medium text-foreground">Custom destination URL</span>
+        </label>
+
+        <div id="custom-link-container" class="hidden pl-6">
+          <input
+            type="url"
+            id="custom-link-input"
+            placeholder="https://mysite.com/landing-page"
+            class="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- Duplicate Warning Banner (D31 / A2) -->
+    <div id="duplicate-warning-banner" class="hidden mb-5 p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs">
+      <div class="flex items-start gap-2.5">
+        <span class="text-base">⚠️</span>
+        <div class="flex-1">
+          <p id="duplicate-warning-text" class="font-semibold text-amber-700 dark:text-amber-400">
+            Duplicate pins detected.
+          </p>
+          <label class="mt-2 flex items-center gap-2 cursor-pointer font-medium text-foreground">
+            <input type="checkbox" id="override-duplicate-toggle" class="rounded border-border text-primary h-3.5 w-3.5 cursor-pointer" />
+            <span>Allow Duplicate Dispatch (Override previous stamps)</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Banner -->
+    <div id="repurpose-status-banner" class="hidden mb-4 p-3 rounded-xl text-xs font-medium"></div>
+
+    <!-- Footer Controls -->
+    <div class="flex items-center justify-end gap-2 border-t border-border pt-4">
+      <button
+        type="button"
+        id="cancel-repurpose-btn"
+        class="rounded-xl border border-border bg-background px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        id="confirm-repurpose-btn"
+        class="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+      >
+        <span id="repurpose-submit-text">Send to Scheduling (Repurpose)</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let selectedPins: string[] = [];
+  let availableTargets: any[] = [];
+  let notebookLinks: any[] = [];
+  let currentBatchUuid = '';
+
+  const modal = document.getElementById('repurpose-modal');
+  const closeBtn = document.getElementById('close-repurpose-btn');
+  const cancelBtn = document.getElementById('cancel-repurpose-btn');
+  const confirmBtn = document.getElementById('confirm-repurpose-btn') as HTMLButtonElement;
+  const submitText = document.getElementById('repurpose-submit-text');
+  const pinCountBadge = document.getElementById('repurpose-pin-count-badge');
+  const accountsListContainer = document.getElementById('target-accounts-list');
+  const notebookSelectContainer = document.getElementById('notebook-link-selector-container');
+  const notebookSelect = document.getElementById('notebook-link-select') as HTMLSelectElement;
+  const customLinkContainer = document.getElementById('custom-link-container');
+  const customLinkInput = document.getElementById('custom-link-input') as HTMLInputElement;
+  const duplicateBanner = document.getElementById('duplicate-warning-banner');
+  const duplicateText = document.getElementById('duplicate-warning-text');
+  const duplicateToggle = document.getElementById('override-duplicate-toggle') as HTMLInputElement;
+  const statusBanner = document.getElementById('repurpose-status-banner');
+  const openNotebookBtn = document.getElementById('open-notebook-link-btn');
+
+  function showStatus(msg: string, type: 'error' | 'warning' | 'success') {
+    if (!statusBanner) return;
+    statusBanner.textContent = msg;
+    const styles = {
+      error: 'mb-4 p-3 rounded-xl text-xs font-medium bg-rose-500/10 text-rose-600 border border-rose-500/20',
+      warning: 'mb-4 p-3 rounded-xl text-xs font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20',
+      success: 'mb-4 p-3 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',
+    };
+    statusBanner.className = styles[type];
+    statusBanner.classList.remove('hidden');
+  }
+
+  async function loadTargetsAndLinks() {
+    if (!accountsListContainer) return;
+    accountsListContainer.innerHTML = '<div class="p-4 text-center text-xs text-muted-foreground">Loading targets...</div>';
+
+    try {
+      const [targetsRes, linksRes] = await Promise.all([
+        fetch('/api/pinarchive/repurpose/targets'),
+        fetch('/api/links'),
+      ]);
+
+      const targetsData = await targetsRes.json();
+      const linksData = await linksRes.json();
+
+      if (targetsData.success) {
+        availableTargets = targetsData.targets || [];
+        renderTargets();
+      } else {
+        accountsListContainer.innerHTML = `<div class="p-4 text-center text-xs text-rose-500">${targetsData.error || 'Failed to load accounts'}</div>`;
+      }
+
+      if (linksData.success) {
+        const uLinks = linksData.user_links || [];
+        const wLinks = linksData.workspace_links || [];
+        notebookLinks = [...uLinks, ...wLinks];
+        populateNotebookSelect();
+      }
+    } catch (e: any) {
+      accountsListContainer.innerHTML = `<div class="p-4 text-center text-xs text-rose-500">${e.message}</div>`;
+    }
+  }
+
+  function renderTargets() {
+    if (!accountsListContainer) return;
+    if (availableTargets.length === 0) {
+      accountsListContainer.innerHTML = '<div class="p-4 text-center text-xs text-muted-foreground">No accounts with publishable boards found.</div>';
+      return;
+    }
+
+    accountsListContainer.innerHTML = availableTargets.map((acc) => {
+      const boards = acc.boards || [];
+      const hasBoards = boards.length > 0;
+
+      return `
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl border border-border bg-card/60">
+          <label class="flex items-center gap-2 text-xs font-semibold text-foreground cursor-pointer">
+            <input
+              type="checkbox"
+              class="target-account-checkbox rounded border-border text-primary h-4 w-4 cursor-pointer"
+              data-account-id="${acc.id}"
+              data-account-name="${acc.name}"
+              ${hasBoards ? '' : 'disabled'}
+            />
+            <span>${acc.name} <span class="text-[11px] font-normal text-muted-foreground">(@${acc.username})</span></span>
+          </label>
+
+          ${hasBoards ? `
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] text-muted-foreground">Board:</span>
+              <select class="target-board-select rounded-lg border border-border bg-background px-2.5 py-1 text-xs text-foreground focus:ring-1 focus:ring-primary" data-account-id="${acc.id}">
+                ${boards.map((b: any) => `<option value="${b.board_name}">${b.board_name}</option>`).join('')}
+              </select>
+            </div>
+          ` : `
+            <span class="text-[11px] text-rose-500">No publishable boards</span>
+          `}
+        </div>
+      `;
+    }).join('');
+
+    // Attach listener for duplicate pre-check
+    accountsListContainer.querySelectorAll('.target-account-checkbox').forEach((cb) => {
+      cb.addEventListener('change', triggerDuplicateCheck);
+    });
+  }
+
+  function populateNotebookSelect() {
+    if (!notebookSelect) return;
+    notebookSelect.innerHTML = '<option value="">-- Select a link from notebook --</option>';
+    let defaultVal = '';
+
+    for (const l of notebookLinks) {
+      const opt = document.createElement('option');
+      opt.value = l.url;
+      opt.textContent = `${l.is_default ? '⭐ ' : ''}${l.label} (${l.domain})`;
+      if (l.is_default && !defaultVal) {
+        defaultVal = l.url;
+        opt.selected = true;
+      }
+      notebookSelect.appendChild(opt);
+    }
+  }
+
+  async function triggerDuplicateCheck() {
+    const checkedAccounts: string[] = [];
+    document.querySelectorAll<HTMLInputElement>('.target-account-checkbox:checked').forEach((cb) => {
+      const id = cb.getAttribute('data-account-id');
+      if (id) checkedAccounts.push(id);
+    });
+
+    if (checkedAccounts.length === 0 || selectedPins.length === 0) {
+      duplicateBanner?.classList.add('hidden');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/pinarchive/repurpose/check-duplicates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinIds: selectedPins, targetAccountIds: checkedAccounts }),
+      });
+      const data = await res.json();
+      if (data.success && data.totalDuplicates > 0) {
+        if (duplicateText) {
+          duplicateText.textContent = `⚠️ ${data.totalDuplicates} duplicate pairings detected. These pins were previously sent to the chosen accounts.`;
+        }
+        duplicateBanner?.classList.remove('hidden');
+      } else {
+        duplicateBanner?.classList.add('hidden');
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Radio button link selector
+  document.querySelectorAll<HTMLInputElement>('input[name="link-choice"]').forEach((radio) => {
+    radio.addEventListener('change', () => {
+      if (radio.value === 'notebook') {
+        notebookSelectContainer?.classList.remove('hidden');
+        customLinkContainer?.classList.add('hidden');
+      } else if (radio.value === 'custom') {
+        customLinkContainer?.classList.remove('hidden');
+        notebookSelectContainer?.classList.add('hidden');
+      } else {
+        notebookSelectContainer?.classList.add('hidden');
+        customLinkContainer?.classList.add('hidden');
+      }
+    });
+  });
+
+  // Confirm Submit
+  confirmBtn?.addEventListener('click', async () => {
+    const selectedTargets: any[] = [];
+    document.querySelectorAll<HTMLInputElement>('.target-account-checkbox:checked').forEach((cb) => {
+      const accId = cb.getAttribute('data-account-id');
+      const accName = cb.getAttribute('data-account-name') || '';
+      const boardSelect = document.querySelector<HTMLSelectElement>(`.target-board-select[data-account-id="${accId}"]`);
+      const boardName = boardSelect?.value;
+      if (accId && boardName) {
+        selectedTargets.push({ accountId: accId, accountLabel: accName, boardName });
+      }
+    });
+
+    if (selectedTargets.length === 0) {
+      showStatus('Please select at least one target account with a publishable board.', 'warning');
+      return;
+    }
+
+    // Determine link override
+    const linkChoice = (document.querySelector<HTMLInputElement>('input[name="link-choice"]:checked'))?.value;
+    let finalLinkOverride: string | undefined = undefined;
+
+    if (linkChoice === 'notebook') {
+      finalLinkOverride = notebookSelect?.value;
+      if (!finalLinkOverride) {
+        showStatus('Please select a destination link from the notebook.', 'warning');
+        return;
+      }
+    } else if (linkChoice === 'custom') {
+      finalLinkOverride = customLinkInput?.value?.trim();
+      if (!finalLinkOverride) {
+        showStatus('Please enter a valid custom URL.', 'warning');
+        return;
+      }
+    }
+
+    confirmBtn.disabled = true;
+    if (submitText) submitText.textContent = 'Dispatching pins...';
+    statusBanner?.classList.add('hidden');
+
+    if (!currentBatchUuid) {
+      currentBatchUuid = crypto.randomUUID();
+    }
+
+    try {
+      const res = await fetch('/api/pinarchive/repurpose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batchUuid: currentBatchUuid,
+          pinIds: selectedPins,
+          targets: selectedTargets,
+          linkOverride: finalLinkOverride,
+          allowDuplicates: duplicateToggle?.checked ?? false,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.status === 409 && data.retryable) {
+        // D31 / v2.3 Toast: Batch in progress
+        showStatus('⏳ Duplicate batch in progress. Please wait a moment and click send again.', 'warning');
+        confirmBtn.disabled = false;
+        if (submitText) submitText.textContent = 'Retry Send';
+        return;
+      }
+
+      if (data.success) {
+        const s = data.summary;
+        showStatus(`✅ Success! Dispatched ${s.pins_count} pins across ${s.accounts_count} accounts (${s.total_stamps} stamps created).`, 'success');
+        currentBatchUuid = ''; // reset on success
+
+        setTimeout(() => {
+          modal?.classList.add('hidden');
+          modal?.classList.remove('flex');
+          // Trigger custom event so page can uncheck pins or refresh
+          window.dispatchEvent(new CustomEvent('repurpose-completed', { detail: s }));
+        }, 2000);
+      } else {
+        showStatus(data.error || 'Failed to repurpose pins.', 'error');
+        confirmBtn.disabled = false;
+        if (submitText) submitText.textContent = 'Send to Scheduling (Repurpose)';
+      }
+    } catch (e: any) {
+      showStatus(e.message, 'error');
+      confirmBtn.disabled = false;
+      if (submitText) submitText.textContent = 'Send to Scheduling (Repurpose)';
+    }
+  });
+
+  // Close & Helpers
+  const closeModal = () => {
+    modal?.classList.add('hidden');
+    modal?.classList.remove('flex');
+    statusBanner?.classList.add('hidden');
+  };
+  closeBtn?.addEventListener('click', closeModal);
+  cancelBtn?.addEventListener('click', closeModal);
+
+  openNotebookBtn?.addEventListener('click', () => {
+    closeModal();
+    window.dispatchEvent(new CustomEvent('open-link-notebook'));
+  });
+
+  // Custom Event to open modal
+  window.addEventListener('open-repurpose-modal', ((e: CustomEvent) => {
+    selectedPins = e.detail?.pinIds || [];
+    currentBatchUuid = crypto.randomUUID(); // generate fresh batch_uuid
+    if (pinCountBadge) {
+      pinCountBadge.textContent = `${selectedPins.length} pin${selectedPins.length === 1 ? '' : 's'} selected`;
+    }
+    modal?.classList.remove('hidden');
+    modal?.classList.add('flex');
+    duplicateBanner?.classList.add('hidden');
+    statusBanner?.classList.add('hidden');
+    confirmBtn.disabled = false;
+    if (submitText) submitText.textContent = 'Send to Scheduling (Repurpose)';
+    loadTargetsAndLinks();
+  }) as EventListener);
+</script>
