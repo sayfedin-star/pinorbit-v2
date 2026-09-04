@@ -58,7 +58,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
         .select('*', { count: 'exact' })
         .eq(filterCol, filterVal);
 
-      const escapeLike = (s: string) => s.replace(/[%_\\]/g, '\\$&').replace(/"/g, '""');
+      const escapeLike = (s: string) => s.replace(/\\/g, '\\\\').replace(/[%_]/g, '\\$&').replace(/"/g, '""');
 
       if (q) {
         const eq = escapeLike(q);

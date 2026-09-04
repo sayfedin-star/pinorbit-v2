@@ -167,7 +167,7 @@ describe('Link Notebook v2.6 Comprehensive Test Suite', () => {
   });
 
   describe('Gate 6: PostgREST LIKE Injection & Syntax Breakage Defense', () => {
-    const escapeLike = (s: string) => s.replace(/[%_\\]/g, '\\$&').replace(/"/g, '""');
+    const escapeLike = (s: string) => s.replace(/\\/g, '\\\\').replace(/[%_]/g, '\\$&').replace(/"/g, '""');
 
     it('escapes %, _, \\, and double quotes from search query', () => {
       const malicious = '50%_discount\\deal"special';
