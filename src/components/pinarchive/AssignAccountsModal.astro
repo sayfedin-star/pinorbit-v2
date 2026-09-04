@@ -1,0 +1,712 @@
+---
+export interface Props {
+  id?: string;
+}
+const { id = 'assign-accounts-modal' } = Astro.props;
+---
+
+<div
+  id={id}
+  class="fixed inset-0 z-50 hidden items-center justify-center bg-background/80 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto"
+  role="dialog"
+  aria-modal="true"
+>
+  <div class="relative w-full max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-xl transition-all my-8">
+    <!-- Header -->
+    <div class="flex items-center justify-between border-b border-border pb-4 mb-4">
+      <div class="flex items-center gap-3">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <span class="text-xl">🎯</span>
+        </div>
+        <div>
+          <h3 id="assign-modal-title" class="text-base font-bold text-foreground">Assign Accounts & Dispatch</h3>
+          <p id="assign-modal-subtitle" class="text-xs text-muted-foreground">Select destination accounts and individualize destination links per account with smart slug preservation.</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        id="close-assign-modal-btn"
+        class="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        aria-label="Close"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Pin Preview Summary Card -->
+    <div id="assign-pin-preview-container" class="mb-4 flex items-center gap-3 p-3 rounded-xl border border-border bg-muted/20 text-xs">
+      <img
+        id="assign-pin-preview-img"
+        src=""
+        alt="Pin Preview"
+        class="h-14 w-11 rounded-lg object-cover border border-border bg-muted shrink-0"
+      />
+      <div class="min-w-0 flex-1 space-y-1">
+        <div id="assign-pin-preview-title" class="font-bold text-foreground truncate text-xs">Loading pin...</div>
+        <div class="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <span>Board: <span id="assign-pin-preview-board" class="font-medium text-foreground">—</span></span>
+          <span>•</span>
+          <span class="truncate max-w-xs">Base Link: <span id="assign-pin-preview-link" class="font-mono text-primary truncate">—</span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bulk Mode Summary Banner (Hidden in Single Mode) -->
+    <div id="assign-bulk-summary-banner" class="hidden mb-4 p-3 rounded-xl border border-primary/20 bg-primary/5 text-xs text-foreground">
+      <div class="flex items-center gap-2 font-bold text-primary mb-1">
+        <span>📦 Bulk Dispatch Mode</span>
+        <span id="assign-bulk-count-badge" class="px-2 py-0.5 rounded-full text-[10px] bg-primary text-primary-foreground font-bold">0 pins</span>
+      </div>
+      <p class="text-[11px] text-muted-foreground">
+        Selected accounts will receive all pins. If a root domain is chosen for an account, <strong>each pin will preserve its original slug</strong> on that domain.
+      </p>
+    </div>
+
+    <!-- Target Accounts List -->
+    <div class="mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <h4 class="text-xs font-bold text-foreground">Target Accounts & Destination Links *</h4>
+        <span id="assign-selected-accounts-count" class="text-[11px] text-muted-foreground">0 accounts selected</span>
+      </div>
+
+      <div id="assign-targets-list" class="space-y-3 max-h-72 overflow-y-auto pr-1">
+        <div class="p-6 text-center text-xs text-muted-foreground">Loading connected accounts & defaults...</div>
+      </div>
+    </div>
+
+    <!-- Allow Duplicates Checkbox -->
+    <div class="mb-4 p-3 rounded-xl border border-border bg-muted/20 text-xs">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          id="assign-allow-duplicates-toggle"
+          checked
+          class="rounded border-border text-primary h-4 w-4 cursor-pointer"
+        />
+        <span class="font-medium text-foreground">Allow duplicate dispatch if previously sent to selected accounts</span>
+      </label>
+    </div>
+
+    <!-- Status Banner -->
+    <div id="assign-status-banner" class="hidden mb-4 p-3 rounded-xl text-xs font-medium"></div>
+
+    <!-- Footer Controls -->
+    <div class="flex items-center justify-end gap-2 border-t border-border pt-4">
+      <button
+        type="button"
+        id="cancel-assign-modal-btn"
+        class="rounded-xl border border-border bg-background px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        id="confirm-assign-dispatch-btn"
+        class="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+      >
+        <span id="assign-dispatch-submit-text">🚀 Dispatch Pin</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  import { createNotebookCombobox } from '../../scripts/notebook-combobox';
+  let activeStagedPins: any[] = []; // 1 or more pins
+  let targetAccounts: any[] = [];
+  let notebookLinks: any[] = [];
+  let accountDefaults: Record<string, string> = {};
+  let singleDomainAuto: string | null = null;
+  let notebookComboboxes: Record<string, any> = {};
+  let accountLinkChoice: Record<string, any> = {};
+
+  const modal = document.getElementById('assign-accounts-modal');
+  const modalTitle = document.getElementById('assign-modal-title');
+  const modalSubtitle = document.getElementById('assign-modal-subtitle');
+  const closeBtn = document.getElementById('close-assign-modal-btn');
+  const cancelBtn = document.getElementById('cancel-assign-modal-btn');
+  const confirmBtn = document.getElementById('confirm-assign-dispatch-btn') as HTMLButtonElement | null;
+  const submitText = document.getElementById('assign-dispatch-submit-text');
+  const targetsList = document.getElementById('assign-targets-list');
+  const countSpan = document.getElementById('assign-selected-accounts-count');
+  const allowDupToggle = document.getElementById('assign-allow-duplicates-toggle') as HTMLInputElement | null;
+  const statusBanner = document.getElementById('assign-status-banner');
+
+  const previewContainer = document.getElementById('assign-pin-preview-container');
+  const previewImg = document.getElementById('assign-pin-preview-img') as HTMLImageElement | null;
+  const previewTitle = document.getElementById('assign-pin-preview-title');
+  const previewBoard = document.getElementById('assign-pin-preview-board');
+  const previewLink = document.getElementById('assign-pin-preview-link');
+
+  const bulkSummaryBanner = document.getElementById('assign-bulk-summary-banner');
+  const bulkCountBadge = document.getElementById('assign-bulk-count-badge');
+
+  function escapeHtml(str: string): string {
+    return (str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  // Client-side smart domain swap engine
+  function buildFinalLinkClient(originalLink: string, chosen: string): string {
+    const cleanChosen = (chosen || '').trim();
+    const cleanOriginal = (originalLink || '').trim();
+
+    if (!cleanChosen) return cleanOriginal;
+
+    let chosenWithProto = cleanChosen;
+    if (!/^https?:\/\//i.test(chosenWithProto)) {
+      chosenWithProto = `https://${chosenWithProto}`;
+    }
+
+    let chosenUrl: URL;
+    try {
+      chosenUrl = new URL(chosenWithProto);
+    } catch {
+      return cleanChosen;
+    }
+
+    const chosenPath = chosenUrl.pathname.replace(/\/+$/, '');
+    const hasSpecificPath = chosenPath.length > 0;
+
+    if (hasSpecificPath) {
+      return chosenUrl.toString();
+    }
+
+    if (!cleanOriginal) {
+      return chosenUrl.origin;
+    }
+
+    let origUrl: URL;
+    try {
+      const origWithProto = /^https?:\/\//i.test(cleanOriginal) ? cleanOriginal : `https://${cleanOriginal}`;
+      origUrl = new URL(origWithProto);
+    } catch {
+      return chosenUrl.origin;
+    }
+
+    const finalUrl = new URL(chosenUrl.origin);
+    finalUrl.pathname = origUrl.pathname;
+    finalUrl.search = origUrl.search;
+    finalUrl.hash = origUrl.hash;
+
+    return finalUrl.toString();
+  }
+
+  function showStatus(htmlContent: string, type: 'error' | 'warning' | 'success') {
+    if (!statusBanner) return;
+    statusBanner.innerHTML = htmlContent;
+    const styles = {
+      error: 'mb-4 p-3 rounded-xl text-xs font-medium bg-rose-500/10 text-rose-600 border border-rose-500/20',
+      warning: 'mb-4 p-3 rounded-xl text-xs font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20',
+      success: 'mb-4 p-3 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',
+    };
+    statusBanner.className = styles[type];
+    statusBanner.classList.remove('hidden');
+  }
+
+  async function loadData() {
+    if (!targetsList) return;
+    targetsList.innerHTML = '<div class="p-6 text-center text-xs text-muted-foreground">Loading connected accounts & defaults...</div>';
+
+    try {
+      const [targetsRes, linksRes, defaultsRes] = await Promise.all([
+        fetch('/api/pinarchive/repurpose/targets'),
+        fetch('/api/links'),
+        fetch('/api/pinarchive/account-defaults'),
+      ]);
+
+      const tData = await targetsRes.json();
+      const lData = await linksRes.json();
+      const dData = await defaultsRes.json();
+
+      if (tData.success) {
+        targetAccounts = tData.targets || [];
+      } else {
+        targetsList.innerHTML = `<div class="p-4 text-center text-xs text-rose-500">${tData.error || 'Failed to load accounts'}</div>`;
+        return;
+      }
+
+      if (lData.success) {
+        const u = (lData.user_links || []).map((x: any) => ({ ...x, scope: 'user' }));
+        const w = (lData.workspace_links || []).map((x: any) => ({ ...x, scope: 'workspace' }));
+        notebookLinks = [...u, ...w];
+      }
+
+      if (dData.success) {
+        accountDefaults = dData.defaults || {};
+        singleDomainAuto = dData.singleDomain || null;
+      }
+
+      renderTargetAccounts();
+    } catch (e: any) {
+      targetsList.innerHTML = `<div class="p-4 text-center text-xs text-rose-500">${e.message || 'Error'}</div>`;
+    }
+  }
+
+  function renderTargetAccounts() {
+    if (!targetsList) return;
+    if (targetAccounts.length === 0) {
+      targetsList.innerHTML = '<div class="p-6 text-center text-xs text-muted-foreground">No accounts with publishable boards found.</div>';
+      return;
+    }
+
+    const firstPin = activeStagedPins[0];
+    const baseLink = firstPin ? (firstPin.override_link || firstPin.original_link || '') : '';
+    const defaultStarLink = notebookLinks.find((l) => l.is_default)?.url || '';
+
+    targetsList.innerHTML = targetAccounts.map((acc) => {
+      const boards = acc.boards || [];
+      const hasBoards = boards.length > 0;
+
+      const matchingBoard = boards.find((b: any) => b.board_name === firstPin?.board_name);
+      const defaultBoard = matchingBoard ? matchingBoard.board_name : (boards[0]?.board_name || '');
+
+      // Resolve initial default choice
+      const explicitAccDefault = accountDefaults[acc.id];
+      const effectiveDefault = explicitAccDefault || singleDomainAuto || defaultStarLink || baseLink;
+      const hasAccountDefault = Boolean(explicitAccDefault || singleDomainAuto);
+      const isAuto = !explicitAccDefault && Boolean(singleDomainAuto);
+
+      return `
+        <div class="p-3.5 rounded-xl border border-border bg-card/70 space-y-2.5 transition-colors" data-account-card="${acc.id}">
+          <div class="flex items-center justify-between gap-2">
+            <label class="flex items-center gap-2 text-xs font-bold text-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                class="account-assign-cb rounded border-border text-primary h-4 w-4 cursor-pointer"
+                data-account-id="${acc.id}"
+                data-account-label="${escapeHtml(acc.name)}"
+                ${hasBoards ? 'checked' : 'disabled'}
+              />
+              <span>${escapeHtml(acc.name)} <span class="text-[11px] font-normal text-muted-foreground">(@${escapeHtml(acc.username)})</span></span>
+            </label>
+
+            ${hasBoards ? `
+              <div class="flex items-center gap-1.5 text-xs">
+                <span class="text-muted-foreground text-[11px]">Board:</span>
+                <select class="account-board-select rounded-lg border border-border bg-background px-2 py-1 text-xs text-foreground focus:ring-1 focus:ring-primary" data-account-id="${acc.id}">
+                  ${boards.map((b: any) => `
+                    <option value="${escapeHtml(b.board_name)}" ${b.board_name === defaultBoard ? 'selected' : ''}>
+                      ${escapeHtml(b.board_name)}
+                    </option>
+                  `).join('')}
+                </select>
+              </div>
+            ` : `
+              <span class="text-[11px] text-rose-500 font-medium">No boards</span>
+            `}
+          </div>
+
+          <!-- Per-Account Destination Link Section -->
+          <div class="account-link-config pl-6 space-y-2 border-t border-border/40 pt-2 text-xs" data-account-link-section="${acc.id}">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="text-[11px] font-semibold text-muted-foreground">Destination Link:</span>
+
+              ${hasAccountDefault ? `
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" name="link-source-${acc.id}" value="account-default" checked class="link-source-radio text-primary" data-account-id="${acc.id}" />
+                  <span class="text-[11px] font-medium text-foreground">
+                    ★ ${isAuto ? 'Auto Site' : 'Account Default'}
+                  </span>
+                </label>
+              ` : ''}
+
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="link-source-${acc.id}" value="staged" ${hasAccountDefault ? '' : 'checked'} class="link-source-radio text-primary" data-account-id="${acc.id}" />
+                <span class="text-[11px]">Staged Link</span>
+              </label>
+
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="link-source-${acc.id}" value="notebook" class="link-source-radio text-primary" data-account-id="${acc.id}" />
+                <span class="text-[11px]">Link Notebook</span>
+              </label>
+
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="link-source-${acc.id}" value="custom" class="link-source-radio text-primary" data-account-id="${acc.id}" />
+                <span class="text-[11px]">Custom Domain/URL</span>
+              </label>
+            </div>
+
+            <!-- Account default display -->
+            ${hasAccountDefault ? `
+              <div class="account-default-display text-[11px] font-mono text-muted-foreground flex items-center gap-1.5" data-account-default-disp="${acc.id}">
+                <span class="px-1.5 py-0.2 rounded bg-primary/10 text-primary text-[10px] font-bold">${isAuto ? 'AUTO-RULE' : 'DEFAULT'}</span>
+                <span class="truncate">${escapeHtml(effectiveDefault)}</span>
+              </div>
+            ` : ''}
+
+            <!-- Staged link display -->
+            <div class="staged-link-display ${hasAccountDefault ? 'hidden' : ''} text-[11px] font-mono text-muted-foreground truncate" data-display="${acc.id}">
+              ${baseLink ? escapeHtml(baseLink) : '<span class="italic text-muted-foreground/60">None (will use original)</span>'}
+            </div>
+
+            <!-- Notebook Combobox Container -->
+            <div class="notebook-link-combobox-container hidden" data-notebook-container="${acc.id}">
+            </div>
+
+            <!-- Custom URL input -->
+            <div class="custom-link-container hidden" data-custom-container="${acc.id}">
+              <input
+                type="text"
+                placeholder="https://customdomain1.com or full URL"
+                class="account-custom-link-input w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:ring-1 focus:ring-primary"
+                data-account-id="${acc.id}"
+              />
+              <p class="text-[10px] text-muted-foreground mt-0.5">Enter a domain root (e.g. customdomain1.com) to swap host with original slug preserved.</p>
+            </div>
+
+            <!-- LIVE PREVIEW BADGE -->
+            <div class="mt-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-1.5" data-preview-box="${acc.id}">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-emerald-700 dark:text-emerald-400 font-semibold shrink-0">Live URL Preview:</span>
+                <span class="font-mono text-emerald-800 dark:text-emerald-300 truncate final-preview-url" data-preview-text="${acc.id}">—</span>
+              </div>
+              <span class="hidden px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-600 border border-amber-500/30 shrink-0" data-preview-warning="${acc.id}">
+                ⚠️ No slug to preserve — root URL will be used
+              </span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Attach listeners
+    targetsList.querySelectorAll('.account-assign-cb').forEach((cb) => {
+      cb.addEventListener('change', (e) => {
+        const input = e.target as HTMLInputElement;
+        const accId = input.getAttribute('data-account-id');
+        const linkSec = targetsList?.querySelector(`[data-account-link-section="${accId}"]`);
+        if (input.checked) {
+          linkSec?.classList.remove('hidden');
+        } else {
+          linkSec?.classList.add('hidden');
+        }
+        updateSelectedCount();
+      });
+    });
+
+    targetsList.querySelectorAll('.link-source-radio').forEach((radio) => {
+      radio.addEventListener('change', (e) => {
+        const r = e.target as HTMLInputElement;
+        const accId = r.getAttribute('data-account-id');
+        const accDefDisp = targetsList?.querySelector(`[data-account-default-disp="${accId}"]`);
+        const stagedDisp = targetsList?.querySelector(`[data-display="${accId}"]`);
+        const nbCont = targetsList?.querySelector(`[data-notebook-container="${accId}"]`);
+        const customCont = targetsList?.querySelector(`[data-custom-container="${accId}"]`);
+
+        accDefDisp?.classList.add('hidden');
+        stagedDisp?.classList.add('hidden');
+        nbCont?.classList.add('hidden');
+        customCont?.classList.add('hidden');
+
+        if (r.value === 'account-default') accDefDisp?.classList.remove('hidden');
+        else if (r.value === 'staged') stagedDisp?.classList.remove('hidden');
+        else if (r.value === 'notebook') nbCont?.classList.remove('hidden');
+        else if (r.value === 'custom') customCont?.classList.remove('hidden');
+
+        updateAccountPreview(accId || '');
+      });
+    });
+
+    targetsList.querySelectorAll('.account-custom-link-input').forEach((input) => {
+      input.addEventListener('input', (e) => {
+        const accId = (e.target as HTMLElement).getAttribute('data-account-id');
+        updateAccountPreview(accId || '');
+      });
+    });
+
+    // Clean up previous combobox instances
+    Object.values(notebookComboboxes).forEach((cb: any) => {
+      try { cb.destroy(); } catch {}
+    });
+    notebookComboboxes = {};
+    accountLinkChoice = {};
+
+    // Initialize createNotebookCombobox for each account
+    targetAccounts.forEach((acc) => {
+      const nbContainer = targetsList?.querySelector(`[data-notebook-container="${acc.id}"]`) as HTMLElement | null;
+      if (nbContainer) {
+        const defStar = notebookLinks.find((l) => l.is_default);
+        const cb = createNotebookCombobox({
+          container: nbContainer,
+          links: notebookLinks,
+          selectedUrl: defStar?.url,
+          serverTotal: notebookLinks.length,
+          onSelect: (link) => {
+            accountLinkChoice[acc.id] = link;
+            updateAccountPreview(acc.id);
+          },
+        });
+        notebookComboboxes[acc.id] = cb;
+        if (defStar) {
+          accountLinkChoice[acc.id] = defStar;
+        }
+      }
+    });
+
+    // Run initial preview computation for all accounts
+    targetAccounts.forEach((acc) => updateAccountPreview(acc.id));
+    updateSelectedCount();
+  }
+
+  function getEffectiveChoiceForAccount(accId: string): string {
+    const radioVal = (targetsList?.querySelector(`input[name="link-source-${accId}"]:checked`) as HTMLInputElement)?.value;
+    const firstPin = activeStagedPins[0];
+    const basePinLink = firstPin ? (firstPin.override_link || firstPin.original_link || '') : '';
+
+    if (radioVal === 'account-default') {
+      return accountDefaults[accId] || singleDomainAuto || '';
+    }
+    if (radioVal === 'staged') {
+      return basePinLink;
+    }
+    if (radioVal === 'notebook') {
+      return accountLinkChoice[accId]?.url || '';
+    }
+    if (radioVal === 'custom') {
+      const customInput = targetsList?.querySelector(`.account-custom-link-input[data-account-id="${accId}"]`) as HTMLInputElement | null;
+      return customInput?.value?.trim() || '';
+    }
+    return '';
+  }
+
+  function updateAccountPreview(accId: string) {
+    const previewEl = targetsList?.querySelector(`[data-preview-text="${accId}"]`);
+    const previewWarning = targetsList?.querySelector(`[data-preview-warning="${accId}"]`);
+    if (!previewEl) return;
+
+    const chosen = getEffectiveChoiceForAccount(accId);
+    const firstPin = activeStagedPins[0];
+    const basePinLink = firstPin ? (firstPin.override_link || firstPin.original_link || '') : '';
+
+    if (!chosen && !basePinLink) {
+      previewEl.textContent = 'None set';
+      if (previewWarning) previewWarning.classList.add('hidden');
+      return;
+    }
+
+    const finalUrl = buildFinalLinkClient(basePinLink, chosen);
+    previewEl.textContent = finalUrl;
+
+    if (previewWarning) {
+      let hasOriginalSlug = false;
+      if (basePinLink) {
+        try {
+          const u = new URL(/^https?:\/\//i.test(basePinLink) ? basePinLink : `https://${basePinLink}`);
+          hasOriginalSlug = u.pathname.replace(/\/+$/, '').length > 0;
+        } catch {}
+      }
+
+      let isRootChosen = false;
+      if (chosen) {
+        try {
+          const cu = new URL(/^https?:\/\//i.test(chosen) ? chosen : `https://${chosen}`);
+          isRootChosen = cu.pathname.replace(/\/+$/, '').length === 0;
+        } catch {}
+      }
+
+      if ((!basePinLink || !hasOriginalSlug) && isRootChosen) {
+        previewWarning.classList.remove('hidden');
+      } else {
+        previewWarning.classList.add('hidden');
+      }
+    }
+  }
+
+  function updateSelectedCount() {
+    const checked = targetsList?.querySelectorAll('.account-assign-cb:checked') || [];
+    const isBulk = activeStagedPins.length > 1;
+
+    if (countSpan) {
+      countSpan.textContent = `${checked.length} account${checked.length === 1 ? '' : 's'} selected`;
+    }
+    if (confirmBtn) {
+      confirmBtn.disabled = checked.length === 0;
+    }
+    if (submitText) {
+      if (isBulk) {
+        submitText.textContent = `🚀 Dispatch ${activeStagedPins.length} Pins to ${checked.length} Account${checked.length === 1 ? '' : 's'}`;
+      } else {
+        submitText.textContent = `🚀 Dispatch Pin to ${checked.length} Account${checked.length === 1 ? '' : 's'}`;
+      }
+    }
+  }
+
+  // Submit dispatch (Single or Bulk)
+  confirmBtn?.addEventListener('click', async () => {
+    if (activeStagedPins.length === 0) return;
+
+    // F2: Validate that notebook selection is not empty if radio=notebook
+    let missingNotebookAccount: string | null = null;
+    targetsList?.querySelectorAll('.account-assign-cb:checked').forEach((cb) => {
+      const accId = cb.getAttribute('data-account-id') || '';
+      const accLabel = cb.getAttribute('data-account-label') || accId;
+      const radioVal = (targetsList?.querySelector(`input[name="link-source-${accId}"]:checked`) as HTMLInputElement)?.value;
+
+      if (radioVal === 'notebook') {
+        const link = accountLinkChoice[accId];
+        if (!link || !link.url) {
+          missingNotebookAccount = accLabel;
+        }
+      }
+    });
+
+    if (missingNotebookAccount) {
+      showStatus(`Please choose a destination link from the notebook for account "${missingNotebookAccount}".`, 'warning');
+      return;
+    }
+
+    const assignments: any[] = [];
+    targetsList?.querySelectorAll('.account-assign-cb:checked').forEach((cb) => {
+      const accId = cb.getAttribute('data-account-id');
+      const accLabel = cb.getAttribute('data-account-label') || '';
+      const boardSelect = targetsList?.querySelector(`.account-board-select[data-account-id="${accId}"]`) as HTMLSelectElement | null;
+      const boardName = boardSelect?.value || '';
+
+      const chosenLink = getEffectiveChoiceForAccount(accId || '');
+
+      assignments.push({
+        accountId: accId,
+        accountLabel: accLabel,
+        boardName,
+        linkUrl: chosenLink || undefined,
+      });
+    });
+
+    if (assignments.length === 0) {
+      showStatus('Please select at least one account.', 'warning');
+      return;
+    }
+
+    if (confirmBtn) confirmBtn.disabled = true;
+    if (submitText) submitText.textContent = 'Dispatching pins...';
+    statusBanner?.classList.add('hidden');
+
+    const isBulk = activeStagedPins.length > 1;
+
+    try {
+      if (isBulk) {
+        // Bulk dispatch
+        const res = await fetch('/api/pinarchive/staged/dispatch-bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            stagedPinIds: activeStagedPins.map((p) => p.id),
+            assignments,
+            allowDuplicates: allowDupToggle?.checked ?? true,
+          }),
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          showStatus(
+            `✅ Dispatched ${data.succeeded.length} of ${data.total_requested} pins successfully!`,
+            'success'
+          );
+
+          window.dispatchEvent(new CustomEvent('staged-pins-bulk-dispatched', { detail: data }));
+
+          setTimeout(() => {
+            modal?.classList.add('hidden');
+            modal?.classList.remove('flex');
+          }, 1800);
+        } else {
+          showStatus(data.error || 'Failed to dispatch pins.', 'error');
+          if (confirmBtn) confirmBtn.disabled = false;
+          updateSelectedCount();
+        }
+      } else {
+        // Single pin dispatch
+        const stagedPinId = activeStagedPins[0]?.id;
+        const res = await fetch('/api/pinarchive/staged/dispatch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            stagedPinId,
+            assignments,
+            allowDuplicates: allowDupToggle?.checked ?? true,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          showStatus(
+            `✅ Dispatched pin successfully! Total stamps created: ${data.summary.total_stamps}.`,
+            'success'
+          );
+
+          window.dispatchEvent(new CustomEvent('staged-pin-dispatched', { detail: { ...data, stagedPinId } }));
+
+          setTimeout(() => {
+            modal?.classList.add('hidden');
+            modal?.classList.remove('flex');
+          }, 1800);
+        } else {
+          showStatus(data.error || 'Failed to dispatch staged pin.', 'error');
+          if (confirmBtn) confirmBtn.disabled = false;
+          updateSelectedCount();
+        }
+      }
+    } catch (e: any) {
+      showStatus(e.message || 'Network error.', 'error');
+      if (confirmBtn) confirmBtn.disabled = false;
+      updateSelectedCount();
+    }
+  });
+
+  const closeModal = () => {
+    modal?.classList.add('hidden');
+    modal?.classList.remove('flex');
+    statusBanner?.classList.add('hidden');
+  };
+  closeBtn?.addEventListener('click', closeModal);
+  cancelBtn?.addEventListener('click', closeModal);
+
+  // Custom Event listener: open modal for single or bulk
+  window.addEventListener('open-assign-modal', ((e: CustomEvent) => {
+    const pin = e.detail?.stagedPin;
+    const pins = e.detail?.stagedPins;
+
+    if (pins && Array.isArray(pins) && pins.length > 0) {
+      activeStagedPins = pins;
+    } else if (pin) {
+      activeStagedPins = [pin];
+    } else {
+      return;
+    }
+
+    const isBulk = activeStagedPins.length > 1;
+
+    if (isBulk) {
+      if (modalTitle) modalTitle.textContent = `🎯 Assign Accounts & Dispatch (${activeStagedPins.length} Pins)`;
+      if (modalSubtitle) modalSubtitle.textContent = 'Individualize destination links per account. Original slugs will be preserved under each account\'s domain.';
+      if (previewContainer) previewContainer.classList.add('hidden');
+      if (bulkSummaryBanner) {
+        bulkSummaryBanner.classList.remove('hidden');
+        if (bulkCountBadge) bulkCountBadge.textContent = `${activeStagedPins.length} pins selected`;
+      }
+    } else {
+      const singlePin = activeStagedPins[0];
+      if (modalTitle) modalTitle.textContent = '🎯 Assign Accounts & Dispatch';
+      if (modalSubtitle) modalSubtitle.textContent = 'Select destination accounts and individualize destination links per account with smart slug preservation.';
+      if (bulkSummaryBanner) bulkSummaryBanner.classList.add('hidden');
+      if (previewContainer) previewContainer.classList.remove('hidden');
+
+      if (previewImg) previewImg.src = singlePin.image_url || '';
+      if (previewTitle) previewTitle.textContent = singlePin.title || 'Untitled Pin';
+      if (previewBoard) previewBoard.textContent = singlePin.board_name || 'None';
+      if (previewLink) previewLink.textContent = singlePin.override_link || singlePin.original_link || 'None';
+    }
+
+    modal?.classList.remove('hidden');
+    modal?.classList.add('flex');
+    statusBanner?.classList.add('hidden');
+
+    loadData();
+  }) as EventListener);
+</script>

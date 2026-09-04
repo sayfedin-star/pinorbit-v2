@@ -2,6 +2,7 @@
 export const prerender = false;
 import Layout from '../../layouts/Layout.astro';
 import SectionHeader from '../../components/ui/SectionHeader.astro';
+import RepurposeModal from '../../components/pinarchive/RepurposeModal.astro';
 ---
 
 <Layout title="Winning Pins Intelligence — PinArchive" description="Cross-account high-velocity winners, delta growth analytics (24h/3d/7d), evergreen strategy matrix, and keyword mining.">
@@ -108,6 +109,16 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
           </svg>
           <span>Refresh</span>
         </button>
+
+        <!-- Link Notebook Page Link -->
+        <a
+          id="open-link-notebook-btn"
+          href="/pinarchive/links"
+          title="Manage Link Notebook"
+          class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-xs hover:bg-muted transition-all cursor-pointer"
+        >
+          <span>📖 Links</span>
+        </a>
       </div>
     </div>
   </div>
@@ -530,6 +541,9 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
       <button id="launch-bulk-ai-btn" type="button" class="rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-bold text-primary hover:bg-primary hover:text-primary-foreground transition-all cursor-pointer">
         🤖 Copy AI Prompt
       </button>
+      <button id="launch-repurpose-btn" type="button" class="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white transition-all cursor-pointer shadow-xs">
+        📤 Repurpose
+      </button>
       <button id="clear-compare-btn" type="button" class="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-all cursor-pointer">
         Clear
       </button>
@@ -640,6 +654,9 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
       </div>
     </div>
   </div>
+
+  <!-- Modals -->
+  <RepurposeModal />
 </Layout>
 
 <script>
@@ -2368,6 +2385,18 @@ TASK:
     // Compare Controls
     const launchCompareBtn = document.getElementById('launch-compare-btn');
     if (launchCompareBtn) launchCompareBtn.addEventListener('click', openCompareModal);
+
+    // Repurpose from Compare Bar
+    const launchRepurposeBtn = document.getElementById('launch-repurpose-btn');
+    if (launchRepurposeBtn) {
+      launchRepurposeBtn.addEventListener('click', () => {
+        const ids = Array.from(selectedForCompare);
+        if (ids.length === 0) return;
+        window.dispatchEvent(new CustomEvent('open-repurpose-modal', {
+          detail: { pinIds: ids }
+        }));
+      });
+    }
 
     const clearCompareBtn = document.getElementById('clear-compare-btn');
     if (clearCompareBtn) {

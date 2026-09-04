@@ -1,7 +1,8 @@
 export class HttpError extends Error {
   constructor(
     public readonly status: number,
-    message: string
+    message: string,
+    public readonly options?: Record<string, any>
   ) {
     super(message);
     this.name = 'HttpError';
