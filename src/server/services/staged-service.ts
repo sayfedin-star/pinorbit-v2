@@ -294,10 +294,37 @@ export async function dispatchStagedPin(
   userId: string,
   stagedPinId: string,
   assignments: TargetAssignment[],
-  allowDuplicates = true
+  allowDuplicates = false
 ): Promise<{ success: boolean; stagedPin: StagedPinItem; summary: RepurposeSummary }> {
   if (!assignments || assignments.length === 0) {
     throw new HttpError(400, 'Please select at least one target account with a destination link.');
+  }
+
+  // Pre-CAS check: Attempt to pre-validate publishable boards if row exists,
+  // but do NOT throw 404/409 here; if row is null or not found, proceed directly to CAS to preserve 409 conflict contract.
+  if (p1Admin && typeof (p1Admin as any).from === 'function' && paAdmin && typeof (paAdmin as any).from === 'function') {
+    try {
+      const { data: preRow } = await paAdmin
+        .from('pa_staged_pins')
+        .select('id, board_name')
+        .eq('id', stagedPinId)
+        .eq('workspace_id', workspaceId)
+        .maybeSingle();
+
+      if (preRow) {
+        const preTargets: TargetDestination[] = assignments.map((a) => ({
+          accountId: a.accountId,
+          accountLabel: a.accountLabel || '',
+          boardName: a.boardName || preRow.board_name || '',
+          customLink: '',
+        }));
+        await assertPublishableBoards(p1Admin, workspaceId, preTargets);
+      }
+    } catch (err: any) {
+      if (err instanceof HttpError) {
+        throw err;
+      }
+    }
   }
 
   // 1. Atomic CAS update: Transition from 'staged' -> 'dispatched'
@@ -400,7 +427,7 @@ export async function dispatchBulkStagedPins(
   userId: string,
   stagedPinIds: string[],
   assignments: TargetAssignment[],
-  allowDuplicates = true
+  allowDuplicates = false
 ): Promise<BulkDispatchResult> {
   if (!stagedPinIds || stagedPinIds.length === 0) {
     throw new HttpError(400, 'No staged pin IDs provided for bulk dispatch.');
@@ -408,6 +435,53 @@ export async function dispatchBulkStagedPins(
 
   if (!assignments || assignments.length === 0) {
     throw new HttpError(400, 'Please select at least one target account.');
+  }
+
+  // Pre-CAS check: Attempt to pre-validate publishable boards across requested targets
+  if (p1Admin && typeof (p1Admin as any).from === 'function' && paAdmin && typeof (paAdmin as any).from === 'function') {
+    try {
+      const { data: preRows } = await paAdmin
+        .from('pa_staged_pins')
+        .select('id, board_name')
+        .in('id', stagedPinIds)
+        .eq('workspace_id', workspaceId);
+
+      const preBoardNames = new Set<string>();
+      if (preRows) {
+        for (const r of preRows) {
+          if (r.board_name) preBoardNames.add(r.board_name);
+        }
+      }
+
+      const preTargets: TargetDestination[] = [];
+      for (const a of assignments) {
+        if (a.boardName) {
+          preTargets.push({
+            accountId: a.accountId,
+            accountLabel: a.accountLabel || '',
+            boardName: a.boardName,
+            customLink: '',
+          });
+        } else {
+          for (const bn of preBoardNames) {
+            preTargets.push({
+              accountId: a.accountId,
+              accountLabel: a.accountLabel || '',
+              boardName: bn,
+              customLink: '',
+            });
+          }
+        }
+      }
+
+      if (preTargets.length > 0) {
+        await assertPublishableBoards(p1Admin, workspaceId, preTargets);
+      }
+    } catch (err: any) {
+      if (err instanceof HttpError) {
+        throw err;
+      }
+    }
   }
 
   const succeeded: string[] = [];

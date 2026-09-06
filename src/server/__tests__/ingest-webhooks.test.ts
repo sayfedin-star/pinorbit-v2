@@ -385,6 +385,7 @@ describe('Pinterest Ingest Webhook Engine Events Suite (boards.list, board.creat
     expect(pin.image_url).toBe('https://images.example.com/original-image.jpg');
 
     // 3b. Stringified 'undefined'
+    pin.status = 'processing';
     const reqUndefined = new Request('http://localhost:4321/api/internal/pinterest/ingest', {
       method: 'POST',
       headers: {
@@ -403,6 +404,7 @@ describe('Pinterest Ingest Webhook Engine Events Suite (boards.list, board.creat
     expect(pin.image_url).toBe('https://images.example.com/original-image.jpg');
 
     // 3c. Valid image_url updates cleanly
+    pin.status = 'processing';
     const reqValid = new Request('http://localhost:4321/api/internal/pinterest/ingest', {
       method: 'POST',
       headers: {

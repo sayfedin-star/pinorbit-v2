@@ -51,7 +51,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       user.id,
       stagedPinId,
       assignments,
-      allowDuplicates !== false
+      allowDuplicates === true
     );
 
     return json({
