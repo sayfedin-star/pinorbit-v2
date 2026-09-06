@@ -30,16 +30,10 @@ export async function fastcronCall(
     });
 
     if (res.status === 404 || res.status === 405) {
-      const searchParams = new URLSearchParams();
-      for (const [key, value] of Object.entries(payload)) {
-        if (value !== undefined && value !== null) {
-          searchParams.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
-        }
-      }
-      res = await fetch(`${url}?${searchParams.toString()}`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(8000),
-      });
+      return {
+        success: false,
+        error: `FastCron HTTP ${res.status}: refusing fallback query-string authentication`,
+      };
     }
 
     let data: any = {};

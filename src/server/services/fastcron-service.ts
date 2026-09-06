@@ -2,6 +2,7 @@ import { analyticsDb } from '../db/analytics';
 import { getServerEnv } from '../db/clients';
 import { decryptToken } from '../lib/token-crypto';
 import { evaluateTokenCandidates, maskToken } from '../lib/token-resolver';
+import { validateSafeUrl } from '../lib/ssrf-guard';
 import { getEffectiveSecret } from './webhook-secrets';
 import type {
   ScheduleSyncResponse,
@@ -723,7 +724,28 @@ export const fastcronService = {
               sort_modes: effectiveSortModes,
             };
 
-        const res = await fetch(webhookUrl!, {
+        if (!webhookUrl) {
+          return {
+            success: false,
+            connection_id: connectionId,
+            channel,
+            mode: 'ping',
+            error: 'No webhook URL configured',
+          };
+        }
+        try {
+          validateSafeUrl(webhookUrl);
+        } catch (err: any) {
+          return {
+            success: false,
+            connection_id: connectionId,
+            channel,
+            mode: 'ping',
+            error: 'SSRF guard rejected webhook URL: ' + err.message,
+          };
+        }
+
+        const res = await fetch(webhookUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(pingPayload),
@@ -814,8 +836,29 @@ export const fastcronService = {
     }
 
     // Legacy Fallback: Direct POST to channel webhook
+    if (!webhookUrl) {
+      return {
+        success: false,
+        connection_id: connectionId,
+        channel,
+        mode: 'sync',
+        error: 'No webhook URL configured',
+      };
+    }
     try {
-      const res = await fetch(webhookUrl!, {
+      validateSafeUrl(webhookUrl);
+    } catch (err: any) {
+      return {
+        success: false,
+        connection_id: connectionId,
+        channel,
+        mode: 'sync',
+        error: 'SSRF guard rejected webhook URL: ' + err.message,
+      };
+    }
+
+    try {
+      const res = await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payloadObj),
@@ -1346,6 +1389,12 @@ export async function triggerBoardAction(
   }
 
   if (!webhookUrl || !branch) return { success: false, error: 'No webhook URL found for board actions' };
+
+  try {
+    validateSafeUrl(webhookUrl);
+  } catch (err: any) {
+    return { success: false, error: 'SSRF guard rejected webhook URL: ' + err.message };
+  }
 
   const payload = { action, account_id: accountId, workspace_id: account.workspace_id, ...extra };
   try {

@@ -152,6 +152,11 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
 
     if (updateErr) throw updateErr;
 
+    if (updated) {
+      delete (updated as any).dispatch_token;
+      (updated as any).has_dispatch_token = true;
+    }
+
     return new Response(
       JSON.stringify({ success: true, schedule: updated, message: 'Schedule updated successfully.' }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }

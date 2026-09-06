@@ -29,30 +29,17 @@ describe('FastCron Full Service Suite (R6 Reconcile Idempotency & Orphan Cleanup
     expect(FASTCRON_BASE).toBe('https://www.fastcron.com/api/v1');
   });
 
-  it('A1: fastcronCall performs POST JSON primary, falling back to GET on 404/405', async () => {
-    let callIndex = 0;
+  it('A1: fastcronCall fails closed without query-string token fallback on 404/405', async () => {
+    let callCount = 0;
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (url: string, init?: any) => {
-      callIndex++;
-      if (callIndex === 1) {
-        // First call: POST returns 405 Method Not Allowed
-        expect(init?.method).toBe('POST');
-        expect(url).toBe('https://www.fastcron.com/api/v1/cron_test');
-        return {
-          status: 405,
-          ok: false,
-          json: async () => ({ error: 'Method Not Allowed' }),
-        } as any;
-      } else {
-        // Second call: GET fallback
-        expect(init?.method).toBe('GET');
-        expect(url).toContain('https://www.fastcron.com/api/v1/cron_test?');
-        expect(url).toContain('token=test_token');
-        return {
-          status: 200,
-          ok: true,
-          json: async () => ({ status: 'OK', id: 5566 }),
-        } as any;
-      }
+      callCount++;
+      expect(init?.method).toBe('POST');
+      expect(url).toBe('https://www.fastcron.com/api/v1/cron_test');
+      return {
+        status: 405,
+        ok: false,
+        json: async () => ({ error: 'Method Not Allowed' }),
+      } as any;
     }) as any);
 
     const result = await fastcronService.fastcronCall(
@@ -61,9 +48,9 @@ describe('FastCron Full Service Suite (R6 Reconcile Idempotency & Orphan Cleanup
       'test_token'
     );
 
-    expect(result.success).toBe(true);
-    expect(result.data.id).toBe(5566);
-    expect(callIndex).toBe(2);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/refusing fallback query-string authentication/i);
+    expect(callCount).toBe(1);
 
     fetchSpy.mockRestore();
   });

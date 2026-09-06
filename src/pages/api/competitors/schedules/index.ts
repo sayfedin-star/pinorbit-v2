@@ -338,29 +338,43 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    const createdJobId = String(addRes.data?.id || addRes.data?.data?.id || '');
+    const createdJobId = addRes.success ? String(addRes.data?.id || addRes.data?.data?.id || '') : '';
     const compAdmin = dbClients.getCompetitorsAdmin(runtimeEnv);
 
-    const { data: newRow, error: insertErr } = await compAdmin
-      .from('competitor_schedules')
-      .insert({
-        workspace_id: workspaceId,
-        label,
-        cron_expression: cronExpression,
-        timezone,
-        fastcron_token_id: targetTokenObj.tokenId || null,
-        fastcron_job_id: createdJobId || null,
-        status: enabled ? 'active' : 'paused',
-      })
-      .select('*')
-      .single();
+    try {
+      const { data: newRow, error: insertErr } = await compAdmin
+        .from('competitor_schedules')
+        .insert({
+          workspace_id: workspaceId,
+          label,
+          cron_expression: cronExpression,
+          timezone,
+          fastcron_token_id: targetTokenObj.tokenId || null,
+          fastcron_job_id: createdJobId || null,
+          status: enabled ? 'active' : 'paused',
+        })
+        .select('*')
+        .single();
 
-    if (insertErr) throw insertErr;
+      if (insertErr) throw insertErr;
 
-    return new Response(
-      JSON.stringify({ success: true, schedule: newRow, message: 'Schedule created successfully.' }),
-      { status: 201, headers: { 'Content-Type': 'application/json' } }
-    );
+      if (newRow) {
+        delete (newRow as any).dispatch_token;
+        (newRow as any).has_dispatch_token = true;
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, schedule: newRow, message: 'Schedule created successfully.' }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } }
+      );
+    } catch (insertErr: any) {
+      if (createdJobId) {
+        await fastcronCall('cron_delete', { id: createdJobId }, targetTokenObj.token).catch((delErr) => {
+          console.warn('[CompetitorSchedules] Compensating remote delete failed:', delErr);
+        });
+      }
+      throw insertErr;
+    }
   } catch (err: any) {
     return new Response(
       JSON.stringify({ success: false, error: err.message || 'Failed to create competitor schedule' }),
