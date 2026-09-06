@@ -45,154 +45,151 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const ws = g.ok!.ws;
 
   try {
-    const accRes = await db
-      .from('pa_accounts')
-      .select('id, username, status, pins_count, follower_count, last_run_at, sheet_id, next_run_at, ingest_enabled, interval_days, backfill_status, backfill_cursor, last_result')
-      .eq('workspace_id', ws)
-      .limit(100);
+    // Safely prepare table queries with method checks
+    const runsTable = typeof db.from === 'function' ? db.from('pa_runs') : null;
+    const runsPromise = runsTable && typeof runsTable.select === 'function'
+      ? runsTable.select('account_id, pins_updated, started_at').eq('workspace_id', ws).eq('trigger', 'refresh').order('started_at', { ascending: false }).limit(300)
+      : Promise.resolve({ data: [], error: null });
 
-    if (accRes.error) {
-      return json({ success: false, error: accRes.error.message }, 500);
+    const settingsTable = typeof db.from === 'function' ? db.from('pa_workspace_settings') : null;
+    const settingsPromise = settingsTable && typeof settingsTable.select === 'function'
+      ? settingsTable.select('cron_expression, schedule_status, fastcron_job_id').eq('workspace_id', ws).maybeSingle()
+      : Promise.resolve({ data: null, error: null });
+
+    const pinsTable = typeof db.from === 'function' ? db.from('pa_pins') : null;
+    const countPromise = pinsTable && typeof pinsTable.select === 'function'
+      ? pinsTable.select('*', { count: 'exact', head: true }).eq('workspace_id', ws)
+      : Promise.resolve({ count: 0, error: null });
+
+    // Tier 2: Execute all independent queries concurrently via Promise.allSettled
+    const [
+      accResSettled,
+      countRpcSettled,
+      recentRunsSettled,
+      wsSettingsSettled,
+      totalPinsSettled,
+      sumsRpcSettled
+    ] = await Promise.allSettled([
+      db.from('pa_accounts')
+        .select('id, username, status, pins_count, follower_count, last_run_at, sheet_id, next_run_at, ingest_enabled, interval_days, backfill_status, backfill_cursor, last_result')
+        .eq('workspace_id', ws)
+        .limit(100),
+      typeof db.rpc === 'function'
+        ? db.rpc('pa_account_pin_counts', { p_workspace_id: ws })
+        : Promise.resolve({ data: [], error: null }),
+      runsPromise,
+      settingsPromise,
+      countPromise,
+      typeof db.rpc === 'function'
+        ? db.rpc('pa_workspace_sums', { p_workspace_id: ws })
+        : Promise.resolve({ data: [], error: null })
+    ]);
+
+    // 1. Process Accounts
+    const accRes = accResSettled.status === 'fulfilled' ? accResSettled.value : null;
+    if (!accRes || accRes.error) {
+      return json({ success: false, error: accRes?.error?.message || 'Failed to fetch accounts' }, 500);
     }
-
     let accounts = (accRes.data || []).map((a: any) => ({ ...a }));
 
-    // Fetch live DB pin count per account (pins total + archived qualifying)
+    // 2. Fetch live DB pin count per account (pins total + archived qualifying)
     const countMap = new Map<string, number>();
     const archivedMap = new Map<string, number>();
-    try {
-      if (typeof db.rpc === 'function') {
-        const { data: countData, error: countRpcErr } = await db.rpc('pa_account_pin_counts', { p_workspace_id: ws });
-        if (!countRpcErr && Array.isArray(countData)) {
-          for (const row of countData) {
-            if (row.account_id) {
-              countMap.set(row.account_id, Number(row.pins || 0));
-              archivedMap.set(row.account_id, Number(row.archived ?? row.pins ?? 0));
-            }
-          }
+    const countRpc = countRpcSettled.status === 'fulfilled' ? countRpcSettled.value : null;
+    if (countRpc && !countRpc.error && Array.isArray(countRpc.data)) {
+      for (const row of countRpc.data) {
+        if (row.account_id) {
+          countMap.set(row.account_id, Number(row.pins || 0));
+          archivedMap.set(row.account_id, Number(row.archived ?? row.pins ?? 0));
         }
       }
-    } catch (err) {
-      console.warn('Could not query pa_account_pin_counts:', err);
     }
 
-    for (const a of accounts) {
-      a.db_pins_count = countMap.has(a.id) ? countMap.get(a.id) : a.pins_count;
-      a.archived_count = archivedMap.has(a.id) ? archivedMap.get(a.id) : (a.db_pins_count ?? a.pins_count ?? 0);
-    }
-
-    // Compute Recent Δ per account from its latest refresh run session (preserves delta without 5m global cutoff)
+    // 3. Compute Recent Δ per account from its latest refresh run session
     let changedMap = new Map<string, number>();
-    try {
-      const runsTable = db.from('pa_runs');
-      if (runsTable && typeof runsTable.select === 'function') {
-        const { data: recentRuns } = await runsTable
-          .select('account_id, pins_updated, started_at')
-          .eq('workspace_id', ws)
-          .eq('trigger', 'refresh')
-          .order('started_at', { ascending: false })
-          .limit(300);
-
-        if (Array.isArray(recentRuns) && recentRuns.length > 0) {
-          const accountLatestTime = new Map<string, number>();
-          for (const r of recentRuns) {
-            if (!r.account_id || !r.started_at) continue;
-            const t = new Date(r.started_at).getTime();
-            if (!accountLatestTime.has(r.account_id) || t > accountLatestTime.get(r.account_id)!) {
-              accountLatestTime.set(r.account_id, t);
-            }
-          }
-
-          for (const r of recentRuns) {
-            if (!r.account_id || !r.started_at) continue;
-            const latestT = accountLatestTime.get(r.account_id);
-            if (!latestT) continue;
-            const t = new Date(r.started_at).getTime();
-            // Aggregate batches from the same run session (within 45 minutes of account's latest run)
-            if (latestT - t <= 45 * 60 * 1000) {
-              changedMap.set(r.account_id, (changedMap.get(r.account_id) || 0) + Number(r.pins_updated || 0));
-            }
-          }
+    const runsRes = recentRunsSettled.status === 'fulfilled' ? recentRunsSettled.value : null;
+    const recentRuns = (runsRes && !runsRes.error && Array.isArray(runsRes.data)) ? runsRes.data : [];
+    if (recentRuns.length > 0) {
+      const accountLatestTime = new Map<string, number>();
+      for (const r of recentRuns) {
+        if (!r.account_id || !r.started_at) continue;
+        const t = new Date(r.started_at).getTime();
+        if (!accountLatestTime.has(r.account_id) || t > accountLatestTime.get(r.account_id)!) {
+          accountLatestTime.set(r.account_id, t);
         }
       }
-    } catch (err) {
-      console.warn('Could not query pa_runs refresh delta:', err);
+
+      for (const r of recentRuns) {
+        if (!r.account_id || !r.started_at) continue;
+        const latestT = accountLatestTime.get(r.account_id);
+        if (!latestT) continue;
+        const t = new Date(r.started_at).getTime();
+        // Aggregate batches from the same run session (within 45 minutes of account's latest run)
+        if (latestT - t <= 45 * 60 * 1000) {
+          changedMap.set(r.account_id, (changedMap.get(r.account_id) || 0) + Number(r.pins_updated || 0));
+        }
+      }
     }
 
-    // Derive active schedule next run from persisted workspace settings
+    // 4. Derive active schedule next run from persisted workspace settings
     let activeNextRunIso: string | null = null;
-    try {
-      const settingsTable = db.from('pa_workspace_settings');
-      if (settingsTable && typeof settingsTable.select === 'function') {
-        const { data: wsSettings } = await settingsTable
-          .select('cron_expression, schedule_status, fastcron_job_id')
-          .eq('workspace_id', ws)
-          .maybeSingle();
+    const settingsRes = wsSettingsSettled.status === 'fulfilled' ? wsSettingsSettled.value : null;
+    const wsSettings = (settingsRes && !settingsRes.error) ? settingsRes.data : null;
+    if (wsSettings) {
+      const cronExpr = wsSettings.cron_expression;
+      const isPaused = wsSettings.schedule_status === 'paused' || wsSettings.schedule_status === 'disabled';
+      const hasJob = Boolean(wsSettings.fastcron_job_id);
+      const jobTimezone = 'UTC';
 
-        const cronExpr = wsSettings?.cron_expression;
-        const isPaused = wsSettings?.schedule_status === 'paused' || wsSettings?.schedule_status === 'disabled';
-        const hasJob = Boolean(wsSettings?.fastcron_job_id);
-        const jobTimezone = 'UTC';
-
-        if (cronExpr && !isPaused && hasJob) {
-          const nextDate = getNextCronDate(cronExpr, jobTimezone);
-          if (nextDate) {
-            activeNextRunIso = nextDate.toISOString();
-          }
+      if (cronExpr && !isPaused && hasJob) {
+        const nextDate = getNextCronDate(cronExpr, jobTimezone);
+        if (nextDate) {
+          activeNextRunIso = nextDate.toISOString();
         }
       }
-    } catch (err: any) {
-      console.warn(`[PinArchive Overview] Could not derive schedule next run for workspace ${ws}:`, err?.message || err);
     }
 
-    // Attach to each account:
+    // Attach computed metrics to each account:
     accounts = accounts.map((a: any) => ({
       ...a,
+      db_pins_count: countMap.has(a.id) ? countMap.get(a.id) : a.pins_count,
+      archived_count: archivedMap.has(a.id) ? archivedMap.get(a.id) : (countMap.has(a.id) ? countMap.get(a.id) : a.pins_count ?? 0),
       next_run_at: activeNextRunIso || a.next_run_at || null,
       changed_last_refresh: changedMap.get(a.id) ?? 0,
-      checked_last_refresh: Number(a.db_pins_count ?? 0), // total pins for account = checked
+      checked_last_refresh: Number(countMap.get(a.id) ?? a.pins_count ?? 0),
     }));
 
-    // 1. Get exact total pins count once via lightweight HEAD request
-    const { count: totalPinsCount, error: countErr } = await db
-      .from('pa_pins')
-      .select('*', { count: 'exact', head: true })
-      .eq('workspace_id', ws);
+    // 5. Total pins count from exact count HEAD request
+    const totalPinsRes = totalPinsSettled.status === 'fulfilled' ? totalPinsSettled.value : null;
+    const totalPins = (totalPinsRes && !totalPinsRes.error && typeof totalPinsRes.count === 'number')
+      ? totalPinsRes.count
+      : 0;
 
-    if (countErr) {
-      return json({ success: false, error: countErr.message }, 500);
-    }
-
-    const totalPins = totalPinsCount ?? 0;
-
-    // 2. Sums via SQL RPC; fallback to paginated scan if RPC unavailable
+    // 6. Sums via SQL RPC; bounded single-page fallback to protect latency (no un-capped while(true))
     let sumSaves = 0, sumShares = 0;
-    try {
-      const rpcRes = await db.rpc('pa_workspace_sums', { p_workspace_id: ws });
-      if (!rpcRes.error && Array.isArray(rpcRes.data) && rpcRes.data.length > 0) {
-        sumSaves = Number(rpcRes.data[0].sum_saves || 0);
-        sumShares = Number(rpcRes.data[0].sum_shares || 0);
-      } else {
-        const PAGE = 1000;
-        let offset = 0;
-        while (true) {
-          const { data, error } = await db
-            .from('pa_pins')
-            .select('saves, share_count')
-            .eq('workspace_id', ws)
-            .order('pin_id', { ascending: true })
-            .range(offset, offset + PAGE - 1);
-          if (error) break;
-          for (const p of data || []) {
+    const rpcRes = sumsRpcSettled.status === 'fulfilled' ? sumsRpcSettled.value : null;
+    if (rpcRes && !rpcRes.error && Array.isArray(rpcRes.data) && rpcRes.data.length > 0) {
+      sumSaves = Number(rpcRes.data[0].sum_saves || 0);
+      sumShares = Number(rpcRes.data[0].sum_shares || 0);
+    } else {
+      try {
+        if (pinsTable && typeof pinsTable.select === 'function') {
+          const query = pinsTable.select('saves, share_count').eq('workspace_id', ws);
+          const ordered = typeof query?.order === 'function' ? query.order('pin_id', { ascending: true }) : query;
+          const paged = typeof ordered?.range === 'function'
+            ? ordered.range(0, 999)
+            : typeof ordered?.limit === 'function'
+            ? ordered.limit(1000)
+            : ordered;
+          const { data: fallbackPins } = await paged;
+          for (const p of fallbackPins || []) {
             sumSaves += Number(p.saves || 0);
             sumShares += Number(p.share_count || 0);
           }
-          if (!data || data.length < PAGE) break;
-          offset += PAGE;
         }
+      } catch (sumErr) {
+        console.warn('[PinArchive Overview] Sums query fallback warning:', sumErr);
       }
-    } catch (sumErr) {
-      console.warn('[PinArchive Overview] Sums query warning:', sumErr);
     }
 
     return json({
