@@ -243,10 +243,26 @@ function normalizeMetrics(raw: PinnerRawMetrics = {}) {
 
 export const pinnerETL = {
   /**
-   * Resets failure tracker for a workspace (useful for tests).
+   * Resets failure tracker for a workspace/connection/channel (useful for tests).
    */
-  resetFailureStreak(workspaceId: string) {
-    failureStreakTracker.delete(workspaceId);
+  resetFailureStreak(workspaceId: string, connectionId?: string, channel?: string) {
+    if (connectionId && channel) {
+      failureStreakTracker.delete(`${workspaceId}:${connectionId}:${channel}`);
+    } else {
+      const prefix = `${workspaceId}:`;
+      for (const key of failureStreakTracker.keys()) {
+        if (key === workspaceId || key.startsWith(prefix)) {
+          failureStreakTracker.delete(key);
+        }
+      }
+    }
+  },
+
+  /**
+   * Returns current failure streak count for a workspace/connection/channel.
+   */
+  getFailureStreak(workspaceId: string, connectionId: string, channel: string): number {
+    return failureStreakTracker.get(`${workspaceId}:${connectionId}:${channel}`)?.count ?? 0;
   },
 
   /**
@@ -410,14 +426,15 @@ export const pinnerETL = {
           await this.handleAccountRevocation(workspaceId, connectionId, errorDetails, runtimeEnv);
         }
 
-        const streak = failureStreakTracker.get(workspaceId) || { count: 0, lastFailedAt: nowIso };
+        const trackerKey = `${workspaceId}:${connectionId}:${channel}`;
+        const streak = failureStreakTracker.get(trackerKey) || { count: 0, lastFailedAt: nowIso };
         streak.count += 1;
         streak.lastFailedAt = nowIso;
-        if (failureStreakTracker.size >= MAX_TRACKER_SIZE && !failureStreakTracker.has(workspaceId)) {
+        if (failureStreakTracker.size >= MAX_TRACKER_SIZE && !failureStreakTracker.has(trackerKey)) {
           const oldestKey = failureStreakTracker.keys().next().value;
           if (oldestKey) failureStreakTracker.delete(oldestKey);
         }
-        failureStreakTracker.set(workspaceId, streak);
+        failureStreakTracker.set(trackerKey, streak);
 
         const currentStreak = streak.count;
         let snitchFired = false;
@@ -477,7 +494,7 @@ export const pinnerETL = {
       }
 
       // Reset failure streak on success
-      failureStreakTracker.delete(workspaceId);
+      failureStreakTracker.delete(`${workspaceId}:${connectionId}:${channel}`);
 
       const dailyRows: AccountAnalyticsDaily[] = [];
       let summaryRow: AccountAnalyticsSummary | null = null;

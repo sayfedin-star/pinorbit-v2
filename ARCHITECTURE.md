@@ -144,4 +144,15 @@ All migrations must be applied sequentially in chronological order matching the 
 6. **Concurrent Cross-Batch Duplicate Dispatch Race (Accepted-by-Design):**
    - *Risk:* Two independent batches initiated simultaneously with different `batchUuid`s targeting the exact same pin and account could both pass the initial `checkPriorDispatches` read check and insert duplicate draft pins into P1 before either batch finishes recording stamps to P4 (`pa_pin_dispatches`).
    - *Decision:* Cross-batch distributed locking between P1 and P4 for arbitrary concurrent dispatches is deliberately omitted to prevent distributed lock contention, network partitioning deadlocks, and latency spikes across database boundaries. Pin dispatches are user-initiated with frontend idempotency guards (disabling submit buttons and displaying active state). In the rare event of a concurrent race, P1 pins are created in `draft` status, allowing harmless manual cleanup by the user. Once stamps are committed in P4, all subsequent batches and zombie recovery CAS passes deterministically detect and deduplicate against existing stamps.
+7. **Webhook Ingest & Execution Idempotency:**
+   - *Design:* Single-statement `INSERT INTO public.webhook_execution_idempotency` with 7-day TTL cleanup in `increment_webhook_execution` RPC prevents duplicate quota deductions on network retries while bounding table storage.
+   - *Pin Posting Dedup:* Webhook callback `pin.posted` short-circuits returning HTTP 200 `{ success: true, handled: 'pin_posted_duplicate' }` when `pin.status === 'posted'`, preventing mutation of `posted_at` or duplicate delivery log entries.
+8. **ETL Failure Streak Scoping:**
+   - *Design:* In-memory tracker keys streaks on `${workspaceId}:${connectionId}:${channel}` ensuring that failure streaks on one connection or channel do not cross-pollute another connection or channel within the same tenant.
+9. **PinArchive Safe Default & Pre-CAS Validation:**
+   - *Safe Default:* Staged pin dispatches enforce `allowDuplicates = false` across both service and HTTP layer (requiring explicit opt-in for duplicate dispatches).
+   - *Pre-CAS Verification:* Destination validation checks target board publishability on P1 prior to CAS acquisition, rolling back or rejecting early while preserving 409 conflict semantics when staged pins are missing or already consumed.
+10. **Secret Resolution Parity & Fail-Closed Scoping:**
+   - *Parity:* `getEffectiveSecret` strictly throws `HttpError(400, 'Invalid workspace UUID')` when a truthy non-UUID workspace ID is provided, aligning behavior with `getSecretCandidates` and preventing malformed sessions from collapsing into shared global secrets.
+
 

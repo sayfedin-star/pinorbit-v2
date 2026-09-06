@@ -22,6 +22,7 @@ export async function handleDispatch(body: any, locals: any) {
   if (!hasSchedulingSecretKey(runtimeEnv)) return json({ success: false, error: 'SCHEDULING_SUPABASE_SECRET_KEY not configured; dispatch disabled.' }, 503);
 
   const admin = dbClients.getSchedulingAdmin(runtimeEnv);
+  const dispatchBatchId = crypto.randomUUID();
 
   const force = body?.force === true || body?.force === 'true';
 
@@ -334,10 +335,12 @@ export async function handleDispatch(body: any, locals: any) {
 
     // Update webhook counter atomically via increment_webhook_execution RPC
     if (successfulExecutions > 0) {
+      const idempotencyKey = `dispatch_inc_${dispatchBatchId}`;
       const { error: incErr } = await admin.rpc('increment_webhook_execution', {
         p_webhook_id: hook.id,
         p_count: successfulExecutions,
         p_workspace_id: workspaceId,
+        p_idempotency_key: idempotencyKey,
       });
       if (incErr) {
         console.warn('[Dispatch] increment_webhook_execution RPC failed, retrying once:', incErr.message);
@@ -345,6 +348,7 @@ export async function handleDispatch(body: any, locals: any) {
           p_webhook_id: hook.id,
           p_count: successfulExecutions,
           p_workspace_id: workspaceId,
+          p_idempotency_key: idempotencyKey,
         });
         if (retryErr) {
           console.error('[Dispatch] Fatal: increment_webhook_execution retry failed:', retryErr.message);

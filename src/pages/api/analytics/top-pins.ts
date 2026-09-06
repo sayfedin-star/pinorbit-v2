@@ -25,7 +25,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const workspaceId = url.searchParams.get('workspace_id') || locals.activeWorkspaceId;
   const connectionId = url.searchParams.get('connection_id');
   const sortBy = (url.searchParams.get('sort_by') || 'IMPRESSION').toUpperCase() as PinnerSortBy;
-  const limit = parseInt(url.searchParams.get('limit') || '50', 10);
+  const rawLimit = parseInt(url.searchParams.get('limit') || '50', 10);
+  const limit = isNaN(rawLimit) ? 50 : Math.min(Math.max(rawLimit, 1), 100);
   const bypassCacheParam = url.searchParams.get('cache_bypass') === '1';
   let bypassCache = false;
 

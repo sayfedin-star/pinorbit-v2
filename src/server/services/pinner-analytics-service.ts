@@ -39,9 +39,10 @@ export const pinnerAnalyticsService = {
     kvNamespace?: any,
     bypassCache = false
   ): Promise<ServiceResponse<PinnerOverviewKPIs>> {
+    const clampedWindowDays = Math.min(Math.max(1, typeof windowDays === 'number' && !isNaN(windowDays) ? Math.floor(windowDays) : 30), 365);
     await assertWorkspaceAccess(schedulingClient, workspaceId, userId);
 
-    const cacheKey = edgeCache.keys.overview(workspaceId, connectionId, windowDays);
+    const cacheKey = edgeCache.keys.overview(workspaceId, connectionId, clampedWindowDays);
     let cached: any = { status: 'MISS', data: null };
 
     if (!bypassCache) {
@@ -56,12 +57,12 @@ export const pinnerAnalyticsService = {
 
     // Fallback: Query Project 3
     const now = new Date();
-    const startDateObj = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
+    const startDateObj = new Date(now.getTime() - clampedWindowDays * 24 * 60 * 60 * 1000);
     const startDate = startDateObj.toISOString().split('T')[0];
     const endDate = now.toISOString().split('T')[0];
 
     const [overview, topPins] = await Promise.all([
-      analyticsDb.getAccountOverviewMetrics(workspaceId, connectionId, windowDays),
+      analyticsDb.getAccountOverviewMetrics(workspaceId, connectionId, clampedWindowDays),
       analyticsDb.getRankedTopPins(workspaceId, connectionId, 'IMPRESSION', 50),
     ]);
 
@@ -243,10 +244,11 @@ export const pinnerAnalyticsService = {
     kvNamespace?: any,
     bypassCache = false
   ): Promise<ServiceResponse<AccountAnalyticsDaily[]>> {
+    const clampedWindowDays = Math.min(Math.max(1, typeof windowDays === 'number' && !isNaN(windowDays) ? Math.floor(windowDays) : 30), 365);
     await assertWorkspaceAccess(schedulingClient, workspaceId, userId);
 
     // R10.3: Single source of truth for timeseries key
-    const cacheKey = edgeCache.keys.timeseries(workspaceId, connectionId, windowDays);
+    const cacheKey = edgeCache.keys.timeseries(workspaceId, connectionId, clampedWindowDays);
     let cached: any = { status: 'MISS', data: null };
 
     if (!bypassCache) {
@@ -262,7 +264,7 @@ export const pinnerAnalyticsService = {
     const dailyRows = await analyticsDb.getDailyTimeSeries(
       workspaceId,
       connectionId,
-      windowDays
+      clampedWindowDays
     );
 
     // R10.1: NEVER cache empty results

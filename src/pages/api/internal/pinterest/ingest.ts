@@ -78,6 +78,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
         }
         return new Response(JSON.stringify({ success: true, handled: 'pin_failed', exhausted }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
+
+      // Idempotency guard: If pin is already posted, do not mutate posted_at or create duplicate delivery logs
+      if (pin.status === 'posted') {
+        return new Response(JSON.stringify({ success: true, handled: 'pin_posted_duplicate', pin_id: internalId }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
       const postedAt = payload.created_at
         ? (() => {
             try {
@@ -124,7 +130,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
         attempt_no: pin.attempts,
         event_type: 'dispatch_success',
         provider: 'pinterest',
-        metadata: { pinterest_pin_id: payload.id || pin.pinterest_pin_id, board_id: payload.board_id, source: 'make_callback' }
+        metadata: {
+          pinterest_pin_id: payload.id || pin.pinterest_pin_id,
+          board_id: payload.board_id,
+          source: 'make_callback',
+          ...(payload.idempotency_key ? { idempotency_key: payload.idempotency_key } : {}),
+        }
       });
       if (logErr) {
         console.warn('[IngestAPI] Failed to record pin delivery log:', logErr.message);

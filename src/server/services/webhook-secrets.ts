@@ -118,9 +118,12 @@ export async function getEffectiveSecret(
   wsId: string,
   runtimeEnv: Record<string, any>
 ): Promise<IngestSecretResolution> {
+  if (wsId && !UUID_REGEX.test(wsId)) {
+    throw new HttpError(400, 'Invalid workspace UUID');
+  }
   const kv = runtimeEnv?.INGEST_SECRETS_KV;
   if (kv) {
-    if (wsId && UUID_REGEX.test(wsId)) {
+    if (wsId) {
       const ws = await kv.get(wsKey(wsId));
       if (ws) return { value: ws, source: 'workspace' };
       const wsPrev = await kv.get(`${wsKey(wsId)}:prev`);
