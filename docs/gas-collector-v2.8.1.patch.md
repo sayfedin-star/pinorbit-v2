@@ -265,8 +265,9 @@ function handleAccountAges_(p) {
           t = cell.getTime();
         } else {
           const s = String(cell).trim();
-          if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(s)) {
-            t = Date.parse(s.replace(' ', 'T') + 'Z');
+          const isoMatch = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/);
+          if (isoMatch) {
+            t = Date.parse(isoMatch[1] + 'T' + isoMatch[2] + 'Z');
           } else {
             t = Date.parse(s);
           }

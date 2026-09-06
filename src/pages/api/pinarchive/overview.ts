@@ -89,16 +89,27 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const chunk1 = allUsernames.slice(0, 50);
     const chunk2 = allUsernames.slice(50, 100);
 
-    // TIER C Hardening: check edge cache with distinct key per rule 6
+    // TIER C Hardening: deterministic hash-based edge cache key (capped length, order-independent)
     const kv = getAnalyticsKV(locals);
-    const agesCacheKey = `pa:ages:v2:${ws}:${allUsernames.join(',')}`;
     let cachedAges: Record<string, string | null> | null = null;
-    try {
-      const cached = await edgeCache.get<Record<string, string | null>>(agesCacheKey, kv);
-      if (cached.status === 'HIT' && cached.data) {
-        cachedAges = cached.data;
-      }
-    } catch {}
+    let agesCacheKey = '';
+
+    if (allUsernames.length > 0) {
+      const sortedJoined = [...allUsernames].sort().join('|');
+      const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sortedJoined));
+      const hashHex = Array.from(new Uint8Array(hashBuf))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+        .slice(0, 16);
+      agesCacheKey = `pa:ages:v2:${ws}:${hashHex}`;
+
+      try {
+        const cached = await edgeCache.get<Record<string, string | null>>(agesCacheKey, kv);
+        if (cached.status === 'HIT' && cached.data) {
+          cachedAges = cached.data;
+        }
+      } catch {}
+    }
 
     // Concurrently fetch recent runs, schedule settings, and account ages within the shared 8s budget
     const [recentRuns, wsSettings, agesRes1, agesRes2] = await Promise.all([
@@ -202,7 +213,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     }
 
     // Save to edge cache (6 hours TTL) if fresh data was acquired
-    if (!cachedAges && Object.keys(combinedAges).length > 0) {
+    if (!cachedAges && agesCacheKey && Object.keys(combinedAges).length > 0) {
       try {
         await edgeCache.set(agesCacheKey, combinedAges, kv, 6 * 3600);
       } catch {}
