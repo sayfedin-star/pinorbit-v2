@@ -449,13 +449,25 @@ function handleSheetWrite_(p) {
     const lastRow = sh.getLastRow();
     const nowHuman = fmtDate_(new Date());
 
+    // In-batch deduplication (Fix integration)
+    const dedupedRows = [];
+    const seen = {};
+    for (const r of rawRows) {
+      const id = String((r && r.pin_id) || '').trim();
+      if (!id || seen[id]) continue;
+      seen[id] = true;
+      dedupedRows.push(r);
+    }
+
     if (mode === 'append') {
-      const rowsToAdd = rawRows.map(r => {
+      const rowsToAdd = dedupedRows.map(r => {
         if (!r.first_seen_at) r.first_seen_at = nowHuman;
         if (!r.last_updated_at) r.last_updated_at = nowHuman;
         return buildRow_(r, map, width);
       });
-      sh.getRange(lastRow + 1, 1, rowsToAdd.length, width).setValues(rowsToAdd);
+      if (rowsToAdd.length > 0) {
+        sh.getRange(lastRow + 1, 1, rowsToAdd.length, width).setValues(rowsToAdd);
+      }
       return out_({
         ok: true,
         version: '2.8.2',
@@ -479,22 +491,16 @@ function handleSheetWrite_(p) {
     const toAppend = [];
     const updatedIndices = [];
 
-    for (let j = 0; j < rawRows.length; j++) {
-      const r = rawRows[j];
+    for (let j = 0; j < dedupedRows.length; j++) {
+      const r = dedupedRows[j];
       const pinId = String(r.pin_id || '').trim();
       if (!pinId) continue;
       const idx = index[pinId];
       if (idx !== undefined) {
         const existRow = existingRows[idx];
-        const oldSaves = Number(getF_(existRow, map, 'saves') || 0);
-        const oldRepins = Number(getF_(existRow, map, 'repins') || 0);
-        const oldComments = Number(getF_(existRow, map, 'comments') || 0);
-        const newSaves = Number(r.saves || 0);
-        const newRepins = Number(r.repins || 0);
-        const newComments = Number(r.comments || 0);
 
-        if (oldSaves === newSaves && oldRepins === newRepins && oldComments === newComments) {
-          // No metrics changed, skip writing
+        // Comprehensive row update check (Fix integration)
+        if (!rowNeedsUpdate_(existRow, map, r)) {
           continue;
         }
 
