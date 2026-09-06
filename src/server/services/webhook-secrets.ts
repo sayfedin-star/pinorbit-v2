@@ -1,5 +1,6 @@
 import { getServerEnv } from '../db/clients';
 import { timingSafeEqual } from '../lib/timing-safe';
+import { HttpError } from '../lib/http-error';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -44,6 +45,10 @@ export async function getSecretCandidates(
       ? (globalThis as any)?.INGEST_SECRETS_KV || (globalThis as any)?.env?.INGEST_SECRETS_KV
       : undefined);
 
+  if (wsId && !UUID_REGEX.test(wsId)) {
+    throw new HttpError(400, 'Invalid workspace UUID');
+  }
+
   if (kv && wsId && UUID_REGEX.test(wsId)) {
     // 1. Workspace override (current)
     const ws = await kv.get(wsKey(wsId));
@@ -60,8 +65,8 @@ export async function getSecretCandidates(
     // 4. Global secret (grace period - 300s)
     const gPrev = await kv.get(`${GLOBAL_KEY}:prev`);
     if (gPrev) candidates.push({ value: gPrev, source: 'global:prev' });
-  } else if (kv) {
-    // If wsId is missing or invalid UUID but KV is present, still allow global candidates
+  } else if (kv && !wsId) {
+    // Only allow global candidates when workspaceId is omitted
     const g = await kv.get(GLOBAL_KEY);
     if (g) candidates.push({ value: g, source: 'global' });
     const gPrev = await kv.get(`${GLOBAL_KEY}:prev`);

@@ -122,20 +122,25 @@ export async function resolveToken(
   const kek = await resolveTokenKek(runtimeEnv || {});
 
   // 1. Schedule-encrypted token (AES-GCM decrypted via TOKEN_KEK)
-  if (encryptedToken && kek) {
-    try {
-      const dec = await decryptToken(encryptedToken, kek, runtimeEnv);
-      if (dec && dec.trim().length >= 8) {
-        return {
-          token: dec.trim(),
-          source: 'schedule_override',
-          tokenId: null,
-          name: 'Schedule Token Override',
-          maskedToken: maskToken(dec.trim()),
-        };
+  if (encryptedToken) {
+    if (!workspaceId) {
+      throw new Error('Tenant isolation violation: workspaceId is required when resolving schedule override token');
+    }
+    if (kek) {
+      try {
+        const dec = await decryptToken(encryptedToken, kek, runtimeEnv);
+        if (dec && dec.trim().length >= 8) {
+          return {
+            token: dec.trim(),
+            source: 'schedule_override',
+            tokenId: null,
+            name: 'Schedule Token Override',
+            maskedToken: maskToken(dec.trim()),
+          };
+        }
+      } catch (err) {
+        console.warn('[TokenResolver] Failed to decrypt schedule-level token:', err);
       }
-    } catch (err) {
-      console.warn('[TokenResolver] Failed to decrypt schedule-level token:', err);
     }
   }
 
@@ -166,6 +171,9 @@ export async function resolveToken(
           maskedToken: row.token_masked || maskToken(dec.trim()),
         };
       }
+      if (!dec) {
+        throw new Error('Workspace token undecryptable; KEK mismatch — fail-lazy, not env fallback');
+      }
     }
   }
 
@@ -178,10 +186,12 @@ export async function resolveToken(
       .eq('is_default', true)
       .maybeSingle();
 
-    if (defRow) {
+    if (defRow && (defRow.token_encrypted || (defRow as any).token)) {
       let dec = defRow.token_encrypted && kek ? await decryptToken(defRow.token_encrypted, kek, runtimeEnv) : null;
       if (!dec && (defRow as any).token) dec = (defRow as any).token;
-      if (!dec && envToken) dec = envToken;
+      if (!dec) {
+        throw new Error('Workspace token undecryptable; KEK mismatch — fail-lazy, not env fallback');
+      }
       if (dec && dec.trim().length >= 8) {
         return {
           token: dec.trim(),
@@ -218,8 +228,14 @@ export async function resolveToken(
             maskedToken: anyRows[0].token_masked || maskToken(dec.trim()),
           };
         }
+        if (!dec) {
+          throw new Error('Workspace token undecryptable; KEK mismatch — fail-lazy, not env fallback');
+        }
       }
     } catch (regErr: any) {
+      if (regErr?.message?.includes('KEK mismatch')) {
+        throw regErr;
+      }
       console.warn('[TokenResolver] Non-fatal registry token lookup error:', regErr?.message || regErr);
     }
   }

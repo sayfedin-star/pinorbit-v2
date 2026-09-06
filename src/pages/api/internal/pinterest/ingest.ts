@@ -189,7 +189,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         status: insErr ? 'failed' : 'completed',
         error_message: insErr?.message || null,
         completed_at: new Date().toISOString(),
-      }).eq('idempotency_key', idemKey);
+      }).eq('idempotency_key', idemKey).eq('workspace_id', wsId);
       if (provErr) {
         console.warn('[IngestAPI] Failed to update board_provisioning_requests:', provErr.message);
       }
@@ -276,8 +276,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
           { onConflict: 'account_id,board_id' }
         );
         if (upErr) {
-          errors.push(`Batch upsert: ${upErr.message}`);
-          console.warn('[IngestAPI] Batch board upsert error:', upErr.message);
+          console.warn('[IngestAPI] Batch board upsert error, falling back to per-row upsert:', upErr.message);
+          for (const boardRow of boardsToUpsert) {
+            const { error: singleErr } = await admin.from('boards').upsert(
+              boardRow,
+              { onConflict: 'account_id,board_id' }
+            );
+            if (singleErr) {
+              errors.push(`Board ${boardRow.board_id}: ${singleErr.message}`);
+            } else {
+              syncedCount++;
+            }
+          }
+          if (syncedCount === 0) {
+            errors.unshift(`Batch upsert: ${upErr.message}`);
+          }
         } else {
           syncedCount = boardsToUpsert.length;
         }

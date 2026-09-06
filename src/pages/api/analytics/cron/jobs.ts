@@ -32,7 +32,7 @@ export const GET: APIRoute = async ({ locals }) => {
   }
 
   try {
-    await assertWorkspaceAccess(schedulingClient, workspaceId, user.id);
+    const { isAdmin } = await assertWorkspaceAccess(schedulingClient, workspaceId, user.id);
 
     const connections = await analyticsDb.listWorkspaceConnections(workspaceId);
     const settings = await analyticsDb.getWorkspaceAnalyticsSettings(workspaceId);
@@ -92,7 +92,8 @@ export const GET: APIRoute = async ({ locals }) => {
         cron_expression: conn.analytics_cron_expression || '0 4 * * *',
         sync_time: conn.analytics_sync_time || '04:00',
         schedule_status: conn.analytics_schedule_status || 'pending',
-        webhook_url: conn.analytics_webhook_url || null,
+        webhook_url: isAdmin ? (conn.analytics_webhook_url || null) : null,
+        has_webhook: Boolean(conn.analytics_webhook_url),
         live: liveA
           ? {
               id: idA,
@@ -123,7 +124,8 @@ export const GET: APIRoute = async ({ locals }) => {
         cron_expression: conn.top_pins_cron_expression || '30 4 * * *',
         sync_time: conn.top_pins_sync_time || '04:30',
         schedule_status: conn.top_pins_schedule_status || 'pending',
-        webhook_url: conn.top_pins_webhook_url || null,
+        webhook_url: isAdmin ? (conn.top_pins_webhook_url || null) : null,
+        has_webhook: Boolean(conn.top_pins_webhook_url),
         live: liveB
           ? {
               id: idB,

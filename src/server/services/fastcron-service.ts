@@ -1187,6 +1187,15 @@ export async function deletePublishingSchedule(
     }
   }
 
+  if (jobId && !remoteDeleted) {
+    return {
+      success: false,
+      remote_deleted: false,
+      remote_error: remoteError || 'FastCron remote delete failed',
+      error: remoteError || 'FastCron remote delete failed',
+    };
+  }
+
   const { error: dbErr } = await schedulingClient
     .from('posting_schedules')
     .delete()

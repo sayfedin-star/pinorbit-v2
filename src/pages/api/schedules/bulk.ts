@@ -72,12 +72,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
           results.push({ id, success: true });
         } else if (action === 'delete') {
           const result = await deletePublishingSchedule(id, schedule.fastcron_job_id, runtimeEnv, workspaceId);
-          if (!result.success) throw new Error(result.error);
           results.push({
             id,
-            success: true,
+            success: result.success,
             remote_deleted: result.remote_deleted,
             remote_error: result.remote_error,
+            error: result.error,
           });
         } else if (action === 'clone') {
           const result = await clonePublishingSchedule(id, runtimeEnv, workspaceId);
@@ -89,7 +89,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
     }
 
-    const remoteOrphans = results.filter(r => r.success && r.remote_error).length;
+    const remoteOrphans = results.filter(r => !r.success && r.remote_error).length;
     const summary = {
       total: ids.length,
       success: results.filter(r => r.success).length,

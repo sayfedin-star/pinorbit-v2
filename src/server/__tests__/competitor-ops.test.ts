@@ -455,22 +455,18 @@ describe('Competitor Ops Console API Endpoints', () => {
           };
         }
         if (table === 'competitor_boards') {
-          return {
-            select: vi.fn().mockReturnValue({
-              eq: vi.fn().mockReturnValue({
-                not: vi.fn().mockReturnValue({
-                  order: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      maybeSingle: vi.fn().mockResolvedValue({
-                        data: { board_created_at: '2026-01-01T00:00:00Z' },
-                        error: null,
-                      }),
-                    }),
-                  }),
-                }),
-              }),
+          const b: any = {
+            select: vi.fn(() => b),
+            eq: vi.fn(() => b),
+            not: vi.fn(() => b),
+            order: vi.fn(() => b),
+            limit: vi.fn(() => b),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: { board_created_at: '2026-01-01T00:00:00Z' },
+              error: null,
             }),
           };
+          return b;
         }
         return {};
       });
@@ -508,19 +504,18 @@ describe('Competitor Ops Console API Endpoints', () => {
           };
         }
         if (table === 'competitor_boards') {
-          return {
-            select: vi.fn().mockReturnValue({
-              eq: vi.fn().mockReturnValue({
-                order: vi.fn().mockResolvedValue({
-                  data: [
-                    { id: 'b1', name: 'Board 1', pin_count: 500 },
-                    { id: 'b2', name: 'Board 2', pin_count: 200 },
-                  ],
-                  error: null,
-                }),
-              }),
+          const b: any = {
+            select: vi.fn(() => b),
+            eq: vi.fn(() => b),
+            order: vi.fn().mockResolvedValue({
+              data: [
+                { id: 'b1', name: 'Board 1', pin_count: 500 },
+                { id: 'b2', name: 'Board 2', pin_count: 200 },
+              ],
+              error: null,
             }),
           };
+          return b;
         }
         return {};
       });

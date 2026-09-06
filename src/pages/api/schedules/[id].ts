@@ -107,7 +107,17 @@ export const DELETE: APIRoute = async ({ params, locals }) => {
       return new Response(JSON.stringify({ error: 'Schedule not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
     }
     const result = await deletePublishingSchedule(id, schedule?.fastcron_job_id, runtimeEnv, workspaceId);
-    if (!result.success) throw new Error(result.error);
+    if (!result.success) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: result.error || result.remote_error || 'Failed to delete schedule',
+          remote_deleted: result.remote_deleted,
+          remote_error: result.remote_error,
+        }),
+        { status: 502, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
     return new Response(JSON.stringify({ success: true, remote_deleted: result.remote_deleted, remote_error: result.remote_error }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (err: any) {
     return new Response(JSON.stringify({ error: err.message || 'Failed to delete schedule' }), { status: 500, headers: { 'Content-Type': 'application/json' } });

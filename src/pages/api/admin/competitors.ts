@@ -138,7 +138,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
   if (boardsOnly) {
     const comp = await db.from('competitors').select('id').eq('id', id).eq('workspace_id', g.ok!.ws).maybeSingle();
     if (!comp.data) return json({ error: 'Not found in workspace' }, 404);
-    const { data: boards, error: bErr } = await db.from('competitor_boards').select('*').eq('competitor_id', id).order('pin_count', { ascending: false });
+    const { data: boards, error: bErr } = await db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false });
     if (bErr) return json({ error: bErr.message }, 500);
     return json({ success: true, boards: boards || [] });
   }
@@ -158,6 +158,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       db.from('competitor_boards')
         .select('board_created_at')
         .eq('competitor_id', id)
+        .eq('workspace_id', g.ok!.ws)
         .not('board_created_at', 'is', null)
         .order('board_created_at', { ascending: true })
         .limit(1)
@@ -175,7 +176,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
   } else {
     const [snaps, boards, topPins] = await Promise.all([
       db.from('competitor_snapshots').select('*').eq('competitor_id', id).order('recorded_at', { ascending: false }).limit(100),
-      db.from('competitor_boards').select('*').eq('competitor_id', id).order('pin_count', { ascending: false }),
+      db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false }),
       db.from('competitor_top_pins').select('*').eq('competitor_id', id).order('save_count', { ascending: false }).limit(10),
     ]);
     snapsList = (snaps.data || []).slice().reverse();

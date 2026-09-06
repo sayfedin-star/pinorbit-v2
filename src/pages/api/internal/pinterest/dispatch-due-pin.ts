@@ -2,6 +2,7 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import { dbClients, hasSchedulingSecretKey } from '../../../../server/db/clients';
 import { triggerBoardAction } from '../../../../server/services/fastcron-service';
+import { validateSafeUrl } from '../../../../server/lib/ssrf-guard';
 import {
   checkScheduleWindow,
   clampProcessingTimeoutMinutes,
@@ -136,7 +137,7 @@ export async function handleDispatch(body: any, locals: any) {
     if (!force && (!account || account.is_active === false)) return json({ success: true, dispatched: false, reason: 'account_inactive' });
     const todayStart = new Date(); todayStart.setUTCHours(0, 0, 0, 0);
     const { count: postedToday } = await admin.from('pins').select('*', { count: 'exact', head: true })
-      .eq('account_id', accountId).eq('status', 'posted').gte('posted_at', todayStart.toISOString());
+      .eq('workspace_id', workspaceId).eq('account_id', accountId).eq('status', 'posted').gte('posted_at', todayStart.toISOString());
     if (!force && (postedToday ?? 0) >= (account?.max_pins_per_day ?? 20)) return json({ success: true, dispatched: false, reason: 'cap_reached' });
 
     // 4) Atomic claim: claimed_at and claimed_by_schedule_id are set atomically inside the RPC
@@ -150,8 +151,18 @@ export async function handleDispatch(body: any, locals: any) {
 
     // 5) Webhook channel (schedule's channel first, then any with capacity)
     const { data: hooks } = await admin.from('account_webhooks').select('*').eq('account_id', accountId).eq('is_active', true).order('priority', { ascending: true });
-    const hook = (hooks || []).find((h: any) => h.id === schedule.webhook_id && (h.remaining_capacity ?? 0) > 0)
-      || (hooks || []).find((h: any) => (h.remaining_capacity ?? 0) > 0);
+    const hook = (hooks || []).find((h: any) => h.id === schedule.webhook_id && (h.remaining_capacity ?? h.monthly_capacity ?? 0) > 0)
+      || (hooks || []).find((h: any) => (h.remaining_capacity ?? h.monthly_capacity ?? 0) > 0);
+
+    if (hook?.webhook_url) {
+      try {
+        validateSafeUrl(hook.webhook_url);
+      } catch (ssrfErr: any) {
+        console.warn('[Dispatch] Webhook URL failed SSRF validation:', ssrfErr?.message || ssrfErr);
+        hook.webhook_url = null;
+      }
+    }
+
     if (!hook?.webhook_url) {
       for (const c of claimed) {
         await admin.from('pins').update({
@@ -170,6 +181,8 @@ export async function handleDispatch(body: any, locals: any) {
     const { data: pinsList } = await admin
       .from('pins')
       .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('account_id', accountId)
       .in('id', pinIds);
 
     const rawBoardNames = (pinsList || []).map((p: any) => p.board_name).filter(Boolean);
@@ -257,7 +270,7 @@ export async function handleDispatch(body: any, locals: any) {
           attempts: Math.max(0, (pin.attempts || 1) - 1),
           next_retry_at: new Date(Date.now() + 120000).toISOString(),
           updated_at: new Date().toISOString(),
-        }).eq('id', c.id).eq('workspace_id', workspaceId);
+        }).eq('id', c.id).eq('workspace_id', workspaceId).eq('account_id', accountId);
         skipped++; continue;
       }
 
@@ -289,11 +302,21 @@ export async function handleDispatch(body: any, locals: any) {
           board_name: pin.board_name, board_id: boardId,
         }),
         signal: AbortSignal.timeout(8000),
-      }).catch(() => null);
+      }).catch((err) => {
+        console.warn(`[Dispatch] Webhook push failed for pin ${pin.id}:`, err?.message || err);
+        return null;
+      });
 
       if (pushRes && pushRes.ok) {
         successfulExecutions++;
         dispatched++;
+        // Update pin processing heartbeat to accurately maintain stuck-sweep telemetry
+        await admin.from('pins').update({
+          processing_started_at: new Date().toISOString(),
+          claimed_at: new Date().toISOString(),
+          last_failure_reason: null,
+          updated_at: new Date().toISOString(),
+        }).eq('id', pin.id).eq('workspace_id', workspaceId).eq('account_id', accountId);
       } else {
         // Push failed or timed out: back off and reset pin to pending so it is not abandoned in processing
         await admin.from('pins').update({
@@ -304,7 +327,7 @@ export async function handleDispatch(body: any, locals: any) {
           next_retry_at: new Date(Date.now() + 60000).toISOString(),
           last_failure_reason: pushRes ? `Webhook responded HTTP ${pushRes.status}` : 'Webhook push timed out or connection failed',
           updated_at: new Date().toISOString(),
-        }).eq('id', pin.id).eq('workspace_id', workspaceId);
+        }).eq('id', pin.id).eq('workspace_id', workspaceId).eq('account_id', accountId);
         skipped++;
       }
     }
@@ -317,17 +340,14 @@ export async function handleDispatch(body: any, locals: any) {
         p_workspace_id: workspaceId,
       });
       if (incErr) {
-        console.warn('[Dispatch] increment_webhook_execution RPC failed, falling back:', incErr.message);
-        hook.executions_used = (hook.executions_used ?? 0) + successfulExecutions;
-        hook.monthly_usage = (hook.monthly_usage ?? 0) + successfulExecutions;
-        try {
-          await admin.from('account_webhooks').update({
-            executions_used: hook.executions_used,
-            monthly_usage: hook.monthly_usage,
-            last_used_at: new Date().toISOString(),
-          }).eq('id', hook.id).eq('account_id', accountId);
-        } catch (err: any) {
-          console.warn('[Dispatch] fallback hook counter error:', err?.message || err);
+        console.warn('[Dispatch] increment_webhook_execution RPC failed, retrying once:', incErr.message);
+        const { error: retryErr } = await admin.rpc('increment_webhook_execution', {
+          p_webhook_id: hook.id,
+          p_count: successfulExecutions,
+          p_workspace_id: workspaceId,
+        });
+        if (retryErr) {
+          console.error('[Dispatch] Fatal: increment_webhook_execution retry failed:', retryErr.message);
         }
       }
     }
