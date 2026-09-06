@@ -1092,8 +1092,8 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     try {
       const root = document.getElementById('pinarchive-page-root');
       const wsId = root?.getAttribute('data-workspace-id');
-      const url = wsId ? `/api/admin/competitors?workspace_id=${encodeURIComponent(wsId)}` : '/api/admin/competitors';
-      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      const url = wsId ? `/api/admin/competitors?workspace_id=${encodeURIComponent(wsId)}&lite=1` : '/api/admin/competitors?lite=1';
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
       if (res.ok) {
         const json = await res.json();
         if (json.competitors && Array.isArray(json.competitors)) {
@@ -1105,6 +1105,9 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
                 username: c.username,
               });
             }
+          }
+          if (rawAccounts.length > 0) {
+            filterAndRenderAccounts();
           }
         }
       }
@@ -1788,10 +1791,12 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
       const wsId = root?.getAttribute('data-workspace-id');
       const url = wsId ? `/api/pinarchive/overview?workspace_id=${encodeURIComponent(wsId)}` : '/api/pinarchive/overview';
 
-      const [res] = await Promise.all([
-        fetch(url, { signal: AbortSignal.timeout(8000) }),
-        loadCompetitorUsernames(),
-      ]);
+      // DECOUPLED: Only fetch main overview with extended timeout (15000ms)
+      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+
+      // FIRE-AND-FORGET: Fetch competitor badges independently without blocking KPIs
+      setTimeout(() => loadCompetitorUsernames(), 100);
+
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to load overview');
@@ -1838,6 +1843,11 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
          </td></tr>`;
       document.getElementById('retry-load-btn')?.addEventListener('click', () => {
         if (tbody) tbody.innerHTML = `<tr><td colspan="11" class="p-8 text-center text-xs text-muted-foreground animate-pulse">Loading tracked accounts…</td></tr>`;
+        if (kpiAccounts) kpiAccounts.innerHTML = '<div class="h-8 w-12 bg-muted/60 rounded animate-pulse"></div>';
+        if (kpiArchived) kpiArchived.innerHTML = '<div class="h-8 w-12 bg-muted/60 rounded animate-pulse"></div>';
+        if (kpiSaves) kpiSaves.innerHTML = '<div class="h-8 w-12 bg-muted/60 rounded animate-pulse"></div>';
+        if (kpiShares) kpiShares.innerHTML = '<div class="h-8 w-12 bg-muted/60 rounded animate-pulse"></div>';
+        if (metaText) metaText.textContent = 'Loading sync schedule...';
         loadOverview(2);
       });
     }
