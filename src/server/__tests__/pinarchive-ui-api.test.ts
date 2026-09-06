@@ -10,7 +10,7 @@ import { edgeCache } from '../services/edge-cache';
 vi.mock('../lib/gas-bridge', () => ({
   gasCall: vi.fn().mockResolvedValue({
     ok: true,
-    version: '2.8.1',
+    version: '2.8.2',
     ages: { roseisabelle555: '2026-04-09T00:14:38.000Z' },
   }),
 }));
