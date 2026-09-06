@@ -1,0 +1,383 @@
+---
+export interface Props {
+  id?: string;
+}
+const { id = 'link-notebook-modal' } = Astro.props;
+---
+
+<div
+  id={id}
+  class="fixed inset-0 z-50 hidden items-center justify-center bg-background/80 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto"
+  role="dialog"
+  aria-modal="true"
+>
+  <div class="relative w-full max-w-3xl rounded-2xl border border-border bg-card p-6 shadow-xl transition-all my-8">
+    <!-- Header -->
+    <div class="flex items-center justify-between border-b border-border pb-4 mb-5">
+      <div class="flex items-center gap-3">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <span class="text-xl">🔗</span>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-foreground">Link Notebook (دفتر الروابط)</h3>
+          <p class="text-xs text-muted-foreground">Manage destination URLs, set default landing pages (★), and import sitemaps.</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        id="close-link-notebook-btn"
+        class="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        aria-label="Close"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Tab Bar -->
+    <div class="flex items-center justify-between border-b border-border mb-5 pb-1">
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          id="tab-user-links"
+          class="px-3 py-1.5 text-xs font-bold rounded-lg bg-primary text-primary-foreground transition-all cursor-pointer"
+        >
+          🌐 Global User Links
+        </button>
+        <button
+          type="button"
+          id="tab-workspace-links"
+          class="px-3 py-1.5 text-xs font-bold rounded-lg text-muted-foreground hover:text-foreground transition-all cursor-pointer"
+        >
+          🏢 Workspace Links
+        </button>
+      </div>
+
+      <button
+        type="button"
+        id="toggle-sitemap-import-btn"
+        class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted transition-all cursor-pointer"
+      >
+        <span>🗺️ Import Sitemap</span>
+      </button>
+    </div>
+
+    <!-- Sitemap Import Drawer (Collapsible) -->
+    <div id="sitemap-import-container" class="hidden mb-5 p-4 rounded-xl border border-border bg-muted/30">
+      <h4 class="text-xs font-bold text-foreground mb-2">Import URLs from Remote XML Sitemap</h4>
+      <div class="flex flex-col sm:flex-row gap-2">
+        <input
+          type="url"
+          id="sitemap-url-input"
+          placeholder="https://example.com/sitemap.xml"
+          class="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+        />
+        <button
+          type="button"
+          id="submit-sitemap-btn"
+          class="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 transition-opacity cursor-pointer whitespace-nowrap"
+        >
+          <span id="sitemap-btn-text">Import</span>
+        </button>
+      </div>
+      <p class="text-[11px] text-muted-foreground mt-1.5">
+        Protected by SSRF Seven Gates. Parses standard sitemaps and index files with chunked ingestion.
+      </p>
+    </div>
+
+    <!-- Add New Link Form -->
+    <form id="add-link-form" class="mb-5 p-4 rounded-xl border border-border bg-card/60">
+      <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+        <div class="sm:col-span-6">
+          <label for="link-url-input" class="block text-[11px] font-semibold text-foreground mb-1">Destination URL *</label>
+          <input
+            type="url"
+            id="link-url-input"
+            required
+            placeholder="https://mysite.com/recipe-post"
+            class="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
+        <div class="sm:col-span-4">
+          <label for="link-label-input" class="block text-[11px] font-semibold text-foreground mb-1">Label (Optional)</label>
+          <input
+            type="text"
+            id="link-label-input"
+            placeholder="Auto-derived from slug"
+            class="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
+        <div class="sm:col-span-2 flex items-center gap-2">
+          <button
+            type="submit"
+            id="add-link-submit-btn"
+            class="w-full rounded-xl bg-primary px-3 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 transition-opacity cursor-pointer"
+          >
+            + Add Link
+          </button>
+        </div>
+      </div>
+      <div class="mt-2 flex items-center gap-2">
+        <input type="checkbox" id="link-is-default-input" class="rounded border-border text-primary h-3.5 w-3.5 cursor-pointer" />
+        <label for="link-is-default-input" class="text-xs text-muted-foreground cursor-pointer">Set as default star link (★) for this scope</label>
+      </div>
+    </form>
+
+    <!-- Links Table -->
+    <div class="overflow-x-auto rounded-xl border border-border bg-card">
+      <table class="w-full text-left text-xs">
+        <thead class="border-b border-border bg-muted/40 text-muted-foreground font-semibold">
+          <tr>
+            <th class="py-2.5 px-3 w-10 text-center">★</th>
+            <th class="py-2.5 px-3">Label</th>
+            <th class="py-2.5 px-3">URL / Domain</th>
+            <th class="py-2.5 px-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="links-table-body" class="divide-y divide-border">
+          <tr>
+            <td colspan="4" class="py-6 text-center text-muted-foreground">Loading links...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Status Notice -->
+    <div id="notebook-status-banner" class="hidden mt-4 p-3 rounded-xl text-xs font-medium"></div>
+  </div>
+</div>
+
+<script>
+  let activeScope = 'user';
+  let linksCache: { user_links: any[]; workspace_links: any[] } = { user_links: [], workspace_links: [] };
+
+  const modal = document.getElementById('link-notebook-modal');
+  const closeBtn = document.getElementById('close-link-notebook-btn');
+  const tabUser = document.getElementById('tab-user-links');
+  const tabWs = document.getElementById('tab-workspace-links');
+  const sitemapToggle = document.getElementById('toggle-sitemap-import-btn');
+  const sitemapContainer = document.getElementById('sitemap-import-container');
+  const submitSitemapBtn = document.getElementById('submit-sitemap-btn');
+  const sitemapUrlInput = document.getElementById('sitemap-url-input') as HTMLInputElement | null;
+  const addLinkForm = document.getElementById('add-link-form') as HTMLFormElement | null;
+  const tableBody = document.getElementById('links-table-body');
+  const statusBanner = document.getElementById('notebook-status-banner');
+
+  function showBanner(msg: string, isError = false) {
+    if (!statusBanner) return;
+    statusBanner.textContent = msg;
+    statusBanner.className = isError
+      ? 'mt-4 p-3 rounded-xl text-xs font-medium bg-rose-500/10 text-rose-600 border border-rose-500/20'
+      : 'mt-4 p-3 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20';
+    statusBanner.classList.remove('hidden');
+    setTimeout(() => statusBanner?.classList.add('hidden'), 5000);
+  }
+
+  async function loadLinks() {
+    if (!tableBody) return;
+    tableBody.innerHTML = '<tr><td colspan="4" class="py-6 text-center text-muted-foreground">Loading links...</td></tr>';
+    try {
+      const res = await fetch('/api/links');
+      const data = await res.json();
+      if (data.success) {
+        linksCache = { user_links: data.user_links || [], workspace_links: data.workspace_links || [] };
+        renderLinks();
+      } else {
+        tableBody.innerHTML = `<tr><td colspan="4" class="py-6 text-center text-rose-500">${data.error || 'Failed to load links'}</td></tr>`;
+      }
+    } catch (e: any) {
+      tableBody.innerHTML = `<tr><td colspan="4" class="py-6 text-center text-rose-500">${e.message || 'Network error'}</td></tr>`;
+    }
+  }
+
+  function renderLinks() {
+    if (!tableBody) return;
+    const list = activeScope === 'user' ? linksCache.user_links : linksCache.workspace_links;
+
+    if (list.length === 0) {
+      tableBody.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-muted-foreground">No links registered in this scope yet.</td></tr>';
+      return;
+    }
+
+    tableBody.innerHTML = list.map((item: any) => `
+      <tr class="hover:bg-muted/20 transition-colors">
+        <td class="py-2.5 px-3 text-center">
+          <button
+            type="button"
+            class="star-toggle-btn text-sm cursor-pointer transition-transform hover:scale-110"
+            data-id="${item.id}"
+            data-default="${item.is_default}"
+            title="${item.is_default ? 'Active Default Star Link' : 'Click to make default'}"
+          >
+            ${item.is_default ? '⭐' : '☆'}
+          </button>
+        </td>
+        <td class="py-2.5 px-3 font-semibold text-foreground">
+          ${item.label || item.slug || 'Untitled'}
+        </td>
+        <td class="py-2.5 px-3 max-w-[280px] truncate text-muted-foreground" title="${item.url}">
+          <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="hover:text-primary hover:underline">
+            ${item.url}
+          </a>
+          <span class="block text-[10px] text-muted-foreground/80">Domain: ${item.domain || 'custom'}</span>
+        </td>
+        <td class="py-2.5 px-3 text-right">
+          <button
+            type="button"
+            class="delete-link-btn rounded-lg px-2 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-500/10 transition-colors cursor-pointer"
+            data-id="${item.id}"
+          >
+            Delete
+          </button>
+        </td>
+      </tr>
+    `).join('');
+
+    // Attach listeners
+    tableBody.querySelectorAll('.star-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-id');
+        const curr = btn.getAttribute('data-default') === 'true';
+        if (!id) return;
+        try {
+          const res = await fetch(`/api/links/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isDefault: !curr, scope: activeScope }),
+          });
+          const d = await res.json();
+          if (d.success) {
+            await loadLinks();
+          } else {
+            showBanner(d.error || 'Failed to update star default', true);
+          }
+        } catch (e: any) {
+          showBanner(e.message, true);
+        }
+      });
+    });
+
+    tableBody.querySelectorAll('.delete-link-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-id');
+        if (!id) return;
+        if (!confirm('Are you sure you want to delete this link?')) return;
+        try {
+          const res = await fetch(`/api/links/${id}?scope=${activeScope}`, { method: 'DELETE' });
+          const d = await res.json();
+          if (d.success) {
+            showBanner('Link deleted successfully.');
+            await loadLinks();
+          } else {
+            showBanner(d.error || 'Failed to delete link', true);
+          }
+        } catch (e: any) {
+          showBanner(e.message, true);
+        }
+      });
+    });
+  }
+
+  // Tab Switching
+  tabUser?.addEventListener('click', () => {
+    activeScope = 'user';
+    tabUser.className = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-primary text-primary-foreground transition-all cursor-pointer';
+    tabWs?.setAttribute('class', 'px-3 py-1.5 text-xs font-bold rounded-lg text-muted-foreground hover:text-foreground transition-all cursor-pointer');
+    renderLinks();
+  });
+
+  tabWs?.addEventListener('click', () => {
+    activeScope = 'workspace';
+    tabWs.className = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-primary text-primary-foreground transition-all cursor-pointer';
+    tabUser?.setAttribute('class', 'px-3 py-1.5 text-xs font-bold rounded-lg text-muted-foreground hover:text-foreground transition-all cursor-pointer');
+    renderLinks();
+  });
+
+  // Sitemap Toggle
+  sitemapToggle?.addEventListener('click', () => {
+    sitemapContainer?.classList.toggle('hidden');
+  });
+
+  // Sitemap Submit
+  submitSitemapBtn?.addEventListener('click', async () => {
+    const sitemapUrl = sitemapUrlInput?.value?.trim();
+    if (!sitemapUrl) {
+      showBanner('Please enter a sitemap URL.', true);
+      return;
+    }
+    const btnText = document.getElementById('sitemap-btn-text');
+    if (btnText) btnText.textContent = 'Parsing...';
+    try {
+      const res = await fetch('/api/links/sitemap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sitemapUrl, scope: activeScope }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        showBanner(`Sitemap imported: ${d.imported || 0} new links, ${d.skipped || 0} duplicates.`);
+        if (sitemapUrlInput) sitemapUrlInput.value = '';
+        sitemapContainer?.classList.add('hidden');
+        await loadLinks();
+      } else {
+        showBanner(d.error || 'Failed to import sitemap.', true);
+      }
+    } catch (e: any) {
+      showBanner(e.message, true);
+    } finally {
+      if (btnText) btnText.textContent = 'Import';
+    }
+  });
+
+  // Add Link Submit
+  addLinkForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const urlEl = document.getElementById('link-url-input') as HTMLInputElement | null;
+    const labelEl = document.getElementById('link-label-input') as HTMLInputElement | null;
+    const defaultEl = document.getElementById('link-is-default-input') as HTMLInputElement | null;
+
+    const urlVal = urlEl?.value?.trim();
+    const labelVal = labelEl?.value?.trim();
+    const isDefaultVal = defaultEl?.checked;
+
+    if (!urlVal) return;
+
+    try {
+      const res = await fetch('/api/links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: urlVal,
+          label: labelVal,
+          isDefault: isDefaultVal,
+          scope: activeScope,
+        }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        showBanner('Link added successfully.');
+        addLinkForm?.reset();
+        await loadLinks();
+      } else {
+        showBanner(d.error || 'Failed to add link', true);
+      }
+    } catch (e: any) {
+      showBanner(e.message, true);
+    }
+  });
+
+  // Modal Open / Close Helpers
+  function openModal() {
+    modal?.classList.remove('hidden');
+    modal?.classList.add('flex');
+    loadLinks();
+  }
+
+  function closeModal() {
+    modal?.classList.add('hidden');
+    modal?.classList.remove('flex');
+  }
+
+  closeBtn?.addEventListener('click', closeModal);
+  window.addEventListener('open-link-notebook', openModal);
+  window.addEventListener('open-link-notebook-modal', openModal);
+</script>
