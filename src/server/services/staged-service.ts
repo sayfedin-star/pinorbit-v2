@@ -246,6 +246,47 @@ export function buildFinalLink(originalLink?: string | null, chosen?: string | n
   return safe.toString();
 }
 
+async function assertPublishableBoards(
+  p1Admin: SupabaseClient,
+  workspaceId: string,
+  targets: TargetDestination[]
+): Promise<void> {
+  if (!p1Admin || typeof (p1Admin as any).from !== 'function') {
+    return;
+  }
+
+  const targetAccountIds = [...new Set(targets.map((t) => t.accountId).filter(Boolean))];
+  const targetBoardNames = [...new Set(targets.map((t) => t.boardName).filter(Boolean))];
+
+  if (targetAccountIds.length === 0 || targetBoardNames.length === 0) {
+    throw new HttpError(422, 'Target destination requires accountId and boardName.');
+  }
+
+  const { data: validBoards, error: boardErr } = await p1Admin
+    .from('boards')
+    .select('account_id, board_name, pinterest_board_id')
+    .eq('workspace_id', workspaceId)
+    .in('account_id', targetAccountIds)
+    .in('board_name', targetBoardNames)
+    .not('pinterest_board_id', 'is', null);
+
+  if (boardErr) {
+    throw new HttpError(500, 'Failed to verify target boards: ' + boardErr.message);
+  }
+
+  const validBoardKeys = new Set((validBoards || []).map((b: any) => `${b.account_id}:${b.board_name}`));
+
+  for (const t of targets) {
+    const key = `${t.accountId}:${t.boardName}`;
+    if (!validBoardKeys.has(key)) {
+      throw new HttpError(
+        422,
+        `Board "${t.boardName}" on account "${t.accountLabel}" is not a publishable board (missing Pinterest remote ID).`
+      );
+    }
+  }
+}
+
 export async function dispatchStagedPin(
   paAdmin: SupabaseClient,
   p1Admin: SupabaseClient,
@@ -307,6 +348,8 @@ export async function dispatchStagedPin(
   // 3. Invoke executeRepurposeDispatch
   const batchUuid = crypto.randomUUID();
   try {
+    await assertPublishableBoards(p1Admin, workspaceId, targets);
+
     const repurposeRes = await executeRepurposeDispatch(paAdmin, p1Admin, {
       batchUuid,
       workspaceId,
@@ -420,6 +463,8 @@ export async function dispatchBulkStagedPins(
       // 3. Dispatch to P1
       const batchUuid = crypto.randomUUID();
       try {
+        await assertPublishableBoards(p1Admin, workspaceId, targets);
+
         await executeRepurposeDispatch(paAdmin, p1Admin, {
           batchUuid,
           workspaceId,

@@ -158,25 +158,37 @@ export const POST: APIRoute = async ({ request, locals }) => {
               status: sched.status === 'active' ? 'enabled' : 'disabled',
             };
             const addRes = await fastcronCall('cron_add', cloneParams, targetTokenObj.token);
-            newJobId = String(addRes.data?.id || addRes.data?.data?.id || '');
+            newJobId = (addRes && addRes.success) ? String(addRes.data?.id || addRes.data?.data?.id || '') : null;
           }
 
-          const { data: cloned } = await compAdmin
-            .from('competitor_schedules')
-            .insert({
-              workspace_id: workspaceId,
-              label: newLabel,
-              cron_expression: sched.cron_expression,
-              timezone: sched.timezone || 'UTC',
-              fastcron_token_id: sched.fastcron_token_id,
-              fastcron_job_id: newJobId,
-              status: sched.status,
-            })
-            .select('*')
-            .single();
+          try {
+            const { data: cloned, error: cloneErr } = await compAdmin
+              .from('competitor_schedules')
+              .insert({
+                workspace_id: workspaceId,
+                label: newLabel,
+                cron_expression: sched.cron_expression,
+                timezone: sched.timezone || 'UTC',
+                fastcron_token_id: sched.fastcron_token_id,
+                fastcron_job_id: newJobId,
+                status: sched.status,
+              })
+              .select('id')
+              .single();
 
-          successCount++;
-          results.push({ id: sched.id, cloned_id: cloned?.id, action, success: true });
+            if (cloneErr) throw cloneErr;
+
+            successCount++;
+            results.push({ id: sched.id, cloned_id: cloned?.id, action, success: true });
+          } catch (cloneErr: any) {
+            if (newJobId && targetTokenObj?.token) {
+              await fastcronCall('cron_delete', { id: newJobId }, targetTokenObj.token).catch((delErr) => {
+                console.warn('[CompetitorSchedules] Compensating bulk remote delete failed:', delErr);
+              });
+            }
+            failedCount++;
+            results.push({ id: sched.id, action, success: false, error: cloneErr.message });
+          }
         } else if (action === 'run') {
           if (sched.fastcron_job_id && targetTokenObj?.token) {
             await fastcronCall('cron_run', { id: Number(sched.fastcron_job_id) }, targetTokenObj.token);
