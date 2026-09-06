@@ -310,6 +310,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
           rpcHandled = true;
           pinsAddedCount = Number(rpcRes.data.added || 0);
           pinsUpdatedCount = Number(rpcRes.data.updated || 0);
+          metricsRecordedCount = Number(rpcRes.data.snapshots || 0);
         } else if (rpcRes?.error) {
           console.warn('[ingest-rpc] RPC error, falling back to legacy manual upsert:', rpcRes.error.message);
         }

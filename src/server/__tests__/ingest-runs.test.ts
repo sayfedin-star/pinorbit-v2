@@ -28,6 +28,7 @@ vi.mock('../db/clients', () => ({
       from: vi.fn(() => ({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
+        in: vi.fn().mockReturnThis(),
         is: vi.fn().mockReturnThis(),
         maybeSingle: vi.fn().mockResolvedValue({
           data: {

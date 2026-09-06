@@ -55,7 +55,8 @@ export async function checkPriorDispatches(
   paClient: SupabaseClient,
   workspaceId: string,
   pinIds: string[],
-  targetAccountIds: string[]
+  targetAccountIds: string[],
+  opts?: { failClosed?: boolean }
 ): Promise<{ totalDuplicates: number; duplicates: Array<{ pa_pin_id: string; target_account_id: string; sent_at: string }> }> {
   if (pinIds.length === 0 || targetAccountIds.length === 0) {
     return { totalDuplicates: 0, duplicates: [] };
@@ -70,6 +71,9 @@ export async function checkPriorDispatches(
 
   if (error) {
     console.warn('[Repurpose] Prior dispatch check warning:', error.message);
+    if (opts?.failClosed) {
+      throw new HttpError(503, 'Failed to verify prior dispatches: ' + error.message, { retryable: true });
+    }
     return { totalDuplicates: 0, duplicates: [] };
   }
 
@@ -148,7 +152,7 @@ export async function executeRepurposeDispatch(
       return { success: true, replayed: true, summary: existingBatch.result_summary as RepurposeSummary };
     }
 
-    if (existingBatch.status === 'in_progress') {
+    if (existingBatch.status === 'in_progress' || existingBatch.status === 'reconciling') {
       const elapsedSeconds = (Date.now() - new Date(existingBatch.updated_at).getTime()) / 1000;
       if (elapsedSeconds < HEARTBEAT_TIMEOUT_SECONDS) {
         throw new HttpError(409, 'Duplicate batch currently in progress.', {
@@ -162,7 +166,7 @@ export async function executeRepurposeDispatch(
         .from('pa_repurpose_batches')
         .update({ status: 'reconciling', updated_at: new Date().toISOString() })
         .eq('id', batchUuid)
-        .eq('status', 'in_progress')
+        .in('status', ['in_progress', 'reconciling'])
         .select('id')
         .maybeSingle();
 
@@ -238,7 +242,9 @@ export async function executeRepurposeDispatch(
   const targetAccountIds = targets.map((t) => t.accountId);
   let priorDuplicatesSet = new Set<string>();
   if (!allowDuplicates) {
-    const { duplicates } = await checkPriorDispatches(paAdmin, workspaceId, pinIds, targetAccountIds);
+    const { duplicates } = await checkPriorDispatches(paAdmin, workspaceId, pinIds, targetAccountIds, {
+      failClosed: !allowDuplicates,
+    });
     priorDuplicatesSet = new Set(duplicates.map((d) => `${d.pa_pin_id}:${d.target_account_id}`));
   }
 

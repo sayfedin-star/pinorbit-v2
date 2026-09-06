@@ -1416,6 +1416,7 @@ export async function triggerBoardAction(
     return {
       success: res.ok,
       status: res.status,
+      error: !res.ok ? `Webhook returned HTTP ${res.status}` : undefined,
       meta: {
         branch,
         webhook_id: resolvedWebhookId,

@@ -1,4 +1,4 @@
-﻿export const prerender = false;
+export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { dbClients } from '../../../../server/db/clients';
@@ -39,7 +39,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return json({ success: false, error: 'pinIds and targetAccountIds arrays required.' }, 400);
     }
 
-    const result = await checkPriorDispatches(paAdmin, workspaceId, pinIds, targetAccountIds);
+    const result = await checkPriorDispatches(paAdmin, workspaceId, pinIds, targetAccountIds, { failClosed: true });
     return json({ success: true, ...result });
   } catch (err: any) {
     if (err instanceof HttpError) {

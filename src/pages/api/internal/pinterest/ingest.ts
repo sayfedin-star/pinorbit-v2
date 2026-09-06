@@ -7,6 +7,8 @@ import { pinnerETL } from '../../../../server/services/pinner-etl';
 import { timingSafeEqual } from '../../../../server/lib/timing-safe';
 import { buildBoardCreateIdempotencyKey } from '../../../../server/services/scheduling-logic';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export const POST: APIRoute = async ({ request, locals }) => {
   const runtimeEnv = (locals as { runtime?: { env?: Record<string, any> }; runtimeEnv?: Record<string, any> })?.runtime?.env || (locals as { runtimeEnv?: Record<string, any> })?.runtimeEnv || {};
 
@@ -35,7 +37,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       if (acc?.workspace_id) wsId = acc.workspace_id;
     }
 
-    if (!wsId) {
+    if (!wsId || !UUID_REGEX.test(wsId)) {
       return new Response(JSON.stringify({ success: false, error: 'workspace_id or valid account_id required for engine events.' }), { status: 422, headers: { 'Content-Type': 'application/json' } });
     }
 
@@ -358,6 +360,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   // 4. Authenticate BEFORE connection lookup (generic errors only)
+  if (payload.workspace_id && !UUID_REGEX.test(payload.workspace_id)) {
+    return new Response(JSON.stringify({ success: false, error: 'Invalid workspace_id in payload.' }), { status: 422, headers: { 'Content-Type': 'application/json' } });
+  }
   const preEff = await getEffectiveSecret(payload.workspace_id || '', runtimeEnv);
   if (isProductionEnv(runtimeEnv) && preEff.source === 'env' && isKnownDefaultIngestSecret(preEff.value)) {
     return new Response(JSON.stringify({ success: false, error: 'Service unavailable: ingest secret not configured on server.' }), { status: 503, headers: { 'Content-Type': 'application/json' } });

@@ -27,6 +27,7 @@ describe('Repurpose Zombie CAS Reconciliation Suite', () => {
               if (payload.status === 'completed') completedUpdateCalled = true;
               return {
                 eq: vi.fn().mockReturnThis(),
+                in: vi.fn().mockReturnThis(),
                 select: vi.fn().mockReturnThis(),
                 maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'batch-zombie-1' } }),
               };
@@ -84,6 +85,7 @@ describe('Repurpose Zombie CAS Reconciliation Suite', () => {
             }),
             update: vi.fn().mockReturnValue({
               eq: vi.fn().mockReturnThis(),
+              in: vi.fn().mockReturnThis(),
               select: vi.fn().mockReturnThis(),
               maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'batch-zombie-lost' } }),
             }),
@@ -151,6 +153,7 @@ describe('Repurpose Zombie CAS Reconciliation Suite', () => {
               }
               return {
                 eq: vi.fn().mockReturnThis(),
+                in: vi.fn().mockReturnThis(),
                 select: vi.fn().mockReturnThis(),
                 maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'batch-zombie-skipped-dup' } }),
               };

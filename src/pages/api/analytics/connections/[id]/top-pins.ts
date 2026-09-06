@@ -5,6 +5,7 @@ import { pinnerAnalyticsService } from '../../../../../server/services/pinner-an
 import type { PinnerSortBy } from '../../../../../lib/types';
 import { getAnalyticsKV } from '../../../../../lib/edge-kv';
 import { errorStatus } from '../../../../../server/lib/http-error';
+import { assertWorkspaceAccess } from '../../../../../server/auth/workspace-guard';
 
 export const GET: APIRoute = async ({ params, request, locals }) => {
   const user = locals.user;
@@ -52,7 +53,16 @@ export const GET: APIRoute = async ({ params, request, locals }) => {
     );
   }
   const limit = 50; 
-  const bypassCache = url.searchParams.get('cache_bypass') === '1';
+  const bypassCacheParam = url.searchParams.get('cache_bypass') === '1';
+  let bypassCache = false;
+  if (bypassCacheParam && workspaceId) {
+    try {
+      const access = await assertWorkspaceAccess(schedulingClient, workspaceId, user.id);
+      bypassCache = access.isAdmin || access.isOwner;
+    } catch {
+      bypassCache = false;
+    }
+  }
   const fromDate = url.searchParams.get('from_date') || undefined;
   const toDate = url.searchParams.get('to_date') || undefined;
 
