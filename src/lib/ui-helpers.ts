@@ -212,5 +212,16 @@ export function calculateConnectionHealth(
   };
 }
 
+export function humanAgeFromOldestPin(oldestIso: string | null | undefined, nowMs = Date.now()): string {
+  if (!oldestIso) return "—";
+  const t = Date.parse(oldestIso);
+  if (!Number.isFinite(t)) return "—";
+  const days = Math.max(0, Math.floor((nowMs - t) / 86_400_000));
+  const y = Math.floor(days / 365), m = Math.floor((days % 365) / 30), d = days % 30;
+  if (y > 0) return `${y}y ${m}m`;
+  if (m > 0) return `${m}m ${d}d`;
+  return `${d}d`;
+}
+
 export * from './cron-helper';
 export * from './format-audit';

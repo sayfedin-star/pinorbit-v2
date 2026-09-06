@@ -4,6 +4,16 @@ import { GET as pinsHandler } from '../../pages/api/pinarchive/pins';
 import { GET as topicsHandler } from '../../pages/api/pinarchive/topics';
 import { dbClients } from '../db/clients';
 import { assertWorkspaceAccess } from '../auth/workspace-guard';
+import { gasCall } from '../lib/gas-bridge';
+import { edgeCache } from '../services/edge-cache';
+
+vi.mock('../lib/gas-bridge', () => ({
+  gasCall: vi.fn().mockResolvedValue({
+    ok: true,
+    version: '2.8.2',
+    ages: { roseisabelle555: '2026-04-09T00:14:38.000Z' },
+  }),
+}));
 
 vi.mock('../auth/workspace-guard', () => ({
   assertWorkspaceAccess: vi.fn(),
@@ -39,6 +49,7 @@ describe('PinArchive Dashboard UI Read Layer API Suite', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    edgeCache.clearMemory();
     mockPinArchiveClient = dbClients.getPinArchive();
     vi.mocked(assertWorkspaceAccess).mockResolvedValue({
       workspaceId: mockWsId,
@@ -135,11 +146,53 @@ describe('PinArchive Dashboard UI Read Layer API Suite', () => {
       expect(json.success).toBe(true);
       expect(json.accounts.length).toBe(1);
       expect(json.accounts[0].username).toBe('roseisabelle555');
+      expect(json.accounts[0].oldest_pin_at).toBe('2026-04-09T00:14:38.000Z');
       expect(json.totals.accounts).toBe(1);
       expect(json.totals.archived_pins).toBe(2);
       expect(json.totals.sum_saves).toBe(150);
       expect(json.totals.sum_shares).toBe(25);
       expect(json.totals.total_pins).toBe(2);
+    });
+
+    it('gracefully falls back to oldest_pin_at: null when gasCall fails or times out', async () => {
+      vi.mocked(gasCall).mockResolvedValueOnce({ ok: false, error: 'Network timeout' });
+
+      const req = new Request('http://localhost:4321/api/pinarchive/overview');
+      const res = await overviewHandler({
+        request: req,
+        locals: { user: mockUser, supabase: {}, activeWorkspaceId: mockWsId },
+      } as any);
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+      expect(json.accounts.length).toBe(1);
+      expect(json.accounts[0].oldest_pin_at).toBeNull();
+    });
+
+    it('serves oldest_pin_at from edge cache on repeated requests without invoking gasCall again', async () => {
+      const req = new Request('http://localhost:4321/api/pinarchive/overview');
+      const res1 = await overviewHandler({
+        request: req,
+        locals: { user: mockUser, supabase: {}, activeWorkspaceId: mockWsId },
+      } as any);
+
+      expect(res1.status).toBe(200);
+      const json1 = await res1.json();
+      expect(json1.accounts[0].oldest_pin_at).toBe('2026-04-09T00:14:38.000Z');
+      expect(gasCall).toHaveBeenCalled();
+
+      vi.mocked(gasCall).mockClear();
+
+      const res2 = await overviewHandler({
+        request: req,
+        locals: { user: mockUser, supabase: {}, activeWorkspaceId: mockWsId },
+      } as any);
+
+      expect(res2.status).toBe(200);
+      const json2 = await res2.json();
+      expect(json2.accounts[0].oldest_pin_at).toBe('2026-04-09T00:14:38.000Z');
+      expect(gasCall).not.toHaveBeenCalled();
     });
   });
 

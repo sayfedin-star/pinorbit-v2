@@ -5,6 +5,9 @@ import { dbClients } from '../../../server/db/clients';
 import { errorStatus } from '../../../server/lib/http-error';
 import { getNextCronDate } from '../../../lib/cron-helper';
 import { resolveToken } from '../../../server/lib/token-resolver';
+import { gasCall } from '../../../server/lib/gas-bridge';
+import { edgeCache } from '../../../server/services/edge-cache';
+import { getAnalyticsKV } from '../../../lib/edge-kv';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -81,68 +84,139 @@ export const GET: APIRoute = async ({ request, locals }) => {
       a.archived_count = archivedMap.has(a.id) ? archivedMap.get(a.id) : (a.db_pins_count ?? a.pins_count ?? 0);
     }
 
-    // Compute Recent Δ per account from its latest refresh run session (preserves delta without 5m global cutoff)
-    let changedMap = new Map<string, number>();
-    try {
-      const runsTable = db.from('pa_runs');
-      if (runsTable && typeof runsTable.select === 'function') {
-        const { data: recentRuns } = await runsTable
-          .select('account_id, pins_updated, started_at')
-          .eq('workspace_id', ws)
-          .eq('trigger', 'refresh')
-          .order('started_at', { ascending: false })
-          .limit(300);
+    // Prepare batched usernames for oldest_pin_at (chunked up to 100 in 2 parallel requests of 50)
+    const allUsernames = accounts.map((a: any) => a.username).filter(Boolean);
+    const chunk1 = allUsernames.slice(0, 50);
+    const chunk2 = allUsernames.slice(50, 100);
 
-        if (Array.isArray(recentRuns) && recentRuns.length > 0) {
-          const accountLatestTime = new Map<string, number>();
-          for (const r of recentRuns) {
-            if (!r.account_id || !r.started_at) continue;
-            const t = new Date(r.started_at).getTime();
-            if (!accountLatestTime.has(r.account_id) || t > accountLatestTime.get(r.account_id)!) {
-              accountLatestTime.set(r.account_id, t);
-            }
-          }
+    // TIER C Hardening: deterministic hash-based edge cache key (capped length, order-independent)
+    const kv = getAnalyticsKV(locals);
+    let cachedAges: Record<string, string | null> | null = null;
+    let agesCacheKey = '';
 
-          for (const r of recentRuns) {
-            if (!r.account_id || !r.started_at) continue;
-            const latestT = accountLatestTime.get(r.account_id);
-            if (!latestT) continue;
-            const t = new Date(r.started_at).getTime();
-            // Aggregate batches from the same run session (within 45 minutes of account's latest run)
-            if (latestT - t <= 45 * 60 * 1000) {
-              changedMap.set(r.account_id, (changedMap.get(r.account_id) || 0) + Number(r.pins_updated || 0));
-            }
-          }
+    if (allUsernames.length > 0) {
+      const sortedJoined = [...allUsernames].sort().join('|');
+      const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sortedJoined));
+      const hashHex = Array.from(new Uint8Array(hashBuf))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+        .slice(0, 16);
+      agesCacheKey = `pa:ages:v2:${ws}:${hashHex}`;
+
+      try {
+        const cached = await edgeCache.get<Record<string, string | null>>(agesCacheKey, kv);
+        if (cached.status === 'HIT' && cached.data) {
+          cachedAges = cached.data;
         }
-      }
-    } catch (err) {
-      console.warn('Could not query pa_runs refresh delta:', err);
+      } catch {}
     }
 
-    // Derive active schedule next run from persisted workspace settings
-    let activeNextRunIso: string | null = null;
-    try {
-      const settingsTable = db.from('pa_workspace_settings');
-      if (settingsTable && typeof settingsTable.select === 'function') {
-        const { data: wsSettings } = await settingsTable
-          .select('cron_expression, schedule_status, fastcron_job_id')
-          .eq('workspace_id', ws)
-          .maybeSingle();
-
-        const cronExpr = wsSettings?.cron_expression;
-        const isPaused = wsSettings?.schedule_status === 'paused' || wsSettings?.schedule_status === 'disabled';
-        const hasJob = Boolean(wsSettings?.fastcron_job_id);
-        const jobTimezone = 'UTC';
-
-        if (cronExpr && !isPaused && hasJob) {
-          const nextDate = getNextCronDate(cronExpr, jobTimezone);
-          if (nextDate) {
-            activeNextRunIso = nextDate.toISOString();
+    // Concurrently fetch recent runs, schedule settings, and account ages within the shared 8s budget
+    const [recentRuns, wsSettings, agesRes1, agesRes2] = await Promise.all([
+      // 1. pa_runs query for Recent Δ
+      (async () => {
+        try {
+          const runsTable = db.from('pa_runs');
+          if (runsTable && typeof runsTable.select === 'function') {
+            const { data } = await runsTable
+              .select('account_id, pins_updated, started_at')
+              .eq('workspace_id', ws)
+              .eq('trigger', 'refresh')
+              .order('started_at', { ascending: false })
+              .limit(300);
+            return data;
           }
+        } catch (err) {
+          console.warn('Could not query pa_runs refresh delta:', err);
+        }
+        return null;
+      })(),
+
+      // 2. pa_workspace_settings for active schedule next run
+      (async () => {
+        try {
+          const settingsTable = db.from('pa_workspace_settings');
+          if (settingsTable && typeof settingsTable.select === 'function') {
+            const { data } = await settingsTable
+              .select('cron_expression, schedule_status, fastcron_job_id')
+              .eq('workspace_id', ws)
+              .maybeSingle();
+            return data;
+          }
+        } catch (err: any) {
+          console.warn(`[PinArchive Overview] Could not derive schedule next run for workspace ${ws}:`, err?.message || err);
+        }
+        return null;
+      })(),
+
+      // 3. Batch query oldest pin timestamp chunk 1 (0..50) via GAS bridge
+      cachedAges
+        ? Promise.resolve({ ok: true, ages: cachedAges })
+        : chunk1.length > 0
+          ? gasCall(locals.runtime?.env, ws, 'account_ages', { usernames: chunk1 })
+          : Promise.resolve({ ok: false }),
+
+      // 4. Batch query oldest pin timestamp chunk 2 (50..100) via GAS bridge
+      cachedAges
+        ? Promise.resolve({ ok: true, ages: cachedAges })
+        : chunk2.length > 0
+          ? gasCall(locals.runtime?.env, ws, 'account_ages', { usernames: chunk2 })
+          : Promise.resolve({ ok: false }),
+    ]);
+
+    // Compute Recent Δ per account from latest refresh run session
+    const changedMap = new Map<string, number>();
+    if (Array.isArray(recentRuns) && recentRuns.length > 0) {
+      const accountLatestTime = new Map<string, number>();
+      for (const r of recentRuns) {
+        if (!r.account_id || !r.started_at) continue;
+        const t = new Date(r.started_at).getTime();
+        if (!accountLatestTime.has(r.account_id) || t > accountLatestTime.get(r.account_id)!) {
+          accountLatestTime.set(r.account_id, t);
         }
       }
-    } catch (err: any) {
-      console.warn(`[PinArchive Overview] Could not derive schedule next run for workspace ${ws}:`, err?.message || err);
+
+      for (const r of recentRuns) {
+        if (!r.account_id || !r.started_at) continue;
+        const latestT = accountLatestTime.get(r.account_id);
+        if (!latestT) continue;
+        const t = new Date(r.started_at).getTime();
+        if (latestT - t <= 45 * 60 * 1000) {
+          changedMap.set(r.account_id, (changedMap.get(r.account_id) || 0) + Number(r.pins_updated || 0));
+        }
+      }
+    }
+
+    // Derive active schedule next run
+    let activeNextRunIso: string | null = null;
+    if (wsSettings) {
+      const cronExpr = wsSettings.cron_expression;
+      const isPaused = wsSettings.schedule_status === 'paused' || wsSettings.schedule_status === 'disabled';
+      const hasJob = Boolean(wsSettings.fastcron_job_id);
+      const jobTimezone = 'UTC';
+
+      if (cronExpr && !isPaused && hasJob) {
+        const nextDate = getNextCronDate(cronExpr, jobTimezone);
+        if (nextDate) {
+          activeNextRunIso = nextDate.toISOString();
+        }
+      }
+    }
+
+    // Merge oldest_pin_at results across chunks
+    const combinedAges: Record<string, string | null> = {};
+    if (agesRes1 && agesRes1.ok && agesRes1.ages) {
+      Object.assign(combinedAges, agesRes1.ages);
+    }
+    if (agesRes2 && agesRes2.ok && agesRes2.ages) {
+      Object.assign(combinedAges, agesRes2.ages);
+    }
+
+    // Save to edge cache (6 hours TTL) if fresh data was acquired
+    if (!cachedAges && agesCacheKey && Object.keys(combinedAges).length > 0) {
+      try {
+        await edgeCache.set(agesCacheKey, combinedAges, kv, 6 * 3600);
+      } catch {}
     }
 
     // Attach to each account:
@@ -151,6 +225,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       next_run_at: activeNextRunIso || a.next_run_at || null,
       changed_last_refresh: changedMap.get(a.id) ?? 0,
       checked_last_refresh: Number(a.db_pins_count ?? 0), // total pins for account = checked
+      oldest_pin_at: combinedAges[a.username] ?? null,
     }));
 
     // 1. Get exact total pins count once via lightweight HEAD request
