@@ -4,7 +4,9 @@ import { assertWorkspaceAccess } from '../../../server/auth/workspace-guard';
 import { dbClients } from '../../../server/db/clients';
 import { errorStatus } from '../../../server/lib/http-error';
 import { getNextCronDate } from '../../../lib/cron-helper';
-import { resolveToken } from '../../../server/lib/token-resolver';
+import { gasCall } from '../../../server/lib/gas-bridge';
+import { edgeCache } from '../../../server/services/edge-cache';
+import { getAnalyticsKV } from '../../../lib/edge-kv';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -149,15 +151,80 @@ export const GET: APIRoute = async ({ request, locals }) => {
       }
     }
 
+    // 5. Query oldest pin timestamp (Account Age) via GAS bridge & edge cache
+    const allUsernames = accounts.map((a: any) => a.username).filter(Boolean);
+    const chunk1 = allUsernames.slice(0, 50);
+    const chunk2 = allUsernames.slice(50, 100);
+
+    // TIER C Hardening: deterministic hash-based edge cache key (capped length, order-independent)
+    const kv = getAnalyticsKV(locals);
+    let cachedAges: Record<string, string | null> | null = null;
+    let agesCacheKey = '';
+
+    if (allUsernames.length > 0) {
+      const sortedJoined = [...allUsernames].sort().join('|');
+      const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sortedJoined));
+      const hashHex = Array.from(new Uint8Array(hashBuf))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+        .slice(0, 16);
+      agesCacheKey = `pa:ages:v2:${ws}:${hashHex}`;
+
+      try {
+        const cached = await edgeCache.get<Record<string, string | null>>(agesCacheKey, kv);
+        if (cached.status === 'HIT' && cached.data) {
+          cachedAges = cached.data;
+        }
+      } catch {}
+    }
+
+    let agesRes1: any = null;
+    let agesRes2: any = null;
+    if (cachedAges) {
+      agesRes1 = { ok: true, ages: cachedAges };
+      agesRes2 = { ok: true, ages: cachedAges };
+    } else if (allUsernames.length > 0) {
+      const [r1, r2] = await Promise.allSettled([
+        chunk1.length > 0
+          ? gasCall(locals.runtime?.env, ws, 'account_ages', { usernames: chunk1 })
+          : Promise.resolve({ ok: false }),
+        chunk2.length > 0
+          ? gasCall(locals.runtime?.env, ws, 'account_ages', { usernames: chunk2 })
+          : Promise.resolve({ ok: false }),
+      ]);
+      agesRes1 = r1.status === 'fulfilled' ? r1.value : null;
+      agesRes2 = r2.status === 'fulfilled' ? r2.value : null;
+    }
+
+    // Merge oldest_pin_at results across chunks
+    const combinedAges: Record<string, string | null> = {};
+    if (agesRes1 && agesRes1.ok && agesRes1.ages) {
+      Object.assign(combinedAges, agesRes1.ages);
+    }
+    if (agesRes2 && agesRes2.ok && agesRes2.ages) {
+      Object.assign(combinedAges, agesRes2.ages);
+    }
+
+    // Save to edge cache (6 hours TTL) if fresh data was acquired
+    if (!cachedAges && agesCacheKey && Object.keys(combinedAges).length > 0) {
+      try {
+        await edgeCache.set(agesCacheKey, combinedAges, kv, 6 * 3600);
+      } catch {}
+    }
+
     // Attach computed metrics to each account:
-    accounts = accounts.map((a: any) => ({
-      ...a,
-      db_pins_count: countMap.has(a.id) ? countMap.get(a.id) : a.pins_count,
-      archived_count: archivedMap.has(a.id) ? archivedMap.get(a.id) : (countMap.has(a.id) ? countMap.get(a.id) : a.pins_count ?? 0),
-      next_run_at: activeNextRunIso || a.next_run_at || null,
-      changed_last_refresh: changedMap.get(a.id) ?? 0,
-      checked_last_refresh: Number(countMap.get(a.id) ?? a.pins_count ?? 0),
-    }));
+    accounts = accounts.map((a: any) => {
+      const dbPins = countMap.has(a.id) ? countMap.get(a.id) : a.pins_count;
+      return {
+        ...a,
+        db_pins_count: dbPins,
+        archived_count: archivedMap.has(a.id) ? archivedMap.get(a.id) : (countMap.has(a.id) ? countMap.get(a.id) : a.pins_count ?? 0),
+        next_run_at: activeNextRunIso || a.next_run_at || null,
+        changed_last_refresh: changedMap.get(a.id) ?? 0,
+        checked_last_refresh: Number(dbPins ?? 0),
+        oldest_pin_at: combinedAges[a.username] ?? null,
+      };
+    });
 
     // 5. Total pins count from exact count HEAD request
     const totalPinsRes = totalPinsSettled.status === 'fulfilled' ? totalPinsSettled.value : null;
