@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { escapeHtml, formatDate, formatNumber, formatTime, maskWebhookUrl, renderStatusBadge } from '../ui-helpers';
+import { escapeHtml, formatDate, formatNumber, formatTime, humanAgeFromOldestPin, maskWebhookUrl, renderStatusBadge } from '../ui-helpers';
 
 describe('ui-helpers test suite', () => {
   describe('escapeHtml', () => {
@@ -210,6 +210,47 @@ describe('ui-helpers test suite', () => {
       expect(next5?.getUTCDay()).toBe(1); // Monday
       expect(next5?.getUTCHours()).toBe(3);
       expect(next5?.getUTCMinutes()).toBe(0);
+    });
+  });
+
+  describe('humanAgeFromOldestPin', () => {
+    it('returns "—" for null, undefined, empty, or unparseable date strings', () => {
+      expect(humanAgeFromOldestPin(null)).toBe('—');
+      expect(humanAgeFromOldestPin(undefined)).toBe('—');
+      expect(humanAgeFromOldestPin('')).toBe('—');
+      expect(humanAgeFromOldestPin('not-a-valid-date')).toBe('—');
+    });
+
+    it('formats durations under 30 days as ${d}d', () => {
+      const now = Date.parse('2026-09-06T12:00:00.000Z');
+      // 10 days ago
+      const iso10d = new Date(now - 10 * 86_400_000).toISOString();
+      expect(humanAgeFromOldestPin(iso10d, now)).toBe('10d');
+
+      // 0 days ago (same day)
+      expect(humanAgeFromOldestPin(new Date(now).toISOString(), now)).toBe('0d');
+    });
+
+    it('formats durations between 30 and 364 days as ${m}m ${d}d', () => {
+      const now = Date.parse('2026-09-06T12:00:00.000Z');
+      // 5 months and 12 days ago = 5*30 + 12 = 162 days
+      const iso162d = new Date(now - 162 * 86_400_000).toISOString();
+      expect(humanAgeFromOldestPin(iso162d, now)).toBe('5m 12d');
+
+      // Exactly 30 days ago
+      const iso30d = new Date(now - 30 * 86_400_000).toISOString();
+      expect(humanAgeFromOldestPin(iso30d, now)).toBe('1m 0d');
+    });
+
+    it('formats durations >= 365 days as ${y}y ${m}m', () => {
+      const now = Date.parse('2026-09-06T12:00:00.000Z');
+      // 1 year and 2 months ago = 365 + 60 = 425 days
+      const iso425d = new Date(now - 425 * 86_400_000).toISOString();
+      expect(humanAgeFromOldestPin(iso425d, now)).toBe('1y 2m');
+
+      // 2 years ago = 730 days
+      const iso730d = new Date(now - 730 * 86_400_000).toISOString();
+      expect(humanAgeFromOldestPin(iso730d, now)).toBe('2y 0m');
     });
   });
 });

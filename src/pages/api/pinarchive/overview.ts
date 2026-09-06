@@ -5,6 +5,7 @@ import { dbClients } from '../../../server/db/clients';
 import { errorStatus } from '../../../server/lib/http-error';
 import { getNextCronDate } from '../../../lib/cron-helper';
 import { resolveToken } from '../../../server/lib/token-resolver';
+import { gasCall } from '../../../server/lib/gas-bridge';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -152,6 +153,13 @@ export const GET: APIRoute = async ({ request, locals }) => {
       changed_last_refresh: changedMap.get(a.id) ?? 0,
       checked_last_refresh: Number(a.db_pins_count ?? 0), // total pins for account = checked
     }));
+
+    // Batch query oldest pin timestamp per account via GAS bridge
+    const usernames = accounts.map((a: any) => a.username).filter(Boolean).slice(0, 50);
+    const agesRes = await gasCall(locals.runtime?.env, ws, 'account_ages', { usernames });
+    for (const a of accounts) {
+      a.oldest_pin_at = (agesRes.ok && agesRes.ages && agesRes.ages[a.username]) ? agesRes.ages[a.username] : null;
+    }
 
     // 1. Get exact total pins count once via lightweight HEAD request
     const { count: totalPinsCount, error: countErr } = await db
