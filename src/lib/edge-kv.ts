@@ -5,7 +5,18 @@ export interface EdgeKVNamespace {
   delete(key: string): Promise<void>;
 }
 
-export function getAnalyticsKV(locals: unknown): EdgeKVNamespace | undefined {
-  const env = (locals as { runtime?: { env?: Record<string, unknown> } } | null)?.runtime?.env;
+export function getAnalyticsKV(localsOrEnv: unknown): EdgeKVNamespace | undefined {
+  if (!localsOrEnv || typeof localsOrEnv !== 'object') return undefined;
+
+  if ('ANALYTICS_KV' in (localsOrEnv as Record<string, unknown>)) {
+    return (localsOrEnv as Record<string, unknown>).ANALYTICS_KV as EdgeKVNamespace | undefined;
+  }
+
+  const runtimeEnvKV = (localsOrEnv as { runtimeEnv?: Record<string, unknown> })?.runtimeEnv?.ANALYTICS_KV;
+  if (runtimeEnvKV) {
+    return runtimeEnvKV as EdgeKVNamespace;
+  }
+
+  const env = (localsOrEnv as { runtime?: { env?: Record<string, unknown> } })?.runtime?.env;
   return (env?.ANALYTICS_KV as EdgeKVNamespace | undefined) ?? undefined;
 }

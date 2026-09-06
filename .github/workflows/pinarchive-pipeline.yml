@@ -1,0 +1,167 @@
+# ==============================================================================
+# PinArchive Staged Cutover & Execution Guide:
+# 1. First manual dispatch: Scope to <= 3 accounts using the `usernames` input.
+# 2. Verify 4 Rollout Gates:
+#    - >= 90% HTTP 200 responses from Pinterest API.
+#    - Zero circuit-breaker trips (vault cookie decrypted & self-healed).
+#    - Sheet spot-check: 0 duplicate pin_ids, correct data integrity.
+#    - Sane candidate promotion counts in DB.
+# 3. Full Matrix Run: Once gates pass, run without `usernames` filter for full
+#    workspace coverage across all 4 matrix runner shards.
+# ==============================================================================
+
+name: PinArchive Pipeline (GH Brain)
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      workspace_id:
+        description: 'Workspace UUID (empty = all workspaces)'
+        required: false
+        type: string
+      workspace_filter:
+        description: 'Workspace UUID filter (alias for workspace_id)'
+        required: false
+        type: string
+      usernames:
+        description: 'Comma-separated usernames (optional)'
+        required: false
+        type: string
+      mode:
+        description: 'Pipeline mode: all | discovery | rotation'
+        required: false
+        type: choice
+        options:
+          - all
+          - discovery
+          - rotation
+        default: all
+      force:
+        description: 'Force run (skip interval & schedule check)'
+        required: false
+        type: string
+        default: ''
+      max_pages:
+        description: 'Max pages to scrape per account (default: from settings or 50)'
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: pinarchive-pipeline
+  cancel-in-progress: false
+
+jobs:
+  # ── STAGE 1: Discovery (Vault Cookies + IP Rotation + GAS Thin Writer) ──
+  discovery:
+    if: github.event.inputs.mode == 'all' || github.event.inputs.mode == 'discovery' || github.event_name == 'schedule' || github.event.inputs.mode == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install @supabase/supabase-js --no-save
+
+      - name: Log Egress IP
+        run: |
+          echo "Checking runner egress IP..."
+          curl -s --max-time 10 https://api.ipify.org?format=json || true
+
+      - name: Stagger Job Start (IP distribution)
+        run: |
+          DELAY=$(( ${{ matrix.shard }} * 45 ))
+          echo "Stagger delay for shard ${{ matrix.shard }}: ${DELAY}s"
+          sleep $DELAY
+
+      - name: Run PinArchive Discovery (Shard ${{ matrix.shard }}/4)
+        env:
+          PINARCHIVE_SUPABASE_URL: ${{ secrets.PINARCHIVE_SUPABASE_URL }}
+          PINARCHIVE_SUPABASE_KEY: ${{ secrets.PINARCHIVE_SUPABASE_KEY }}
+          PINORBIT_WORKER_URL: ${{ secrets.PINORBIT_WORKER_URL }}
+          PINARCHIVE_INGEST_SECRET: ${{ secrets.PINARCHIVE_INGEST_SECRET }}
+          PINARCHIVE_GAS_URL: ${{ secrets.PINARCHIVE_GAS_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DISCOVERY_WORKSPACE_ID: ${{ github.event.inputs.workspace_filter || github.event.inputs.workspace_id || '' }}
+          DISCOVERY_USERNAMES: ${{ github.event.inputs.usernames || '' }}
+          DISCOVERY_FORCE: ${{ github.event.inputs.force || '' }}
+          FORCE_RUN: ${{ github.event.inputs.force || '' }}
+          DISCOVERY_MAX_PAGES: ${{ github.event.inputs.max_pages || '' }}
+          DISCOVERY_SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: 4
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: node scripts/pinarchive-discovery.mjs
+
+  # ── STAGE 2: Rotation (Metrics & Enrichment Refresh) ──
+  rotation:
+    needs: [discovery]
+    if: always() && (github.event.inputs.mode == 'all' || github.event.inputs.mode == 'rotation' || github.event_name == 'schedule' || github.event.inputs.mode == '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run PinArchive Refresh (Shard ${{ matrix.shard }}/4)
+        env:
+          PINARCHIVE_SUPABASE_URL: ${{ secrets.PINARCHIVE_SUPABASE_URL }}
+          PINARCHIVE_SUPABASE_KEY: ${{ secrets.PINARCHIVE_SUPABASE_KEY }}
+          PINORBIT_WORKER_URL: ${{ secrets.PINORBIT_WORKER_URL }}
+          PINARCHIVE_INGEST_SECRET: ${{ secrets.PINARCHIVE_INGEST_SECRET }}
+          REFRESH_WORKSPACE_ID: ${{ github.event.inputs.workspace_filter || github.event.inputs.workspace_id || '' }}
+          REFRESH_USERNAMES: ${{ github.event.inputs.usernames || '' }}
+          REFRESH_FORCE: ${{ github.event.inputs.force || '' }}
+          FORCE_RUN: ${{ github.event.inputs.force || '' }}
+          REFRESH_SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: 4
+          REFRESH_MAX_PINS: '0'
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: node scripts/pinarchive-refresh.mjs
+
+  # ── STAGE 3: Monitoring Safety Net ──
+  staleness_check:
+    name: Check for stale workspaces
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [rotation]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install @supabase/supabase-js --no-save
+
+      - name: Check for stale workspaces
+        env:
+          PINARCHIVE_SUPABASE_URL: ${{ secrets.PINARCHIVE_SUPABASE_URL }}
+          PINARCHIVE_SUPABASE_KEY: ${{ secrets.PINARCHIVE_SUPABASE_KEY }}
+        run: node scripts/pinarchive-staleness-check.mjs

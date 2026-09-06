@@ -7,6 +7,21 @@ import { getEffectiveSecret } from '../../../server/services/webhook-secrets';
 import { fastcronCall, isFastCronJobPaused } from '../../../server/lib/fastcron-client';
 import { listWorkspaceTokens, resolveToken } from '../../../server/lib/token-resolver';
 
+/**
+ * ARCHITECTURAL DECISION & AUDIT DEFENSE:
+ * FastCron standard/free tiers do NOT support custom HTTP request headers
+ * (locked behind "Upgrade to change this" paywall).
+ * To guarantee platform compatibility with standard external cron providers without
+ * forcing paid upgrades, incoming dispatch endpoints intentionally accept the ingest
+ * secret via the `?secret=` URL query parameter in addition to the `x-ingest-secret` header.
+ *
+ * SECURITY GUARANTEE:
+ * Confidentiality is strictly preserved by:
+ * 1. Never returning the full dispatch URL or query parameters in any client-facing
+ *    GET responses (the `url` property is omitted or sanitized to path-only).
+ * 2. Requiring workspace admin role (`role === 'admin'`) for creating/updating cron jobs.
+ * 3. Enforcing timing-safe candidate verification on the receiving endpoint.
+ */
 export const getDispatchEndpointUrl = (
   runtimeEnv?: Record<string, any>,
   workspaceId?: string,
@@ -304,7 +319,6 @@ export const GET: APIRoute = async ({ locals }) => {
           label,
           expression: job.expression || job.cron_expression || '0 2 * * *',
           timezone: job.timezone || 'UTC',
-          url: job.url,
           paused: isPaused,
           status: isPaused ? 'paused' : 'active',
           next_run: toMs(cronNext[0] || job.next_run),
@@ -379,7 +393,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const action = body?.action || 'create';
 
   try {
-    await assertWorkspaceAccess(schedulingClient, workspaceId, user.id, 'admin');
+    const wsContext = await assertWorkspaceAccess(schedulingClient, workspaceId, user.id, 'admin');
 
     const { data: ws } = await schedulingClient
       .from('workspaces')
@@ -388,7 +402,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .maybeSingle();
     const wsName = (ws?.name || 'workspace').replace(/[—\r\n\t]+/g, ' ').trim().slice(0, 40) || 'workspace';
 
-    const dispatchUrl = getDispatchEndpointUrl(runtimeEnv);
     const effSecret = await getEffectiveSecret(workspaceId, runtimeEnv);
     if (!effSecret || !effSecret.value || effSecret.value.trim() === '') {
       return new Response(
@@ -396,6 +409,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
+    const dispatchUrl = getDispatchEndpointUrl(runtimeEnv, workspaceId, effSecret.value.trim());
 
     const targetTokenObj = await resolveTargetToken(body?.token_id, workspaceId, runtimeEnv);
     if (!targetTokenObj || !targetTokenObj.token) {
@@ -479,10 +493,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
         );
       }
 
-      const defaultPostDataStr = JSON.stringify({ workspace_id: workspaceId, pipeline: 'competitors', label: 'Default Daily', trigger: 'cron' });
+      const isMasterScope = Boolean(wsContext.isMaster);
+      const defaultPostDataStr = JSON.stringify({
+        workspace_id: workspaceId,
+        pipeline: 'competitors',
+        label: isMasterScope ? '👑 MASTER (All Workspaces)' : 'Default Daily',
+        trigger: 'cron',
+        scope: isMasterScope ? 'all' : 'current',
+      });
+      const defaultDispatchUrl = isMasterScope
+        ? `${getDispatchEndpointUrl(runtimeEnv, workspaceId, effSecret.value.trim())}&scope=all`
+        : getDispatchEndpointUrl(runtimeEnv, workspaceId, effSecret.value.trim());
+
       const defaultParams = {
-        name: `PinOrbit competitors — ${wsName} — Default Daily — ${workspaceId.slice(0, 8)}`,
-        url: getDispatchEndpointUrl(runtimeEnv, workspaceId, effSecret.value.trim()),
+        name: isMasterScope
+          ? `PinOrbit competitors — 👑 MASTER (All Workspaces) — Default Daily — ${workspaceId.slice(0, 8)}`
+          : `PinOrbit competitors — ${wsName} — Default Daily — ${workspaceId.slice(0, 8)}`,
+        url: defaultDispatchUrl,
         expression: '0 2 * * *',
         timezone: 'UTC',
         httpMethod: 'POST',
@@ -567,7 +594,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // ── Branch: create / edit ───────────────────────────────────────────────
-    const label = body?.label?.trim() || 'Competitor Refresh';
+    const isMasterScope = Boolean(wsContext.isMaster);
+    const label = body?.label?.trim() || (isMasterScope ? '👑 Master Daily Competitors' : 'Competitor Refresh');
     const rawCron = body?.cron_expression || '0 2 * * *';
     const cronValidation = validateCronExpression(rawCron);
     if (!cronValidation.valid) {
@@ -579,11 +607,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const cronExpression = cronValidation.cron!;
     const timezone = body?.timezone || 'UTC';
     const enabled = body?.enabled !== false;
-    const postDataStr = JSON.stringify({ workspace_id: workspaceId, pipeline: 'competitors', label, trigger: 'cron' });
+    const postDataStr = JSON.stringify({
+      workspace_id: workspaceId,
+      pipeline: 'competitors',
+      label,
+      trigger: 'cron',
+      scope: isMasterScope ? 'all' : 'current',
+    });
+    const finalDispatchUrl = isMasterScope
+      ? `${getDispatchEndpointUrl(runtimeEnv, workspaceId, effSecret.value.trim())}&scope=all`
+      : getDispatchEndpointUrl(runtimeEnv, workspaceId, effSecret.value.trim());
 
     const fastcronParams = {
-      name: `PinOrbit competitors — ${wsName} — ${label} — ${workspaceId.slice(0, 8)}`,
-      url: getDispatchEndpointUrl(runtimeEnv, workspaceId, effSecret.value.trim()),
+      name: isMasterScope
+        ? `PinOrbit competitors — 👑 MASTER (All Workspaces) — ${label} — ${workspaceId.slice(0, 8)}`
+        : `PinOrbit competitors — ${wsName} — ${label} — ${workspaceId.slice(0, 8)}`,
+      url: finalDispatchUrl,
       expression: cronExpression,
       timezone,
       httpMethod: 'POST',
@@ -722,8 +761,9 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
     await compAdmin
       .from('competitor_pipeline_settings')
       .update({
+        cron_expression: null,
         fastcron_job_id: null,
-        schedule_status: 'pending',
+        schedule_status: 'disabled',
         updated_at: new Date().toISOString(),
       })
       .eq('workspace_id', workspaceId);

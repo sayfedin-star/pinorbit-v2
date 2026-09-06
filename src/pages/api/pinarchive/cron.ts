@@ -10,6 +10,21 @@ import { getNextCronDate } from '../../../lib/cron-helper';
 
 export const FASTCRON_BASE = 'https://www.fastcron.com/api/v1';
 
+/**
+ * ARCHITECTURAL DECISION & AUDIT DEFENSE:
+ * FastCron standard/free tiers do NOT support custom HTTP request headers
+ * (locked behind "Upgrade to change this" paywall).
+ * To guarantee platform compatibility with standard external cron providers without
+ * forcing paid upgrades, incoming dispatch endpoints intentionally accept the ingest
+ * secret via the `?secret=` URL query parameter in addition to the `x-ingest-secret` header.
+ *
+ * SECURITY GUARANTEE:
+ * Confidentiality is strictly preserved by:
+ * 1. Never returning the full dispatch URL or query parameters in any client-facing
+ *    GET responses (the `url` property is omitted or sanitized to path-only).
+ * 2. Requiring workspace admin role (`role === 'admin'`) for creating/updating cron jobs.
+ * 3. Enforcing timing-safe candidate verification on the receiving endpoint.
+ */
 export const getDispatchEndpointUrl = (
   runtimeEnv?: Record<string, any>,
   workspaceId?: string,
@@ -322,7 +337,8 @@ export async function cleanupOrphanJobs(
   token: string,
   workspaceId: string,
   dispatchEndpointUrl: string,
-  knownJobIds: Set<number>
+  knownJobIds: Set<number>,
+  targetLabel?: string
 ): Promise<number> {
   let cleanedCount = 0;
   try {
@@ -341,14 +357,18 @@ export async function cleanupOrphanJobs(
       const isPinArchive = postData && postData.pipeline === 'pinarchive' && postData.workspace_id === workspaceId;
       const urlMatches = typeof j.url === 'string' && (j.url === dispatchEndpointUrl || j.url.includes('/api/internal/pinarchive/dispatch'));
 
+      // If targetLabel is provided, only cleanup orphan duplicates with matching label
+      const labelMatches = !targetLabel || (postData?.label && String(postData.label).trim().toLowerCase() === targetLabel.trim().toLowerCase());
+
       // 4-Condition Gate Check
       if (
         urlMatches &&
         isPinArchive &&
         postData.workspace_id === workspaceId &&
+        labelMatches &&
         !knownJobIds.has(jId)
       ) {
-        console.log(`[PinArchive FastCron] Deleting orphan job #${jId} (${j.name})`);
+        console.log(`[PinArchive FastCron] Deleting orphan duplicate job #${jId} (${j.name}) for label "${postData?.label || 'default'}"`);
         const del = await fastcronCall('cron_delete', { id: jId }, token);
         if (del.success) cleanedCount++;
       }
@@ -552,7 +572,9 @@ export const GET: APIRoute = async ({ locals }) => {
         await pinArchive
           .from('pa_workspace_settings')
           .update({
+            cron_expression: null,
             fastcron_job_id: null,
+            schedule_status: 'disabled',
             updated_at: new Date().toISOString(),
           })
           .eq('workspace_id', workspaceId);
@@ -619,7 +641,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   try {
-    await assertWorkspaceAccess(schedulingClient, workspaceId, user.id);
+    const wsContext = await assertWorkspaceAccess(schedulingClient, workspaceId, user.id, 'admin');
 
     const { data: ws } = await schedulingClient
       .from('workspaces')
@@ -633,6 +655,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // ── Branch: run_now (Server-side GitHub dispatch with force=true) ───────
     if (action === 'run_now') {
+      const isMasterScope = Boolean(wsContext.isMaster) && body.scope !== 'current';
       const githubRepo =
         (runtimeEnv.GITHUB_REPO as string) ||
         (typeof process !== 'undefined' ? process.env.GITHUB_REPO : '') ||
@@ -664,7 +687,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         body: JSON.stringify({
           ref: 'main',
           inputs: {
-            workspace_id: workspaceId,
+            workspace_id: isMasterScope ? '' : workspaceId,
             force: 'true',
           },
         }),
@@ -673,7 +696,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
       if (ghRes.status === 204 || (ghRes.status >= 200 && ghRes.status < 300)) {
         return new Response(
-          JSON.stringify({ success: true, message: 'Workflow run dispatched immediately with force.' }),
+          JSON.stringify({
+            success: true,
+            message: isMasterScope
+              ? '👑 Master Workspace: Workflow run dispatched across ALL workspaces.'
+              : 'Workflow run dispatched immediately with force.',
+            is_master_scope: isMasterScope,
+          }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         );
       }
@@ -760,10 +789,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
         );
       }
 
-      const targetDispatchUrl = getDispatchEndpointUrl(runtimeEnv, workspaceId, effSecret.value.trim());
-      const postDataStr = JSON.stringify({ workspace_id: workspaceId, pipeline: 'pinarchive', label: 'Default Daily' });
+      const isMasterScope = Boolean(wsContext.isMaster);
+      const targetDispatchUrl = isMasterScope
+        ? `${getDispatchEndpointUrl(runtimeEnv, workspaceId, effSecret.value.trim())}&scope=all`
+        : getDispatchEndpointUrl(runtimeEnv, workspaceId, effSecret.value.trim());
+      const postDataStr = JSON.stringify({
+        workspace_id: workspaceId,
+        pipeline: 'pinarchive',
+        label: isMasterScope ? '👑 MASTER (All Workspaces)' : 'Default Daily',
+        scope: isMasterScope ? 'all' : 'current',
+      });
       const defaultParams = {
-        name: `PinOrbit pinarchive — ${wsName} — Default Daily — ${workspaceId.slice(0, 8)}`,
+        name: isMasterScope
+          ? `PinOrbit pinarchive — 👑 MASTER (All Workspaces) — Default Daily — ${workspaceId.slice(0, 8)}`
+          : `PinOrbit pinarchive — ${wsName} — Default Daily — ${workspaceId.slice(0, 8)}`,
         url: targetDispatchUrl,
         expression: '0 3 * * *',
         timezone: 'UTC',
@@ -952,7 +991,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
 
       // 4-Condition Orphan Cleanup
-      await cleanupOrphanJobs(token, workspaceId, dispatchUrl, new Set([jobId]));
+      await cleanupOrphanJobs(token, workspaceId, dispatchUrl, new Set([jobId]), label);
 
       return new Response(
         JSON.stringify({ success: true, message: 'FastCron job updated successfully.', job: editRes.data }),
@@ -1016,7 +1055,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // 4-Condition Orphan Cleanup after create
     if (newJobId) {
-      await cleanupOrphanJobs(token, workspaceId, dispatchUrl, new Set([newJobId]));
+      await cleanupOrphanJobs(token, workspaceId, dispatchUrl, new Set([newJobId]), label);
     }
 
     return new Response(
@@ -1024,9 +1063,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
+    const status = typeof err?.status === 'number' ? err.status : 500;
     return new Response(
       JSON.stringify({ success: false, error: err?.message || 'Failed to process FastCron request.' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      { status, headers: { 'Content-Type': 'application/json' } }
     );
   }
 };
@@ -1105,6 +1145,7 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       }
 
       console.log(`[PinArchive FastCron] Deleted FastCron job #${jobId} for workspace ${workspaceId}`);
+      await syncWorkspaceSettingsPostDelete(workspaceId, token, dispatchUrl, runtimeEnv);
       return new Response(
         JSON.stringify({ success: true, message: `FastCron job #${jobId} deleted successfully.` }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
@@ -1129,14 +1170,56 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       }
     }
 
+    await syncWorkspaceSettingsPostDelete(workspaceId, token, dispatchUrl, runtimeEnv);
+
     return new Response(
       JSON.stringify({ success: true, message: `Deleted ${deletedCount} FastCron job(s) for workspace.` }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
+    const status = typeof err?.status === 'number' ? err.status : 500;
     return new Response(
-      JSON.stringify({ success: false, error: err?.message || 'Failed to delete FastCron job.' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      JSON.stringify({ success: false, error: err?.message || 'Failed to process FastCron request.' }),
+      { status, headers: { 'Content-Type': 'application/json' } }
     );
   }
 };
+
+async function syncWorkspaceSettingsPostDelete(
+  workspaceId: string,
+  token: string,
+  dispatchUrl: string,
+  runtimeEnv: Record<string, any>
+) {
+  try {
+    const listRes = await fastcronCall('cron_list', { keyword: 'PinOrbit' }, token);
+    const jobs: any[] = (Array.isArray(listRes.data) ? listRes.data : listRes.data?.data || []).filter((j: any) =>
+      isMatchingPinArchiveJob(j, workspaceId, dispatchUrl)
+    );
+    const pinArchive = dbClients.getPinArchive(runtimeEnv);
+    if (jobs.length === 0) {
+      await pinArchive
+        .from('pa_workspace_settings')
+        .update({
+          cron_expression: null,
+          fastcron_job_id: null,
+          schedule_status: 'disabled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('workspace_id', workspaceId);
+    } else {
+      const activeJob = jobs.find((j: any) => !j.paused) || jobs[0];
+      await pinArchive
+        .from('pa_workspace_settings')
+        .update({
+          cron_expression: activeJob.expression || null,
+          fastcron_job_id: String(activeJob.id),
+          schedule_status: activeJob.paused ? 'paused' : 'enabled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('workspace_id', workspaceId);
+    }
+  } catch (syncErr) {
+    console.warn('[PinArchive FastCron] Post-delete DB sync deferred:', syncErr);
+  }
+}

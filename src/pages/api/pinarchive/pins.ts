@@ -61,7 +61,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     return json({ success: false, error: 'Invalid account_id format.' }, 422);
   }
 
-  // New Server-Paginated RPC Mode for Account Pins Page
+  // Server-Paginated RPC Mode for Account Pins Page
   if (searchParams.get('mode') === 'page') {
     if (!accountId) {
       return json({ success: false, error: 'account_id is required for mode=page.' }, 422);
@@ -73,26 +73,79 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const pageSize = Math.min(Math.max(isNaN(pageSizeRaw) ? 50 : pageSizeRaw, 1), 100);
     const page = Math.max(parseInt(searchParams.get('page') || '1', 10) || 1, 1);
     const offset = (page - 1) * pageSize;
+    const maxSavesRaw = searchParams.get('max_saves');
+    const maxSaves = maxSavesRaw !== null && maxSavesRaw !== '' && !isNaN(Number(maxSavesRaw)) ? Number(maxSavesRaw) : null;
+    const minSavesRaw = searchParams.get('min_saves');
+    const minSavesRpc = minSavesRaw !== null && minSavesRaw !== '' && !isNaN(Number(minSavesRaw)) ? Number(minSavesRaw) : null;
 
     try {
-      const { data, error } = await db.rpc('pa_account_pins_page', {
-        p_workspace_id: ws,
-        p_account_id: accountId,
-        p_q: q || null,
-        p_board: board || null,
-        p_stage: stageFilter || null,
-        p_sort: sort,
-        p_asc: asc,
-        p_limit: pageSize,
-        p_offset: offset,
-      });
+      let rows: any[] = [];
+      let total = 0;
+      let rpcSucceeded = false;
 
-      if (error) {
-        return json({ success: false, error: error.message }, 500);
+      try {
+        const { data, error } = await db.rpc('pa_account_pins_page', {
+          p_workspace_id: ws,
+          p_account_id: accountId,
+          p_q: q || null,
+          p_board: board || null,
+          p_stage: stageFilter || null,
+          p_sort: sort,
+          p_asc: asc,
+          p_limit: pageSize,
+          p_offset: offset,
+          p_max_saves: maxSaves,
+          p_min_saves: minSavesRpc,
+        });
+
+        if (!error && Array.isArray(data)) {
+          rows = data;
+          total = rows.length > 0 ? Number(rows[0].total_count || 0) : 0;
+          rpcSucceeded = true;
+        } else if (error) {
+          console.warn('[pins:mode=page] RPC pa_account_pins_page returned error, using fallback query:', error.message);
+        }
+      } catch (rpcErr: any) {
+        console.warn('[pins:mode=page] RPC pa_account_pins_page threw error, using fallback query:', rpcErr?.message || rpcErr);
       }
 
-      const rows = Array.isArray(data) ? data : [];
-      const total = rows.length > 0 ? Number(rows[0].total_count || 0) : 0;
+      if (!rpcSucceeded) {
+        // FALLBACK: Standard PostgREST range query on pa_pins
+        let fallbackQuery = db
+          .from('pa_pins')
+          .select('*', { count: 'exact' })
+          .eq('workspace_id', ws)
+          .eq('account_id', accountId);
+
+        if (q) {
+          fallbackQuery = fallbackQuery.or(`title.ilike.%${q}%,description.ilike.%${q}%,pin_id.ilike.%${q}%`);
+        }
+        if (board) {
+          fallbackQuery = fallbackQuery.eq('board_name', board);
+        }
+        if (maxSaves !== null) {
+          fallbackQuery = fallbackQuery.lte('saves', maxSaves);
+        }
+        if (minSavesRpc !== null) {
+          fallbackQuery = fallbackQuery.gte('saves', minSavesRpc);
+        }
+
+        const sortColumn = ['saves', 'repins', 'comments', 'velocity', 'created_at_pinterest', 'archived_at'].includes(sort)
+          ? sort
+          : 'saves';
+
+        fallbackQuery = fallbackQuery
+          .order(sortColumn, { ascending: asc })
+          .range(offset, offset + pageSize - 1);
+
+        const { data: fallbackData, count: fallbackCount, error: fallbackError } = await fallbackQuery;
+        if (fallbackError) {
+          return json({ success: false, error: fallbackError.message }, 500);
+        }
+
+        rows = Array.isArray(fallbackData) ? fallbackData : [];
+        total = fallbackCount ?? rows.length;
+      }
 
       const pins = rows.map((p: any) => {
         const deltaSaves = Number(p.delta_saves || 0);
@@ -104,6 +157,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         return {
           id: p.id,
           pin_id: p.pin_id,
+          account_id: p.account_id,
           title: p.title,
           image_url: p.image_url,
           link: p.link,
@@ -146,20 +200,51 @@ export const GET: APIRoute = async ({ request, locals }) => {
 
   try {
     // 1. Load pa_workspace_settings for persisted filters
-    const { data: wsSettings } = await db
-      .from('pa_workspace_settings')
-      .select('pin_filter_min_saves, pin_filter_min_repins, pin_filter_rising_age_days, pin_filter_rising_saves')
-      .eq('workspace_id', ws)
-      .maybeSingle();
+    let minSaves = 0;
+    let minRepins = 0;
+    let risA = 14;
+    let risS = 34;
 
-    const minSaves = Number(wsSettings?.pin_filter_min_saves || 0);
-    const minRepins = Number(wsSettings?.pin_filter_min_repins || 0);
-    const risA = Number(wsSettings?.pin_filter_rising_age_days ?? 14);
-    const risS = Number(wsSettings?.pin_filter_rising_saves ?? 34);
+    try {
+      const settingsTable = db.from('pa_workspace_settings');
+      if (settingsTable && typeof settingsTable.select === 'function') {
+        const { data: wsSettings } = await settingsTable
+          .select('pin_filter_min_saves, pin_filter_min_repins, pin_filter_rising_age_days, pin_filter_rising_saves')
+          .eq('workspace_id', ws)
+          .maybeSingle();
+
+        minSaves = Number(wsSettings?.pin_filter_min_saves || 0);
+        minRepins = Number(wsSettings?.pin_filter_min_repins || 0);
+        risA = Number(wsSettings?.pin_filter_rising_age_days ?? 14);
+        risS = Number(wsSettings?.pin_filter_rising_saves ?? 34);
+      }
+    } catch {
+      // Non-blocking fallback
+    }
+
+    // 2. Load accounts list for multi-account workspace mapping
+    let accounts: any[] = [];
+    const accountMap = new Map<string, string>();
+    try {
+      const accTable = db.from('pa_accounts');
+      if (accTable && typeof accTable.select === 'function') {
+        const { data: accountsData } = await accTable
+          .select('id, username, status, follower_count, pins_count')
+          .eq('workspace_id', ws)
+          .order('username', { ascending: true });
+
+        accounts = Array.isArray(accountsData) ? accountsData : [];
+        accounts.forEach((acc) => {
+          accountMap.set(acc.id, acc.username);
+        });
+      }
+    } catch {
+      // Non-blocking fallback
+    }
 
     let query = db
       .from('pa_pins')
-      .select('id, pin_id, title, image_url, link, saves, repins, comments, share_count, velocity, annotations, seo_category, canonical_pin_id, archived_at, board_name, board_id, dominant_color, node_id, is_video, created_at_pinterest, notes, notes_updated_at')
+      .select('id, pin_id, account_id, title, image_url, link, saves, repins, comments, share_count, velocity, annotations, seo_category, canonical_pin_id, archived_at, board_name, board_id, dominant_color, node_id, is_video, created_at_pinterest, notes, notes_updated_at')
       .eq('workspace_id', ws);
 
     if (accountId) {
@@ -200,45 +285,100 @@ export const GET: APIRoute = async ({ request, locals }) => {
       const pinIds = pins.map((p: any) => p.id).filter(Boolean);
       const metricsMap = new Map<string, any[]>();
       const CHUNK_SIZE = 100;
-      for (let i = 0; i < pinIds.length; i += CHUNK_SIZE) {
-        const chunk = pinIds.slice(i, i + CHUNK_SIZE);
-        const { data: metricsData } = await db
-          .from('pa_pin_metrics')
-          .select('pin_ref, recorded_at, saves, repins, comments, shares, reactions_total')
-          .in('pin_ref', chunk)
-          .order('recorded_at', { ascending: false })
-          .limit(chunk.length * 5);
 
-        if (Array.isArray(metricsData)) {
-          for (const m of metricsData) {
-            const list = metricsMap.get(m.pin_ref) || [];
-            if (list.length < 2) list.push(m);
-            metricsMap.set(m.pin_ref, list);
+      try {
+        const metricsTable = db.from('pa_pin_metrics');
+        if (metricsTable && typeof metricsTable.select === 'function') {
+          for (let i = 0; i < pinIds.length; i += CHUNK_SIZE) {
+            const chunk = pinIds.slice(i, i + CHUNK_SIZE);
+            const { data: metricsData } = await metricsTable
+              .select('pin_ref, recorded_at, saves, repins, comments, shares, reactions_total')
+              .in('pin_ref', chunk)
+              .order('recorded_at', { ascending: false })
+              .limit(chunk.length * 20);
+
+            if (Array.isArray(metricsData)) {
+              for (const m of metricsData) {
+                const list = metricsMap.get(m.pin_ref) || [];
+                list.push(m);
+                metricsMap.set(m.pin_ref, list);
+              }
+            }
           }
         }
+      } catch {
+        // Non-blocking metrics fallback
       }
 
-      for (const p of pins) {
-        const snaps = metricsMap.get(p.id) || [];
-        let deltaSaves = 0;
-        let daysBetween = 1;
-        if (snaps.length >= 2) {
-          deltaSaves = Number(snaps[0].saves || 0) - Number(snaps[1].saves || 0);
-          const t0 = new Date(snaps[0].recorded_at).getTime();
-          const t1 = new Date(snaps[1].recorded_at).getTime();
-          daysBetween = Math.max(0.01, (t0 - t1) / 86400000);
-        }
+      const now = Date.now();
+      const ONE_DAY_MS = 24 * 3600 * 1000;
+      const THREE_DAYS_MS = 3 * ONE_DAY_MS;
+      const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
 
-        const ageDays = Math.max(0, (Date.now() - new Date(p.created_at_pinterest || p.archived_at || Date.now()).getTime()) / 86400000);
+      for (const p of pins) {
+        p.account_username = p.account_id ? accountMap.get(p.account_id) || null : null;
+        const snaps = metricsMap.get(p.id) || [];
+        const currentSaves = Number(p.saves || 0);
+        const currentRepins = Number(p.repins || 0);
         const velocity = Number(p.velocity || 0);
 
-        const stage = computePinStage(velocity, deltaSaves, ageDays);
-        const anomaly = computePinAnomaly(deltaSaves, velocity, daysBetween);
+        let deltaSaves24h = 0;
+        let deltaSaves3d = 0;
+        let deltaSaves7d = 0;
+        let deltaRepins24h = 0;
+        let deltaRepins7d = 0;
+
+        if (snaps.length >= 2) {
+          const latestSnap = snaps[0];
+          const t0 = new Date(latestSnap.recorded_at).getTime();
+          const s0 = Number(latestSnap.saves || currentSaves);
+          const r0 = Number(latestSnap.repins || currentRepins);
+
+          // Helper: Find baseline snapshot closest to targetMs ago from t0
+          const findBaselineSnap = (targetMs: number) => {
+            let bestSnap = snaps[snaps.length - 1];
+            let minDiff = Infinity;
+            for (const s of snaps) {
+              const elapsed = t0 - new Date(s.recorded_at).getTime();
+              const diff = Math.abs(elapsed - targetMs);
+              if (diff < minDiff) {
+                minDiff = diff;
+                bestSnap = s;
+              }
+            }
+            return bestSnap;
+          };
+
+          const snap24h = findBaselineSnap(ONE_DAY_MS);
+          const snap3d = findBaselineSnap(THREE_DAYS_MS);
+          const snap7d = findBaselineSnap(SEVEN_DAYS_MS);
+
+          deltaSaves24h = Math.max(0, s0 - Number(snap24h.saves || 0));
+          deltaSaves3d = Math.max(deltaSaves24h, s0 - Number(snap3d.saves || 0));
+          deltaSaves7d = Math.max(deltaSaves3d, s0 - Number(snap7d.saves || 0));
+
+          deltaRepins24h = Math.max(0, r0 - Number(snap24h.repins || 0));
+          deltaRepins7d = Math.max(deltaRepins24h, r0 - Number(snap7d.repins || 0));
+        }
+
+        // Strict Guarantee: Delta cannot exceed total current saves
+        deltaSaves24h = Math.min(deltaSaves24h, currentSaves);
+        deltaSaves3d = Math.min(deltaSaves3d, currentSaves);
+        deltaSaves7d = Math.min(deltaSaves7d, currentSaves);
+
+        const ageDays = Math.max(0, (now - new Date(p.created_at_pinterest || p.archived_at || now).getTime()) / ONE_DAY_MS);
+        const stage = computePinStage(velocity, deltaSaves24h, ageDays);
+        const anomaly = computePinAnomaly(deltaSaves24h, velocity, 1);
 
         p.age_days = Math.round(ageDays * 10) / 10;
         p.stage = stage;
         p.anomaly = anomaly;
-        p.delta_saves = deltaSaves;
+        p.delta_saves = deltaSaves24h;
+        p.delta_saves_24h = deltaSaves24h;
+        p.delta_saves_3d = deltaSaves3d;
+        p.delta_saves_7d = deltaSaves7d;
+        p.delta_repins_24h = deltaRepins24h;
+        p.delta_repins_7d = deltaRepins7d;
       }
     }
 
@@ -247,9 +387,105 @@ export const GET: APIRoute = async ({ request, locals }) => {
     return json({
       success: true,
       pins: filteredPins,
+      accounts,
       count: filteredPins.length,
       sort: sortCol,
       filters: { minSaves, minRepins, risingAgeDays: risA, risingSaves: risS },
+    });
+  } catch (e: any) {
+    return json({ success: false, error: e.message || 'Internal Server Error' }, 500);
+  }
+};
+
+export const DELETE: APIRoute = async ({ request, locals }) => {
+  const user = locals.user;
+  const schedulingClient = locals.supabase;
+  if (!user || !schedulingClient) {
+    return json({ success: false, error: 'Unauthorized: missing session' }, 401);
+  }
+
+  let body: any = {};
+  try {
+    body = await request.json();
+  } catch {
+    return json({ success: false, error: 'Invalid JSON payload.' }, 400);
+  }
+
+  const workspaceId = body.workspace_id || locals.activeWorkspaceId;
+  if (!workspaceId || !UUID_REGEX.test(workspaceId)) {
+    return json({ success: false, error: 'Invalid or missing workspace identifier.' }, 400);
+  }
+
+  let wsCtx;
+  try {
+    wsCtx = await assertWorkspaceAccess(schedulingClient, workspaceId, user.id, 'admin');
+  } catch (e: any) {
+    return json({ success: false, error: e.message || 'Forbidden: Admin access required' }, errorStatus(e));
+  }
+
+  const accountId = body.account_id?.trim();
+  if (accountId && !UUID_REGEX.test(accountId)) {
+    return json({ success: false, error: 'Invalid account_id format.' }, 422);
+  }
+
+  const maxSaves = body.max_saves !== undefined && body.max_saves !== null && body.max_saves !== '' ? Number(body.max_saves) : undefined;
+  const pinIds = Array.isArray(body.pin_ids) ? body.pin_ids.map((id: any) => String(id).trim()).filter(Boolean) : undefined;
+
+  if (maxSaves === undefined && (!pinIds || pinIds.length === 0)) {
+    return json({ success: false, error: 'Either pin_ids array or max_saves threshold must be provided.' }, 400);
+  }
+
+  if (maxSaves !== undefined && (!Number.isInteger(maxSaves) || maxSaves < 0 || maxSaves > 10000000)) {
+    return json({ success: false, error: 'max_saves must be an integer between 0 and 10000000.' }, 422);
+  }
+
+  try {
+    const db = dbClients.getPinArchive(locals.runtime?.env);
+    let deleteQuery = db.from('pa_pins').delete({ count: 'exact' }).eq('workspace_id', wsCtx.workspaceId);
+
+    if (accountId) {
+      deleteQuery = deleteQuery.eq('account_id', accountId);
+    }
+
+    if (maxSaves !== undefined) {
+      deleteQuery = deleteQuery.lte('saves', maxSaves);
+    } else if (pinIds && pinIds.length > 0) {
+      const areUuids = pinIds.every((id: string) => UUID_REGEX.test(id));
+      if (areUuids) {
+        deleteQuery = deleteQuery.in('id', pinIds);
+      } else {
+        deleteQuery = deleteQuery.in('pin_id', pinIds);
+      }
+    }
+
+    const { count: deletedCount, error: delErr } = await deleteQuery;
+
+    if (delErr) {
+      return json({ success: false, error: delErr.message }, 500);
+    }
+
+    // Recalculate remaining pins_count for account if accountId is present
+    let remainingCount = 0;
+    if (accountId) {
+      const { count } = await db
+        .from('pa_pins')
+        .select('*', { count: 'exact', head: true })
+        .eq('workspace_id', wsCtx.workspaceId)
+        .eq('account_id', accountId);
+
+      remainingCount = count ?? 0;
+      await db
+        .from('pa_accounts')
+        .update({ pins_count: remainingCount })
+        .eq('workspace_id', wsCtx.workspaceId)
+        .eq('id', accountId);
+    }
+
+    return json({
+      success: true,
+      deleted_count: deletedCount ?? 0,
+      remaining_count: remainingCount,
+      workspace_id: wsCtx.workspaceId,
     });
   } catch (e: any) {
     return json({ success: false, error: e.message || 'Internal Server Error' }, 500);

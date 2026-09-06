@@ -1,0 +1,58 @@
+name: PinArchive Monthly Audit Sweep
+
+on:
+  schedule:
+    - cron: '0 2 1 * *'
+  workflow_dispatch:
+    inputs:
+      workspace_id:
+        description: 'Workspace UUID (empty = all workspaces)'
+        required: false
+        type: string
+      usernames:
+        description: 'Comma-separated usernames (optional)'
+        required: false
+        type: string
+
+concurrency:
+  group: pinarchive-audit-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install @supabase/supabase-js --no-save
+
+      - name: Log Egress IP
+        run: |
+          echo "Checking runner egress IP..."
+          curl -s --max-time 10 https://api.ipify.org?format=json || true
+
+      - name: Run PinArchive Monthly Audit Sweep
+        env:
+          PINARCHIVE_SUPABASE_URL: ${{ secrets.PINARCHIVE_SUPABASE_URL }}
+          PINARCHIVE_SUPABASE_KEY: ${{ secrets.PINARCHIVE_SUPABASE_KEY }}
+          PINORBIT_WORKER_URL: ${{ secrets.PINORBIT_WORKER_URL }}
+          PINARCHIVE_INGEST_SECRET: ${{ secrets.PINARCHIVE_INGEST_SECRET }}
+          PINARCHIVE_GAS_URL: ${{ secrets.PINARCHIVE_GAS_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DISCOVERY_WORKSPACE_ID: ${{ github.event.inputs.workspace_id || '' }}
+          DISCOVERY_USERNAMES: ${{ github.event.inputs.usernames || '' }}
+          AUDIT_SWEEP: 'true'
+          FORCE_RUN: 'true'
+          SHARD_COUNT: 1
+          DISCOVERY_SHARD: 0
+        run: node scripts/pinarchive-discovery.mjs

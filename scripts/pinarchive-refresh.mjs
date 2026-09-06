@@ -13,7 +13,6 @@ const CFG = {
   PUSH_SLEEP_MS: 3000,
   CIRCUIT_BREAKER: 3,
   CONCURRENCY: 3,
-  MAX_PINS: parseInt(process.env.REFRESH_MAX_PINS || '0', 10) || 0,
 };
 
 const SHARD_COUNT = Math.max(1, parseInt(process.env.SHARD_COUNT || '1', 10) || 1);
@@ -32,13 +31,13 @@ const HEADERS = {
 
 const { PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, PINORBIT_WORKER_URL, PINARCHIVE_INGEST_SECRET } = process.env;
 
-const REFRESH_WORKSPACE_ID = (process.env.REFRESH_WORKSPACE_ID || '').trim();
+const REFRESH_WORKSPACE_ID = (process.env.REFRESH_WORKSPACE_ID || process.env.WORKSPACE_ID || process.env.WORKSPACE_FILTER || process.env.REFRESH_WORKSPACE_FILTER || '').trim();
 const REFRESH_USERNAME = (process.env.REFRESH_USERNAME || '').trim().toLowerCase();
 const REFRESH_USERNAMES = (process.env.REFRESH_USERNAMES || '')
   .split(',')
   .map(s => s.trim().toLowerCase())
   .filter(Boolean);
-const REFRESH_FORCE = (process.env.REFRESH_FORCE || '').trim().toLowerCase() === 'true';
+const REFRESH_FORCE = (process.env.REFRESH_FORCE || process.env.FORCE_RUN || '').trim().toLowerCase() === 'true';
 
 function checkEnv() {
   const missing = [];
@@ -420,7 +419,7 @@ async function main() {
   // Load workspace settings to map gating controls
   const settingsMap = new Map();
   try {
-    const wsSettings = await supaQuery('pa_workspace_settings', 'select=workspace_id,ingest_enabled,paused_account_policy,refresh_max_pins');
+    const wsSettings = await supaQuery('pa_workspace_settings', 'select=workspace_id,ingest_enabled,paused_account_policy,refresh_max_pins,refresh_min_saves,discovery_stop_pages,audit_sweep_enabled,daily_sheet_sync_enabled,github_schedule_enabled');
     if (Array.isArray(wsSettings)) {
       for (const s of wsSettings) {
         settingsMap.set(s.workspace_id, s);
@@ -430,7 +429,34 @@ async function main() {
     console.warn('Could not query pa_workspace_settings (using defaults):', e.message);
   }
 
-  let accounts = await supaQuery('pa_accounts', 'select=id,workspace_id,username,follower_count,status,ingest_enabled,last_run_at');
+  // Check Master Workspace Global Kill-Switch for scheduled pipeline runs
+  const isGhScheduled = (process.env.EVENT_NAME || process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'schedule';
+  if (isGhScheduled) {
+    try {
+      const p1Url = process.env.SUPABASE_URL || process.env.PUBLIC_SUPABASE_URL || process.env.PINORBIT_SUPABASE_URL || '';
+      const p1Key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
+      if (p1Url && p1Key) {
+        const p1Res = await fetch(`${p1Url}/rest/v1/workspaces?select=id,is_master&is_master=eq.true&limit=1`, {
+          headers: { apikey: p1Key, Authorization: `Bearer ${p1Key}`, Accept: 'application/json' },
+        });
+        if (p1Res.ok) {
+          const masterWorkspaces = await p1Res.json();
+          if (Array.isArray(masterWorkspaces) && masterWorkspaces.length > 0) {
+            const masterId = masterWorkspaces[0].id;
+            const masterSetting = settingsMap.get(masterId);
+            if (masterSetting && masterSetting.github_schedule_enabled === false) {
+              console.log(`[GLOBAL SKIP] GitHub Actions schedule is globally disabled by Master Workspace (${masterId.slice(0, 8)}). Exiting immediately.`);
+              return;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // Non-blocking fallback
+    }
+  }
+
+  let accounts = await supaQuery('pa_accounts', 'select=id,workspace_id,username,follower_count,status,ingest_enabled,last_run_at&order=username.asc');
   if (!accounts.length) { console.log('No accounts found.'); return; }
 
   if (REFRESH_USERNAME) {
@@ -443,37 +469,69 @@ async function main() {
   }
 
   if (!accounts.length) { console.log('No matching accounts found.'); return; }
-  console.log(`Found ${accounts.length} account(s)\n`);
+
+  // Group accounts by workspace for passengers summary
+  const wsGroups = new Map();
+  for (const a of accounts) {
+    const ws = a.workspace_id;
+    if (!wsGroups.has(ws)) wsGroups.set(ws, { total: 0, intervals: new Set() });
+    const g = wsGroups.get(ws);
+    g.total++;
+    g.intervals.add(`${a.interval_days || 1}d`);
+  }
+
+  console.log('🚌 Today\'s passengers:');
+  for (const [wsId, g] of wsGroups.entries()) {
+    console.log(`- Workspace ${wsId.slice(0, 8)}: ${g.total} accounts (interval=${Array.from(g.intervals).join('/')})`);
+  }
+  console.log('');
+
+  // Distribute accounts across shard matrix when processing multi-account workspaces
+  const isTargetedRun = Boolean(REFRESH_USERNAME || REFRESH_USERNAMES.length > 0);
+  const shardedAccounts = isTargetedRun
+    ? accounts
+    : accounts.filter((_, idx) => idx % SHARD_COUNT === REFRESH_SHARD);
+
+  console.log(`Found ${accounts.length} account(s) total — processing ${shardedAccounts.length} in shard ${REFRESH_SHARD + 1}/${SHARD_COUNT}\n`);
   const summary = { refreshed: 0, updated: 0, pushed: 0, errors: [] };
 
-  for (const acc of accounts) {
+  for (const acc of shardedAccounts) {
+    const wsPrefix = `[ws:${acc.workspace_id.slice(0, 8)}]`;
     const wsSetting = settingsMap.get(acc.workspace_id);
     const wsIngestEnabled = wsSetting ? wsSetting.ingest_enabled : true;
+    const wsGhScheduleEnabled = wsSetting?.github_schedule_enabled ?? true;
+    const isGhScheduledEvent = (process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'schedule';
     const pausedPolicy = wsSetting ? wsSetting.paused_account_policy : 'reject';
+
+    // Check GitHub schedule gate
+    if (isGhScheduledEvent && !wsGhScheduleEnabled) {
+      console.log(`[SKIP]${wsPrefix} GitHub Actions 07:00 UTC schedule is disabled (delegated to FastCron).`);
+      continue;
+    }
 
     // Check workspace-level ingest gate
     if (wsIngestEnabled === false) {
-      console.log(`[SKIP] Workspace ${acc.workspace_id} ingest is disabled.`);
+      console.log(`[SKIP]${wsPrefix} Ingest is disabled at workspace level.`);
       continue;
     }
 
     // Check account-level ingest gate
     if (acc.ingest_enabled === false) {
-      console.log(`[SKIP] Account @${acc.username} ingest is disabled (ingest_enabled=false).`);
+      console.log(`[SKIP]${wsPrefix} Account @${acc.username} ingest is disabled (ingest_enabled=false).`);
       continue;
     }
 
     // Check paused policy gate
-    if (acc.status === 'paused' && pausedPolicy === 'reject') {
-      console.log(`[SKIP] Account @${acc.username} is paused (policy=reject).`);
+    if (['paused', 'cookie_expired', 'error'].includes(acc.status) && pausedPolicy === 'reject') {
+      console.log(`[SKIP]${wsPrefix} Account @${acc.username} is paused (policy=reject).`);
       continue;
     }
 
     if (REFRESH_WORKSPACE_ID && acc.workspace_id !== REFRESH_WORKSPACE_ID) {
-      console.log(`[SKIP] ${acc.username}: outside requested workspace.`); continue;
+      console.log(`[SKIP]${wsPrefix} ${acc.username}: outside requested workspace.`); continue;
     }
     if (REFRESH_USERNAME && acc.username.toLowerCase() !== REFRESH_USERNAME) {
-      console.log(`[SKIP] ${acc.username}: outside requested account.`); continue;
+      console.log(`[SKIP]${wsPrefix} ${acc.username}: outside requested account.`); continue;
     }
 
     // X2: Precedence: env REFRESH_MAX_PINS if set -> else DB setting -> else 0 (unlimited with pagination)
@@ -488,6 +546,16 @@ async function main() {
     const cap = configuredCap > 0 ? configuredCap : Number.MAX_SAFE_INTEGER;
     const effectiveCap = Math.min(cap, 10000);
 
+    // Refresh Min Saves Gate: env REFRESH_MIN_SAVES -> else DB setting -> else 0 (all)
+    const envMinSavesRaw = process.env.REFRESH_MIN_SAVES !== undefined && process.env.REFRESH_MIN_SAVES.trim() !== ''
+      ? parseInt(process.env.REFRESH_MIN_SAVES, 10)
+      : null;
+    const settingsRefreshMinSaves = typeof wsSetting?.refresh_min_saves === 'number' ? wsSetting.refresh_min_saves : null;
+    const effectiveMinSaves = envMinSavesRaw !== null && !isNaN(envMinSavesRaw)
+      ? Math.max(0, envMinSavesRaw)
+      : (settingsRefreshMinSaves !== null && !isNaN(settingsRefreshMinSaves) ? Math.max(0, settingsRefreshMinSaves) : 0);
+    const savesFilterQuery = effectiveMinSaves > 0 ? `&saves=gte.${effectiveMinSaves}` : '';
+
     // True pagination loop (1000 per page)
     const allPins = [];
     let offset = 0;
@@ -496,7 +564,7 @@ async function main() {
       const fetchLimit = Math.min(PAGE, effectiveCap - allPins.length);
       const chunk = await supaQuery(
         'pa_pins',
-        `select=pin_id,saves,repins,comments,share_count,reactions,annotations,seo_category,canonical_pin_id,seo_alt_text,board_pin_count,board_last_modified_at,archived_at,title,description,link,utm_link,domain,board_name,board_id,created_at_pinterest,image_url,dominant_color,image_signature,node_id,is_video,velocity&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}&order=last_updated_at.asc&limit=${fetchLimit}&offset=${offset}`
+        `select=pin_id,saves,repins,comments,share_count,reactions,annotations,seo_category,canonical_pin_id,seo_alt_text,board_pin_count,board_last_modified_at,archived_at,title,description,link,utm_link,domain,board_name,board_id,created_at_pinterest,image_url,dominant_color,image_signature,node_id,is_video,velocity&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}${savesFilterQuery}&order=last_updated_at.asc&limit=${fetchLimit}&offset=${offset}`
       );
       if (!Array.isArray(chunk) || chunk.length === 0) break;
       allPins.push(...chunk);
@@ -504,10 +572,10 @@ async function main() {
       offset += chunk.length;
     }
 
-    const pins = allPins.filter((_, idx) => idx % SHARD_COUNT === REFRESH_SHARD);
+    const pins = isTargetedRun ? allPins.filter((_, idx) => idx % SHARD_COUNT === REFRESH_SHARD) : allPins;
 
     if (!pins.length) continue;
-    console.log(`${acc.username}: ${pins.length} pins to refresh (shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} of ${allPins.length} total)`);
+    console.log(`${acc.username}: ${pins.length} pins to refresh (min saves: ${effectiveMinSaves > 0 ? effectiveMinSaves : 'all'}, shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} of ${allPins.length} total)`);
 
     let consecutiveErrors = 0;
     let rateLimitCooldownUntil = 0;
@@ -586,9 +654,14 @@ async function main() {
           const ms = createdAt ? Date.now() - new Date(createdAt).getTime() : NaN;
           const ageDays = !Number.isFinite(ms) || ms <= 0 ? 1 : Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24)));
 
+          const oldShares = Number(p.share_count) || 0;
+          const oldComments = Number(p.comments) || 0;
+
           if (
             fresh.saves !== oldSaves ||
             fresh.repins !== oldRepins ||
+            (fresh.share_count !== undefined && fresh.share_count !== oldShares) ||
+            (fresh.comments !== undefined && fresh.comments !== oldComments) ||
             newAnnotations.length > 0
           ) {
             const changedItem = {
@@ -597,7 +670,7 @@ async function main() {
               repins: fresh.repins,
               comments: fresh.comments,
               velocity: Math.round((fresh.saves / ageDays) * 100) / 100,
-              archived_at: new Date().toISOString(),
+              archived_at: p.archived_at ?? null,
               refreshed_at: new Date().toISOString(),
             };
             if (fresh.reactions && Object.keys(fresh.reactions).length > 0) {

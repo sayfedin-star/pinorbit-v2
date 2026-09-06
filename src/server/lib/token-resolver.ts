@@ -6,15 +6,21 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export type ProjectName = 'scheduling' | 'analytics' | 'competitors' | 'pinarchive';
 
 export interface TokenResolveOptions {
-  workspaceId: string;
+  workspaceId?: string | null;
   tokenId?: string | null;
   channel?: string | null;
   provider?: 'fastcron' | 'cronjoborg' | string;
+  encryptedToken?: string | null;
+  schedule?: {
+    workspace_id?: string | null;
+    fastcron_token_id?: string | null;
+    fastcron_token_encrypted?: string | null;
+  } | null;
 }
 
 export interface ResolvedTokenResult {
   token: string;
-  source: 'workspace_registry' | 'channel' | 'env';
+  source: 'schedule_override' | 'workspace_registry' | 'channel' | 'env';
   tokenId?: string | null;
   name?: string;
   maskedToken?: string;
@@ -28,6 +34,29 @@ export interface WorkspaceTokenSummary {
   source: 'workspace_registry' | 'env';
   token?: string;
   created_at?: string;
+}
+
+/**
+ * Pure helper function to evaluate token candidates in priority order.
+ * Returns the first valid candidate with length >= 16 (or non-empty if specified).
+ */
+export function evaluateTokenCandidates(candidates: Array<string | null | undefined>): string | null {
+  for (const tok of candidates) {
+    if (tok && typeof tok === 'string' && tok.trim().length >= 16) {
+      return tok.trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Canonical token masker returning ••••XXXX (last 4 characters).
+ */
+export function maskToken(token?: string | null): string {
+  if (!token || typeof token !== 'string') return '';
+  const trimmed = token.trim();
+  if (trimmed.length <= 4) return '••••' + trimmed;
+  return '••••' + trimmed.slice(-4);
 }
 
 function getClientAndTable(
@@ -68,20 +97,22 @@ function getClientAndTable(
 }
 
 /**
- * Resolves API Token for a specific workspace and project.
- * Priority order:
- * 1. Explicit tokenId in that project's token table
- * 2. Workspace default token (is_default = true) in that project's table
- * 3. Any active token in that project's table
- * 4. Channel token (for analytics backwards compatibility)
- * 5. Environment variable fallback (FASTCRON_API_TOKEN or CRONJOB_API_KEY)
+ * Resolves API Token for a specific workspace, schedule, or project.
+ * Canonical Priority Hierarchy:
+ * 1. Schedule-encrypted token (AES-GCM decrypted via TOKEN_KEK)
+ * 2. Explicit tokenId row in that project's token table (AES-GCM decrypted via TOKEN_KEK)
+ * 3. Workspace default token (is_default = true or first active token)
+ * 4. Environment variable fallback (FASTCRON_API_TOKEN or CRONJOB_API_KEY)
  */
 export async function resolveToken(
   options: TokenResolveOptions,
-  project: ProjectName,
+  project: ProjectName = 'scheduling',
   runtimeEnv?: Record<string, any>
 ): Promise<ResolvedTokenResult> {
-  const { workspaceId, tokenId } = options;
+  const workspaceId = options.workspaceId || options.schedule?.workspace_id || null;
+  const tokenId = options.tokenId || options.schedule?.fastcron_token_id || null;
+  const encryptedToken = options.encryptedToken || options.schedule?.fastcron_token_encrypted || null;
+
   const provider = options.provider || (workspaceId ? await getGlobalCronProvider(workspaceId, runtimeEnv) : 'fastcron');
   const isCronJobOrg = provider === 'cronjoborg' || provider === 'cron-job.org';
   const env = getServerEnv(runtimeEnv);
@@ -89,32 +120,56 @@ export async function resolveToken(
     ? (runtimeEnv?.CRONJOB_API_KEY || (typeof process !== 'undefined' ? process.env.CRONJOB_API_KEY || process.env.CRON_JOB_ORG_API_KEY : ''))
     : (runtimeEnv?.FASTCRON_API_TOKEN || env.FASTCRON_API_TOKEN || (typeof process !== 'undefined' ? process.env.FASTCRON_API_TOKEN : ''));
   const kek = await resolveTokenKek(runtimeEnv || {});
+
+  // 1. Schedule-encrypted token (AES-GCM decrypted via TOKEN_KEK)
+  if (encryptedToken && kek) {
+    try {
+      const dec = await decryptToken(encryptedToken, kek, runtimeEnv);
+      if (dec && dec.trim().length >= 8) {
+        return {
+          token: dec.trim(),
+          source: 'schedule_override',
+          tokenId: null,
+          name: 'Schedule Token Override',
+          maskedToken: maskToken(dec.trim()),
+        };
+      }
+    } catch (err) {
+      console.warn('[TokenResolver] Failed to decrypt schedule-level token:', err);
+    }
+  }
+
   const { client, table } = getClientAndTable(project, runtimeEnv);
 
-  // 1. Explicit tokenId lookup
+  // 2. Explicit tokenId row in project table
   if (tokenId && kek) {
-    const { data: row } = await client
+    if (!workspaceId) {
+      throw new Error('Tenant isolation violation: workspaceId is required when resolving by tokenId');
+    }
+
+    const tokenQuery = client
       .from(table)
       .select('id, name, token_encrypted, token_masked, is_default')
       .eq('id', tokenId)
-      .eq('workspace_id', workspaceId)
-      .maybeSingle();
+      .eq('workspace_id', workspaceId);
+
+    const { data: row } = await tokenQuery.maybeSingle();
 
     if (row?.token_encrypted) {
-      const dec = await decryptToken(row.token_encrypted, kek);
+      const dec = await decryptToken(row.token_encrypted, kek, runtimeEnv);
       if (dec && dec.trim().length >= 8) {
         return {
           token: dec.trim(),
           source: 'workspace_registry',
           tokenId: row.id,
           name: row.name,
-          maskedToken: row.token_masked,
+          maskedToken: row.token_masked || maskToken(dec.trim()),
         };
       }
     }
   }
 
-  // 2. Default workspace token lookup
+  // 3. Workspace default token lookup
   if (workspaceId && kek) {
     const { data: defRow } = await client
       .from(table)
@@ -124,7 +179,7 @@ export async function resolveToken(
       .maybeSingle();
 
     if (defRow) {
-      let dec = defRow.token_encrypted && kek ? await decryptToken(defRow.token_encrypted, kek) : null;
+      let dec = defRow.token_encrypted && kek ? await decryptToken(defRow.token_encrypted, kek, runtimeEnv) : null;
       if (!dec && (defRow as any).token) dec = (defRow as any).token;
       if (!dec && envToken) dec = envToken;
       if (dec && dec.trim().length >= 8) {
@@ -133,21 +188,19 @@ export async function resolveToken(
           source: 'workspace_registry',
           tokenId: defRow.id,
           name: defRow.name || 'Workspace Default',
-          maskedToken: defRow.token_masked || ('••••' + dec.trim().slice(-4)),
+          maskedToken: defRow.token_masked || maskToken(dec.trim()),
         };
       }
     }
 
-    // 3. Any first token in project workspace registry
+    // 3b. Any first active token in project workspace registry
     try {
-      let anyQuery: any = client
+      let anyQuery = client
         .from(table)
         .select('id, name, token_encrypted, token_masked, is_default')
-        .eq('workspace_id', workspaceId);
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false });
 
-      if (typeof anyQuery?.order === 'function') {
-        anyQuery = anyQuery.order('created_at', { ascending: true });
-      }
       if (typeof anyQuery?.limit === 'function') {
         anyQuery = anyQuery.limit(1);
       }
@@ -155,28 +208,30 @@ export async function resolveToken(
       const { data: anyRows } = await anyQuery;
 
       if (anyRows && anyRows.length > 0 && anyRows[0].token_encrypted) {
-        const dec = await decryptToken(anyRows[0].token_encrypted, kek);
+        const dec = await decryptToken(anyRows[0].token_encrypted, kek, runtimeEnv);
         if (dec && dec.trim().length >= 8) {
           return {
             token: dec.trim(),
             source: 'workspace_registry',
             tokenId: anyRows[0].id,
             name: anyRows[0].name,
-            maskedToken: anyRows[0].token_masked,
+            maskedToken: anyRows[0].token_masked || maskToken(dec.trim()),
           };
         }
       }
-    } catch {}
+    } catch (regErr: any) {
+      console.warn('[TokenResolver] Non-fatal registry token lookup error:', regErr?.message || regErr);
+    }
   }
 
-  // 4. Environment fallback
+  // 4. Environment variable fallback
   if (envToken && typeof envToken === 'string' && envToken.trim().length >= 8) {
     return {
       token: envToken.trim(),
       source: 'env',
       tokenId: null,
       name: isCronJobOrg ? 'Env cron-job.org Key' : 'Env FastCron Token',
-      maskedToken: '••••' + envToken.trim().slice(-4),
+      maskedToken: maskToken(envToken),
     };
   }
 
@@ -217,7 +272,7 @@ export async function listWorkspaceTokens(
       for (const row of rows) {
         let plain: string | null = null;
         if (row.token_encrypted && kek) {
-          plain = await decryptToken(row.token_encrypted, kek);
+          plain = await decryptToken(row.token_encrypted, kek, runtimeEnv);
         }
 
         if (plain && plain.trim().length > 0) {
@@ -274,7 +329,7 @@ export async function saveWorkspaceToken(
       return { success: false, error: 'Encryption KEK is not configured on server' };
     }
 
-    const encrypted = await encryptToken(token.trim(), kek);
+    const encrypted = await encryptToken(token.trim(), kek, runtimeEnv);
     const masked = '••••' + token.trim().slice(-4);
     const { client, table } = getClientAndTable(project, runtimeEnv);
 
@@ -295,6 +350,9 @@ export async function saveWorkspaceToken(
       .single();
 
     if (error || !inserted) {
+      if (error?.code === '23505') {
+        return { success: false, error: 'A default token already exists for this workspace. Please unset the current default token or refresh and retry.' };
+      }
       return { success: false, error: error?.message || 'Failed to save token' };
     }
 

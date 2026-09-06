@@ -39,7 +39,7 @@ async function authenticateAdmin(request: Request, locals: any, explicitWorkspac
   try {
     const wsCtx = await assertWorkspaceAccess(schedulingClient, workspaceId, user.id, 'admin');
     const competitorsClient = dbClients.getCompetitors(runtimeEnv);
-    return { ok: { user, workspaceId: wsCtx.workspaceId, competitorsClient, runtimeEnv } };
+    return { ok: { user, workspaceId: wsCtx.workspaceId, isMaster: Boolean(wsCtx.isMaster), competitorsClient, runtimeEnv } };
   } catch (err: any) {
     const status = errorStatus(err);
     return { error: jsonResponse({ success: false, error: err.message || 'Forbidden: Access Denied' }, status) };
@@ -74,7 +74,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     // 2. Full Ops State: Pipeline Settings, Competitors, and Recent Jobs
     const { data: pipelineSettings } = await competitorsClient
       .from('competitor_pipeline_settings')
-      .select('workspace_id, is_enabled, dry_run, max_retries, updated_at, cron_expression, fastcron_job_id, cron_provider, schedule_status, timezone')
+      .select('workspace_id, is_enabled, dry_run, max_retries, updated_at, cron_expression, fastcron_job_id, cron_provider, schedule_status, timezone, github_schedule_enabled')
       .eq('workspace_id', workspaceId)
       .maybeSingle();
 
@@ -83,6 +83,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       is_enabled: true,
       dry_run: false,
       max_retries: 3,
+      github_schedule_enabled: true,
       updated_at: null,
       cron_provider: 'fastcron',
       schedule_status: 'pending',
@@ -95,6 +96,25 @@ export const GET: APIRoute = async ({ request, locals }) => {
       .order('username', { ascending: true });
 
     if (compErr) throw compErr;
+
+    // Auto-heal stale running jobs older than 45 minutes to prevent stuck 'In progress' indicators
+    try {
+      const fortyFiveMinutesAgo = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      const jobTable = competitorsClient.from('competitor_ingestion_jobs');
+      if (jobTable && typeof jobTable.update === 'function') {
+        await jobTable
+          .update({
+            status: 'failed',
+            error_message: 'Job timed out after 45 minutes (auto-healed)',
+            completed_at: new Date().toISOString(),
+          })
+          .eq('workspace_id', workspaceId)
+          .eq('status', 'running')
+          .lt('created_at', fortyFiveMinutesAgo);
+      }
+    } catch (err) {
+      // Non-blocking auto-heal
+    }
 
     const { data: jobs, error: jobsErr } = await competitorsClient
       .from('competitor_ingestion_jobs')
@@ -149,6 +169,7 @@ export const PUT: APIRoute = async ({ request, locals }) => {
       updated_at: new Date().toISOString(),
     };
 
+    if (body.github_schedule_enabled !== undefined) updatePayload.github_schedule_enabled = Boolean(body.github_schedule_enabled);
     if (body.cron_provider !== undefined) updatePayload.cron_provider = body.cron_provider;
     if (body.cron_expression !== undefined) updatePayload.cron_expression = body.cron_expression;
     if (body.timezone !== undefined) updatePayload.timezone = body.timezone;
@@ -314,10 +335,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const auth = await authenticateAdmin(request, locals, body.workspace_id);
   if (auth.error) return auth.error;
 
-  const { workspaceId, competitorsClient, runtimeEnv } = auth.ok!;
+  const { workspaceId, isMaster, competitorsClient, runtimeEnv } = auth.ok!;
 
   // 1. Resolve Target Scope & Competitor IDs
-  const scope = body.scope || (body.competitor_id || (Array.isArray(body.ids) && body.ids.length > 0) ? 'selected' : 'all');
+  const isMasterScope = Boolean(isMaster) && body.scope !== 'current' && !body.competitor_id && (!Array.isArray(body.ids) || body.ids.length === 0) && (!Array.isArray(body.competitor_ids) || body.competitor_ids.length === 0);
+  const scope = isMasterScope ? 'all' : (body.scope || (body.competitor_id || (Array.isArray(body.ids) && body.ids.length > 0) ? 'selected' : 'all'));
   let selectedIds: string[] = [];
 
   if (Array.isArray(body.ids) && body.ids.length > 0) {
@@ -333,23 +355,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const dryRun = Boolean(body.dry_run === true || body.dry_run === 'true');
   const targetUsername = typeof body.username === 'string' ? body.username.trim() : (typeof body.target_username === 'string' ? body.target_username.trim() : '');
 
+  let jobRecord: any = null;
   try {
-    // 2. Insert Ingestion Job record with 'running' status (not queued) and trigger origin
+    // 2. Insert Ingestion Job record with 'queued' status
     const trigger = (selectedIds.length === 1 || body.competitor_id) ? 'run_now' : 'full';
     const { data: job, error: jobErr } = await competitorsClient
       .from('competitor_ingestion_jobs')
       .insert({
         workspace_id: workspaceId,
         competitor_id: selectedIds.length === 1 ? selectedIds[0] : (body.competitor_id || null),
-        status: 'running',
+        status: 'queued',
         trigger,
         items_processed: 0,
-        started_at: new Date().toISOString(),
       })
       .select('id, workspace_id, competitor_id, status, trigger, created_at')
       .single();
 
     if (jobErr || !job) throw jobErr || new Error('Failed to create ingestion job record');
+    jobRecord = job;
 
     // 3. Dispatch to GitHub Actions workflow directly
     const githubRepo =
@@ -367,7 +390,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
       // If dispatch token is missing, fail job in DB and return error
       await competitorsClient
         .from('competitor_ingestion_jobs')
-        .update({ status: 'failed', error_message: 'GitHub dispatch token not configured on server', completed_at: new Date().toISOString() })
+        .update({
+          status: 'failed',
+          error_message: 'GitHub dispatch token not configured on server',
+          completed_at: new Date().toISOString(),
+        })
         .eq('id', job.id);
 
       return jsonResponse({ success: false, error: 'GitHub dispatch token not configured on server' }, 503);
@@ -386,24 +413,38 @@ export const POST: APIRoute = async ({ request, locals }) => {
       body: JSON.stringify({
         ref: 'main',
         inputs: {
-          workspace_id: workspaceId,
+          workspace_id: isMasterScope ? '' : workspaceId,
           target_scope: targetScope,
           competitor_ids: selectedIds.join(','),
           target_username: targetUsername,
           dry_run: dryRun ? 'true' : '',
           force_run: forceRun ? 'true' : '',
+          job_id: job?.id || '',
+          trigger,
         },
       }),
       signal: AbortSignal.timeout(8000),
     });
 
     if (ghRes.status === 204 || (ghRes.status >= 200 && ghRes.status < 300)) {
+      try {
+        const uBuilder = competitorsClient.from('competitor_ingestion_jobs');
+        if (typeof uBuilder.update === 'function') {
+          await uBuilder
+            .update({ status: 'running', started_at: new Date().toISOString() })
+            .eq('id', job.id);
+        }
+      } catch (markRunningErr) {
+        console.warn('[CompetitorOps] Failed to mark job running:', markRunningErr);
+      }
+
       return jsonResponse(
         {
           success: true,
           dispatched: true,
           job_id: job.id,
           scope,
+          is_master_scope: isMasterScope,
           target_scope: targetScope,
           count: selectedIds.length > 0 ? selectedIds.length : 'all',
           force: forceRun,
@@ -427,6 +468,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
       502
     );
   } catch (err: any) {
+    if (jobRecord?.id && competitorsClient) {
+      try {
+        const uBuilder = competitorsClient.from('competitor_ingestion_jobs');
+        if (typeof uBuilder.update === 'function') {
+          await uBuilder
+            .update({
+              status: 'failed',
+              error_message: err?.message || 'Failed to dispatch competitor update',
+              completed_at: new Date().toISOString(),
+            })
+            .eq('id', jobRecord.id);
+        }
+      } catch (markErr) {
+        console.warn('[CompetitorOps] Failed to mark job failed:', markErr);
+      }
+    }
     return jsonResponse({ success: false, error: err.message || 'Failed to dispatch competitor update' }, 500);
   }
 };

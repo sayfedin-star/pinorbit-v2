@@ -8,6 +8,7 @@ export interface Workspace {
   updated_at: string;
   cron_provider?: 'fastcron' | 'cronjoborg' | string;
   cron_provider_api_key_encrypted?: string | null;
+  is_master?: boolean;
 }
 
 export interface WorkspaceMembership {
@@ -23,6 +24,7 @@ export interface WorkspaceOption {
   name: string;
   slug?: string | null;
   is_default?: boolean;
+  is_master?: boolean;
 }
 
 export interface AccountWebhook {
@@ -215,6 +217,7 @@ export interface Competitor {
   account_type?: 'own' | 'competitor' | string;
   tags?: string[];
   created_at: string;
+  updated_at?: string | null;
   boards_count?: number;
   strategy_age_days?: number;
   oldest_board_date?: string | null;
@@ -747,7 +750,6 @@ export interface PurgePreviewCounts {
   daily_count: number;
   summaries_count: number;
   top_pins_count: number;
-  url_perf_count: number;
   affected_rollup_dates: string[];
   total_records: number;
 }
@@ -757,7 +759,6 @@ export interface PurgeResultCounts {
   summaries_deleted: number;
   rollups_rebuilt: number;
   top_pins_deleted: number;
-  url_perf_deleted: number;
 }
 
 export interface PurgeResponse {

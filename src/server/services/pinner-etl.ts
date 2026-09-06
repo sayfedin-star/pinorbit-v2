@@ -482,13 +482,6 @@ export const pinnerETL = {
       const dailyRows: AccountAnalyticsDaily[] = [];
       let summaryRow: AccountAnalyticsSummary | null = null;
       const topPinRows: TopPinSnapshot[] = [];
-      const destinationUrlsToTrack: Array<{
-        destination_url: string;
-        period_date: string;
-        total_impressions: number;
-        total_clicks: number;
-        total_pins_active: number;
-      }> = [];
 
       // -------------------------------------------------------------------------
       // Parse Pipeline A: Account Daily Time Series & Summaries (Allowlist filtered)
@@ -676,17 +669,6 @@ export const pinnerETL = {
           ) as TopPinSnapshot;
 
           topPinRows.push(filteredTopPin);
-
-          const destUrl = pin.destination_url || pin.link;
-          if (destUrl) {
-            destinationUrlsToTrack.push({
-              destination_url: destUrl,
-              period_date: windowEnd.split('T')[0],
-              total_impressions: metrics.impressions,
-              total_clicks: metrics.outbound_clicks + metrics.pin_clicks,
-              total_pins_active: 1,
-            });
-          }
         });
       }
 
@@ -780,7 +762,7 @@ export const pinnerETL = {
         // Offload raw JSONB after 7 days to reclaim space
         const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
         const analyticsClient = dbClients.getAnalytics(runtimeEnv);
-        await analyticsClient
+        const { error: reclaimErr } = await analyticsClient
           .from('top_pins_snapshots')
           .update({
             raw_pin: null,
@@ -788,22 +770,20 @@ export const pinnerETL = {
             raw_metrics: null,
           })
           .eq('workspace_id', workspaceId)
-          .lt('window_end', sevenDaysAgo)
-          .then(() => {});
+          .lt('window_end', sevenDaysAgo);
+        if (reclaimErr) {
+          console.warn('[PinnerETL] raw reclaim failed:', reclaimErr.message);
+        }
       }
 
       const rollupsUpsertCount = await upsertBatch('workspace_rollups', workspaceRollupRows, (r) =>
         analyticsDb.upsertDailyWorkspaceMetrics(workspaceId, r)
       );
 
-      if (destinationUrlsToTrack.length > 0) {
-        await analyticsDb.upsertUrlPerformance(workspaceId, destinationUrlsToTrack);
-      }
-
       // =========================================================================
       // Operational Ingestion Run Completion in Project 3 (R5.1)
       // =========================================================================
-      const totalRowsCount = dailyRows.length + topPinRows.length + (summaryRow ? 1 : 0);
+      const totalRowsCount = dailyUpsertCount + topPinsUpsertCount + (summaryRow ? 1 : 0);
       await analyticsDb.completeIngestionRun(runRecord.id, totalRowsCount);
 
       // =========================================================================

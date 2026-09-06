@@ -107,9 +107,11 @@ export const GET: APIRoute = async ({ locals }) => {
               ? listRes.data.jobs
               : [];
 
+        const expectedDispatchBase = getDispatchEndpointUrl(runtimeEnv).split('?')[0];
         for (const rJob of rawJobs) {
           const pd = extractPostData(rJob);
-          if (pd?.pipeline === 'competitors' && pd?.workspace_id === workspaceId) {
+          const isUrlValid = typeof rJob.url === 'string' && rJob.url.startsWith(expectedDispatchBase);
+          if (pd?.pipeline === 'competitors' && pd?.workspace_id === workspaceId && isUrlValid) {
             const rJobIdStr = String(rJob.id);
             if (!knownJobIds.has(rJobIdStr)) {
               const segs = (rJob.name || '').split(' — ');
@@ -124,7 +126,7 @@ export const GET: APIRoute = async ({ locals }) => {
               try {
                 const { data: adoptedRow } = await compAdmin
                   .from('competitor_schedules')
-                  .insert({
+                  .upsert({
                     workspace_id: workspaceId,
                     label: adoptLabel,
                     cron_expression: rJob.expression || rJob.cron_expression || '0 2 * * *',
@@ -132,9 +134,9 @@ export const GET: APIRoute = async ({ locals }) => {
                     fastcron_token_id: defaultToken.id || null,
                     fastcron_job_id: rJobIdStr,
                     status: isFastCronJobPaused(rJob) ? 'paused' : 'active',
-                  })
+                  }, { onConflict: 'workspace_id,fastcron_job_id', ignoreDuplicates: true })
                   .select('*')
-                  .single();
+                  .maybeSingle();
 
                 if (adoptedRow) {
                   dbSchedules.push(adoptedRow);

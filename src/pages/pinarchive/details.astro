@@ -10,7 +10,7 @@ import Layout from '../../layouts/Layout.astro';
     class="fixed top-0 left-0 right-0 z-40 bg-card/90 backdrop-blur-md border-b border-border shadow-md px-6 py-2.5 flex items-center justify-between transition-all duration-300 -translate-y-full opacity-0 pointer-events-none"
   >
     <div class="flex items-center gap-3 min-w-0 max-w-xl">
-      <a href="/pinarchive" class="text-xs font-semibold text-muted-foreground hover:text-foreground shrink-0 transition-colors">← Back</a>
+      <a id="sticky-back-link" href="/pinarchive" class="text-xs font-semibold text-muted-foreground hover:text-foreground shrink-0 transition-colors">← Back</a>
       <span class="text-xs text-border shrink-0">|</span>
       <h3 id="sticky-title" class="text-xs font-bold text-foreground truncate"></h3>
     </div>
@@ -23,18 +23,28 @@ import Layout from '../../layouts/Layout.astro';
 
   <!-- Breadcrumb & Top Action Header -->
   <div class="mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-    <div class="flex items-center gap-2 text-xs">
+    <div class="flex items-center gap-2 text-xs flex-wrap">
       <a
+        id="top-back-btn"
         href="/pinarchive"
-        class="inline-flex items-center gap-1.5 font-semibold text-muted-foreground hover:text-foreground transition-colors group"
+        class="inline-flex items-center gap-1.5 font-semibold text-muted-foreground hover:text-foreground transition-colors group px-2.5 py-1.5 rounded-xl border border-border bg-card shadow-2xs hover:bg-muted mr-1 cursor-pointer"
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        <span id="top-back-label">← Back</span>
+      </a>
+      <span class="text-muted-foreground/40 hidden sm:inline">|</span>
+      <a
+        href="/pinarchive"
+        class="inline-flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground transition-colors group"
+      >
         <span>PinArchive</span>
       </a>
+      <span id="breadcrumb-account-sep" class="hidden text-muted-foreground/50">/</span>
+      <a id="breadcrumb-account-link" href="#" class="hidden font-semibold text-primary hover:underline transition-colors"></a>
       <span class="text-muted-foreground/50">/</span>
       <span class="text-muted-foreground font-medium">Pin Deep-Dive</span>
       <span class="text-muted-foreground/50">/</span>
-      <span id="breadcrumb-pin-title" class="font-bold text-foreground truncate max-w-[200px] sm:max-w-[320px]">Pin Details</span>
+      <span id="breadcrumb-pin-title" class="font-bold text-foreground truncate max-w-[180px] sm:max-w-[280px]">Pin Details</span>
     </div>
 
     <div class="flex items-center gap-2 self-start sm:self-auto">
@@ -116,7 +126,7 @@ import Layout from '../../layouts/Layout.astro';
               <span id="pin-anomaly-badge"></span>
               <span id="pin-board-badge" class="inline-flex items-center gap-1 rounded-full bg-muted/80 px-3 py-1 text-xs font-semibold text-muted-foreground border border-border/60"></span>
               <span id="pin-canonical-badge" class="hidden inline-flex items-center gap-1 rounded-full bg-purple-500/10 px-3 py-1 text-xs font-bold text-purple-500 border border-purple-500/20"></span>
-              <span id="pin-account-badge" class="hidden inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary border border-primary/20"></span>
+              <a id="pin-account-badge" href="#" class="hidden inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary border border-primary/20 hover:bg-primary/20 transition-colors"></a>
             </div>
 
             <!-- Title -->
@@ -757,7 +767,7 @@ import Layout from '../../layouts/Layout.astro';
       if (mainContent) mainContent.classList.add('hidden');
       if (errorContainer) errorContainer.classList.add('hidden');
 
-      const res = await fetch(`/api/pinarchive/pin?id=${encodeURIComponent(pinId)}`);
+      const res = await fetch(`/api/pinarchive/pin?id=${encodeURIComponent(pinId)}`, { signal: AbortSignal.timeout(8000) });
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
         throw new Error(errJson.error || `HTTP ${res.status}`);
@@ -774,7 +784,50 @@ import Layout from '../../layouts/Layout.astro';
       const siblings: any[] = json.canonical_siblings || [];
       const clusterStats = json.cluster_stats || { total_saves: pin.saves, variations_count: 1, rank: 1, share_pct: 100 };
 
-      // Breadcrumb title
+      // Breadcrumb title & Back link configuration
+      const urlParams = new URLSearchParams(window.location.search);
+      const fromAccountParam = urlParams.get('from_account') || urlParams.get('account');
+      const fromParam = urlParams.get('from');
+      const accountUser = fromAccountParam || pin.account_username;
+
+      let targetBackUrl = '/pinarchive';
+      let targetBackText = '← Back to PinArchive';
+
+      if (accountUser) {
+        targetBackUrl = `/pinarchive/account/${encodeURIComponent(accountUser)}`;
+        targetBackText = `← Back to @${accountUser}`;
+      } else if (fromParam === 'winning-pins') {
+        targetBackUrl = '/pinarchive/winning-pins';
+        targetBackText = '← Back to Winning Pins';
+      } else if (fromParam === 'topics') {
+        targetBackUrl = '/pinarchive/topics';
+        targetBackText = '← Back to Topic Clusters';
+      }
+
+      const topBackBtn = document.getElementById('top-back-btn') as HTMLAnchorElement | null;
+      const topBackLabel = document.getElementById('top-back-label');
+      const stickyBackLink = document.getElementById('sticky-back-link') as HTMLAnchorElement | null;
+      const bcAccountLink = document.getElementById('breadcrumb-account-link') as HTMLAnchorElement | null;
+      const bcAccountSep = document.getElementById('breadcrumb-account-sep');
+
+      if (topBackBtn) {
+        topBackBtn.href = targetBackUrl;
+      }
+      if (topBackLabel) {
+        topBackLabel.textContent = targetBackText;
+      }
+      if (stickyBackLink) {
+        stickyBackLink.href = targetBackUrl;
+        stickyBackLink.textContent = targetBackText;
+      }
+
+      if (accountUser && bcAccountLink && bcAccountSep) {
+        bcAccountLink.href = `/pinarchive/account/${encodeURIComponent(accountUser)}`;
+        bcAccountLink.textContent = `@${accountUser}`;
+        bcAccountLink.classList.remove('hidden');
+        bcAccountSep.classList.remove('hidden');
+      }
+
       const bcTitle = document.getElementById('breadcrumb-pin-title');
       if (bcTitle) bcTitle.textContent = pin.title || `Pin #${pin.pin_id}`;
 
@@ -836,10 +889,11 @@ import Layout from '../../layouts/Layout.astro';
         }
       }
 
-      const accountBadge = document.getElementById('pin-account-badge');
+      const accountBadge = document.getElementById('pin-account-badge') as HTMLAnchorElement | null;
       if (accountBadge) {
-        if (pin.account_username) {
-          accountBadge.textContent = `@${pin.account_username}`;
+        if (accountUser) {
+          accountBadge.href = `/pinarchive/account/${encodeURIComponent(accountUser)}`;
+          accountBadge.textContent = `@${accountUser}`;
           accountBadge.classList.remove('hidden');
         } else {
           accountBadge.classList.add('hidden');
@@ -1043,12 +1097,33 @@ import Layout from '../../layouts/Layout.astro';
       setupNotes(pin);
 
       if (skeleton) skeleton.classList.add('hidden');
+      if (errorContainer) errorContainer.classList.add('hidden');
       if (mainContent) mainContent.classList.remove('hidden');
     } catch (e: any) {
+      if (retries > 0) {
+        setTimeout(() => loadPinDetail(retries - 1), 1500);
+        return;
+      }
       console.error('Error loading pin detail:', e);
       if (skeleton) skeleton.classList.add('hidden');
-      if (errorContainer) errorContainer.classList.remove('hidden');
-      if (errorText) errorText.textContent = e.message || 'Failed to load pin details.';
+      if (mainContent) mainContent.classList.add('hidden');
+      if (errorContainer) {
+        errorContainer.classList.remove('hidden');
+        errorContainer.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mx-auto mb-2 text-rose-500 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <p id="pin-error-text" class="font-bold text-sm">Failed to load pin details: ${escapeHtml(e.message || 'Error')}</p>
+          <div class="mt-4 flex items-center justify-center gap-3">
+            <button id="retry-pin-detail-btn" class="font-bold underline cursor-pointer">Retry</button>
+            <span class="text-muted-foreground">•</span>
+            <a href="/pinarchive" class="font-semibold text-primary hover:underline">Return to PinArchive</a>
+          </div>
+        `;
+        document.getElementById('retry-pin-detail-btn')?.addEventListener('click', () => {
+          if (skeleton) skeleton.classList.remove('hidden');
+          if (errorContainer) errorContainer.classList.add('hidden');
+          loadPinDetail(2);
+        });
+      }
     }
   }
 

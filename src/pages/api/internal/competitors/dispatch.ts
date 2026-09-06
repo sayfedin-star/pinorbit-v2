@@ -52,31 +52,11 @@ async function handleCompetitorsDispatch(
 
   let workspaceId = rawWorkspaceId.trim();
 
-  // If workspaceId is not a full UUID (e.g. 8-char prefix), resolve it from Project 1 DB
   if (!UUID_REGEX.test(workspaceId)) {
-    try {
-      const admin = dbClients.getSchedulingAdmin(runtimeEnv);
-      const { data: wsMatch } = await admin
-        .from('workspaces')
-        .select('id')
-        .ilike('id', `${workspaceId}%`)
-        .limit(1)
-        .maybeSingle();
-
-      if (wsMatch?.id) {
-        workspaceId = wsMatch.id;
-      } else {
-        return new Response(
-          JSON.stringify({ success: false, error: 'Validation Error: valid workspace_id UUID is required.' }),
-          { status: 422, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-    } catch {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Validation Error: valid workspace_id UUID is required.' }),
-        { status: 422, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+    return new Response(
+      JSON.stringify({ success: false, error: 'Validation Error: valid workspace_id UUID is required.' }),
+      { status: 422, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
 // 2. Authenticate via verifyIngestSecret (candidate-set verification)
@@ -105,10 +85,6 @@ async function handleCompetitorsDispatch(
         JSON.stringify({
           success: false,
           error: 'Unauthorized: missing or invalid x-ingest-secret header.',
-          debug: {
-            header_present: Boolean(providedSecret),
-            secret_length: providedSecret?.length || 0,
-          },
         }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
       );
@@ -121,11 +97,12 @@ async function handleCompetitorsDispatch(
   }
 
   // 3. Verify workspace existence in Project 1
+  let isMasterScope = false;
   try {
     const admin = dbClients.getSchedulingAdmin(runtimeEnv);
     const { data: ws, error: wsErr } = await admin
       .from('workspaces')
-      .select('id')
+      .select('id, is_master')
       .eq('id', workspaceId)
       .maybeSingle();
 
@@ -135,6 +112,10 @@ async function handleCompetitorsDispatch(
         { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    // Master Scope is strictly restricted to DB-verified master workspaces
+    const isMaster = Boolean(ws.is_master);
+    isMasterScope = isMaster && payload.scope !== 'current' && url.searchParams.get('scope') !== 'current';
   } catch {
     return new Response(
       JSON.stringify({ success: false, error: 'Workspace verification failed.' }),
@@ -201,7 +182,7 @@ async function handleCompetitorsDispatch(
       body: JSON.stringify({
         ref: 'main',
         inputs: {
-          workspace_id: workspaceId,
+          workspace_id: isMasterScope ? '' : workspaceId,
           target_scope: targetScope,
           competitor_ids: competitorIds,
           target_username: targetUsername,
@@ -219,7 +200,8 @@ async function handleCompetitorsDispatch(
         JSON.stringify({
           success: true,
           dispatched: true,
-          workspace_id: workspaceId,
+          workspace_id: isMasterScope ? 'all' : workspaceId,
+          is_master_scope: isMasterScope,
           target_scope: targetScope,
           competitor_ids: competitorIds || undefined,
           trigger: resolvedTrigger,
@@ -280,12 +262,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     try {
       payload = JSON.parse(text);
     } catch {
-      if (!hasQueryParams) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'Malformed JSON payload.' }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
+      return new Response(
+        JSON.stringify({ success: false, error: 'Malformed JSON payload.' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
     }
   }
 

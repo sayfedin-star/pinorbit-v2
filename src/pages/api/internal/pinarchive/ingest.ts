@@ -3,6 +3,7 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import { dbClients, isKnownDefaultIngestSecret, isProductionEnv } from '../../../../server/db/clients';
 import { getEffectiveSecret, verifyIngestSecret } from '../../../../server/services/webhook-secrets';
+import { USERNAME_REGEX } from '../../../../lib/validation/pinterest';
 
 /**
  * Server-Only Internal PinArchive Ingest Endpoint.
@@ -43,7 +44,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
 
   // 2. Validate workspace_id
   if (!payload || !payload.workspace_id || typeof payload.workspace_id !== 'string') {
@@ -138,16 +138,40 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
     const username = rawUsername;
     const fetchedAt = payload.fetched_at || new Date().toISOString();
     
-    // Deduplicate incoming pins by pin_id (taking the last occurrence)
-    const rawPinsList: any[] = Array.isArray(payload.pins) ? payload.pins : [];
+    // Early pre-truncation to maxBatchPins before in-memory deduplication and sorting to prevent Cloudflare Worker OOM
+    const totalIncomingPins = Array.isArray(payload.pins) ? payload.pins.length : 0;
+    const rawPinsList: any[] = (Array.isArray(payload.pins) ? payload.pins : []).slice(0, maxBatchPins);
     const dedupedMap = new Map<string, any>();
     for (const p of rawPinsList) {
+      if (!p || typeof p !== 'object') continue;
       const pid = String(p.pin_id || p.id || '').trim();
-      if (pid) {
+      if (!pid) continue;
+      const prev = dedupedMap.get(pid);
+      if (!prev) {
         dedupedMap.set(pid, p);
+      } else {
+        const prevAnn = Array.isArray(prev.annotations) ? prev.annotations : [];
+        const curAnn = Array.isArray(p.annotations) ? p.annotations : [];
+        const mergedAnnotations = [...prevAnn, ...curAnn];
+        dedupedMap.set(pid, {
+          ...prev,
+          ...p,
+          saves: Math.max(Number(p.saves || 0), Number(prev.saves || 0)),
+          repins: Math.max(Number(p.repins || 0), Number(prev.repins || 0)),
+          comments: Math.max(Number(p.comments || 0), Number(prev.comments || 0)),
+          share_count: Math.max(Number(p.share_count || 0), Number(prev.share_count || 0)),
+          annotations: mergedAnnotations.length > 0 ? mergedAnnotations : (Array.isArray(p.annotations) ? p.annotations : prev.annotations),
+        });
       }
     }
     const rawPins = Array.from(dedupedMap.values());
+    rawPins.sort((a: any, b: any) => {
+      const diffSaves = Number(b.saves || 0) - Number(a.saves || 0);
+      if (diffSaves !== 0) return diffSaves;
+      const ta = new Date(a.created_at_pinterest || a.created_at || 0).getTime();
+      const tb = new Date(b.created_at_pinterest || b.created_at || 0).getTime();
+      return tb - ta;
+    });
 
     // Gating 3: Fetch current pa_accounts row before upsert
     const { data: existingAccount } = await pinArchive
@@ -166,7 +190,7 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
     }
 
     // Account status = 'paused' and policy = 'reject' -> write NOTHING
-    if (existingAccount && existingAccount.status === 'paused' && pausedAccountPolicy === 'reject') {
+    if (existingAccount && ['paused', 'cookie_expired', 'error'].includes(existingAccount.status) && pausedAccountPolicy === 'reject') {
       return new Response(
         JSON.stringify({ success: true, skipped: 'account_paused' }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
@@ -174,11 +198,11 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
     }
 
     // Gating 4: max_batch_pins truncation
-    let pins = rawPins;
+    let pins = rawPins.filter((p: any) => p && typeof p === 'object' && Boolean(p.pin_id || p.id));
     let truncatedCount: number | undefined;
-    if (rawPins.length > maxBatchPins) {
-      truncatedCount = rawPins.length;
-      pins = rawPins.slice(0, maxBatchPins);
+    if (totalIncomingPins > maxBatchPins) {
+      truncatedCount = totalIncomingPins;
+      pins = pins.slice(0, maxBatchPins);
     }
 
     const promotedCount = pins.filter((p: any) => Boolean(p.promoted)).length;
@@ -188,19 +212,24 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
       workspace_id: workspaceId,
       username,
       last_run_at: fetchedAt,
-      last_result: account_meta.last_result || 'success',
     };
+    if (typeof account_meta.last_result === 'string' && /^(pages=|discovery)/i.test(account_meta.last_result.trim())) {
+      accountData.last_result = account_meta.last_result.trim();
+    }
     if (payload.trigger === 'refresh') {
-      accountData.last_refresh_at = fetchedAt;
+      accountData.last_run_at = fetchedAt;
     }
-    if (payload.trigger !== 'refresh' && typeof account_meta.pins_count === 'number' && Number.isFinite(account_meta.pins_count)) {
-      accountData.pins_count = Math.max(0, Math.round(account_meta.pins_count));
+    if (typeof payload.follower_count === 'number' && Number.isFinite(payload.follower_count)) {
+      accountData.follower_count = Math.max(0, Math.round(payload.follower_count));
     }
-    if (typeof account_meta.promoted_count === 'number' && Number.isFinite(account_meta.promoted_count)) {
-      accountData.promoted_count = Math.max(0, Math.round(account_meta.promoted_count));
+    if (payload.trigger !== 'refresh') {
+      if (typeof account_meta.pins_count === 'number' && Number.isFinite(account_meta.pins_count)) {
+        accountData.pins_count = Math.max(0, Math.round(account_meta.pins_count));
+      }
+      if (typeof account_meta.promoted_count === 'number' && Number.isFinite(account_meta.promoted_count)) {
+        accountData.promoted_count = Math.max(0, Math.round(account_meta.promoted_count));
+      }
     }
-    if (typeof payload.follower_count === 'number') accountData.follower_count = payload.follower_count;
-    if (typeof account_meta.follower_count === 'number') accountData.follower_count = account_meta.follower_count;
     if (account_meta.sheet_id) accountData.sheet_id = account_meta.sheet_id;
 
     if (account_meta.status) accountData.status = account_meta.status;
@@ -224,8 +253,12 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
     const accountId = accountRow.id;
     const pinIds = pins.map((p: any) => String(p.pin_id || p.id || '')).filter(Boolean);
 
-    // Phase C1: Atomic Ingest Monitor Mode (pa_ingest_pin_batch dry-run verification)
-    const MONITOR = true;
+    // Phase C1: Atomic Ingest Write Mode (pa_ingest_pin_batch active)
+    let rpcHandled = false;
+    let pinsAddedCount = 0;
+    let pinsUpdatedCount = 0;
+    let metricsRecordedCount = 0;
+
     if (pins.length > 0 && typeof pinArchive.rpc === 'function') {
       try {
         const s = (v: any) => (v === '' || v == null ? undefined : v); // '' → omitted → NULL → R4 keeps target (mirrors legacy ||)
@@ -239,17 +272,17 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
             board_name: s(p.board_name),
             created_at_pinterest: p.created_at_pinterest ?? p.created_at ?? null,
             image_url: s(p.image_url),
-            is_video: !!p.is_video,
-            is_product: !!p.is_product,
-            price: p.price,
-            currency: p.currency,
-            site_name: p.site_name,
             saves: Number(p.saves || 0),
             repins: Number(p.repins || 0),
             comments: Number(p.comments || 0),
             velocity: Number(p.velocity || 0),
-            promoted: !!p.promoted,
           };
+          if (p.is_video !== undefined) row.is_video = Boolean(p.is_video);
+          if (p.is_product !== undefined) row.is_product = Boolean(p.is_product);
+          if (p.promoted !== undefined) row.promoted = Boolean(p.promoted);
+          if (p.price !== undefined) row.price = p.price;
+          if (p.currency !== undefined) row.currency = p.currency;
+          if (p.site_name !== undefined) row.site_name = p.site_name;
           if (p.node_id !== undefined) row.node_id = p.node_id;
           if (p.board_id !== undefined) row.board_id = p.board_id;
           if (p.utm_link !== undefined) row.utm_link = p.utm_link;
@@ -266,27 +299,26 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
           if (p.archived_at !== undefined) row.archived_at = p.archived_at;
           return row;
         });
-        const { data: rpcData, error: rpcErr } = await pinArchive.rpc('pa_ingest_pin_batch', {
+        const rpcRes = await pinArchive.rpc('pa_ingest_pin_batch', {
           p_workspace_id: workspaceId,
           p_account_id: accountId,
           p_fetched_at: fetchedAt,
           p_pins: pinsPayload,
-          p_dry_run: MONITOR,
+          p_dry_run: false,
         });
-        if (rpcErr) {
-          console.error('[ingest-rpc-dry] RPC error:', rpcErr);
-        } else {
-          console.log('[ingest-rpc-dry]', rpcData);
+        if (rpcRes && !rpcRes.error && rpcRes.data && rpcRes.data.success !== false && typeof rpcRes.data.snapshots === 'number') {
+          rpcHandled = true;
+          pinsAddedCount = Number(rpcRes.data.added || 0);
+          pinsUpdatedCount = Number(rpcRes.data.updated || 0);
+        } else if (rpcRes?.error) {
+          console.warn('[ingest-rpc] RPC error, falling back to legacy manual upsert:', rpcRes.error.message);
         }
       } catch (dryErr: any) {
-        console.error('[ingest-rpc-dry] Exception invoking pa_ingest_pin_batch:', dryErr);
+        console.warn('[ingest-rpc] Exception invoking pa_ingest_pin_batch, falling back to legacy manual upsert:', dryErr?.message || dryErr);
       }
     }
 
-    let pinsAddedCount = 0;
-    let pinsUpdatedCount = 0;
-
-    if (pins.length > 0) {
+    if (!rpcHandled && pins.length > 0) {
       // Fetch existing pin metric & enrichment state in chunks of 100 to avoid URI 414 errors
       const existingPins: any[] = [];
       const CHUNK_SIZE = 100;
@@ -294,7 +326,7 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
         const chunk = pinIds.slice(i, i + CHUNK_SIZE);
         const { data, error } = await pinArchive
           .from('pa_pins')
-          .select('id, pin_id, saves, repins, comments, share_count, reactions, archived_at, annotations, board_pin_count, board_last_modified_at, seo_category, canonical_pin_id, utm_link, image_signature, dominant_color, seo_alt_text, title, description, link, domain, board_name, board_id, created_at_pinterest, image_url, node_id')
+          .select('id, pin_id, saves, repins, comments, share_count, reactions, archived_at, annotations, board_pin_count, board_last_modified_at, seo_category, canonical_pin_id, utm_link, image_signature, dominant_color, seo_alt_text, title, description, link, domain, board_name, board_id, created_at_pinterest, image_url, node_id, is_video, is_product, promoted')
           .eq('workspace_id', workspaceId)
           .in('pin_id', chunk);
 
@@ -333,6 +365,9 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
         created_at_pinterest: string | null;
         image_url: string | null;
         node_id: string | null;
+        is_video: boolean;
+        is_product: boolean;
+        promoted: boolean;
       }>();
 
       if (Array.isArray(existingPins)) {
@@ -363,6 +398,9 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
             created_at_pinterest: ep.created_at_pinterest || null,
             image_url: ep.image_url || null,
             node_id: ep.node_id || null,
+            is_video: Boolean(ep.is_video),
+            is_product: Boolean(ep.is_product),
+            promoted: Boolean(ep.promoted),
           });
         }
       }
@@ -411,27 +449,27 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
           board_name: p.board_name || existing?.board_name || null,
           created_at_pinterest: p.created_at_pinterest || p.created_at || existing?.created_at_pinterest || null,
           image_url: p.image_url || existing?.image_url || null,
-          is_video: Boolean(p.is_video),
-          is_product: Boolean(p.is_product),
+          is_video: p.is_video !== undefined ? Boolean(p.is_video) : (existing?.is_video ?? false),
+          is_product: p.is_product !== undefined ? Boolean(p.is_product) : (existing?.is_product ?? false),
           price: p.price !== undefined ? p.price : null,
           currency: p.currency || null,
           site_name: p.site_name || null,
           saves: Math.max(Number(p.saves || 0), existing?.saves || 0),
           repins: Math.max(Number(p.repins || 0), existing?.repins || 0),
-          comments: Number(p.comments || 0),
-          reactions: p.reactions === undefined
-            ? (existing?.reactions ?? {})
-            : (typeof p.reactions === 'object' && p.reactions !== null ? p.reactions : (existing?.reactions ?? {})),
+          comments: Math.max(Number(p.comments || 0), existing?.comments || 0),
+          reactions: (p.reactions && typeof (p.reactions as any)?.total === 'number' && (p.reactions as any)?.total > 0)
+            ? p.reactions
+            : (existing?.reactions && typeof (existing.reactions as any)?.total === 'number' && (existing.reactions as any)?.total > 0 ? existing.reactions : (p.reactions ?? existing?.reactions ?? {})),
           velocity: Number(p.velocity || 0),
-          promoted: Boolean(p.promoted),
+          promoted: p.promoted !== undefined ? Boolean(p.promoted) : (existing?.promoted ?? false),
           last_updated_at: fetchedAt,
           share_count: Math.max(
             p.share_count === undefined ? (existing?.share_count ?? 0) : Number(p.share_count || 0),
             existing?.share_count || 0
           ),
 
-          // Preserved Enrichment & Scalar non-null fallback
-          archived_at: p.archived_at || existing?.archived_at || (isNew ? fetchedAt : null),
+          // Preserved Enrichment & Direct Qualified Ingestion
+          archived_at: existing?.archived_at || (p.archived_at !== undefined ? p.archived_at : fetchedAt),
           annotations: Array.from(mergedByName.values()),
           board_pin_count: p.board_pin_count ?? existing?.board_pin_count ?? null,
           board_last_modified_at: p.board_last_modified_at ?? existing?.board_last_modified_at ?? null,
@@ -474,26 +512,40 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
           const curSaves = Number(up.saves || 0);
           const curRepins = Number(up.repins || 0);
           const curShares = Number(up.share_count || 0);
+          const curComments = Number(up.comments || 0);
+          const curReactions = Math.max(
+            Number((up.reactions as any)?.total || 0),
+            Number((existing?.reactions as any)?.total || 0)
+          );
 
-          if (!existing || curSaves > existing.saves || curRepins > existing.repins) {
+          const isAdvanced =
+            !existing ||
+            curSaves > existing.saves ||
+            curRepins > existing.repins ||
+            curShares > (existing.share_count || 0) ||
+            curComments > existing.comments ||
+            curReactions > Number((existing.reactions as any)?.total || 0);
+
+          if (isAdvanced) {
             metricsToInsert.push({
               workspace_id: workspaceId,
               pin_ref: up.id,
               recorded_at: fetchedAt,
               saves: curSaves,
               repins: curRepins,
-              comments: Number(up.comments || 0),
+              comments: curComments,
               shares: curShares,
-              reactions_total: Number((up.reactions as any)?.total || 0),
+              reactions_total: curReactions,
             });
           }
         }
       }
 
       if (metricsToInsert.length > 0) {
-        await pinArchive
+        const { count: mCount } = await pinArchive
           .from('pa_pin_metrics')
-          .upsert(metricsToInsert, { onConflict: 'pin_ref,recorded_at', ignoreDuplicates: true });
+          .upsert(metricsToInsert, { onConflict: 'pin_ref,recorded_at', ignoreDuplicates: true, count: 'exact' });
+        metricsRecordedCount = mCount ?? 0;
       }
     }
 
@@ -517,10 +569,30 @@ const USERNAME_REGEX = /^[a-zA-Z0-9_.-]{1,60}$/;
       message: payload.run_id ? String(payload.run_id) : null,
     };
 
-    await pinArchive.from('pa_runs').insert(runRow);
+    let insertedRunId: string | null = null;
+    try {
+      const insertResult: any = pinArchive.from('pa_runs').insert(runRow);
+      if (insertResult && typeof insertResult.select === 'function') {
+        const { data: insertedRun, error: runErr } = await insertResult.select('id').maybeSingle();
+        if (runErr) {
+          console.warn('[PinArchive Ingest] Could not record pa_runs row:', runErr.message);
+        } else {
+          insertedRunId = insertedRun?.id || null;
+        }
+      } else {
+        await insertResult;
+      }
+    } catch (runErr: any) {
+      console.warn('[PinArchive Ingest] pa_runs insert caught error:', runErr?.message || runErr);
+    }
 
     const responseData: Record<string, any> = {
       success: true,
+      run_id: insertedRunId,
+      pins_added: pinsAddedCount,
+      pins_updated: pinsUpdatedCount,
+      pins_promoted: promotedCount,
+      metrics_recorded: metricsRecordedCount,
       accepted: pins.length,
       archived_pin_ids: pinIds,
     };

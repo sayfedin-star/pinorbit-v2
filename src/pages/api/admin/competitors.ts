@@ -48,44 +48,75 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const deltasMap: Record<string, any> = {};
 
     if (ids.length) {
-      const [bRowsRes, deltasList] = await Promise.all([
-        g.ok!.db.from('competitor_boards').select('competitor_id').in('competitor_id', ids),
-        Promise.all(ids.map(async (compId: string) => {
-          const { data: snaps } = await g.ok!.db.from('competitor_snapshots')
-            .select('profile_reach, profile_views, follower_count, pin_count, recorded_at')
-            .eq('competitor_id', compId)
-            .order('recorded_at', { ascending: false })
-            .limit(2);
-          const sList = snaps || [];
-          if (sList.length < 2) return { id: compId, deltas: null };
+      let snapsList: any[] = [];
+      try {
+        const snapsQuery = g.ok!.db.from('competitor_snapshots').select('competitor_id, profile_reach, profile_views, follower_count, pin_count, recorded_at');
+        if (snapsQuery && typeof snapsQuery.in === 'function') {
+          const { data } = await snapsQuery.in('competitor_id', ids).order('recorded_at', { ascending: false }).limit(1000);
+          snapsList = data || [];
+        } else {
+          const perComp = await Promise.all(ids.map(async (compId: string) => {
+            const { data } = await g.ok!.db.from('competitor_snapshots')
+              .select('competitor_id, profile_reach, profile_views, follower_count, pin_count, recorded_at')
+              .eq('competitor_id', compId)
+              .order('recorded_at', { ascending: false })
+              .limit(2);
+            return data || [];
+          }));
+          snapsList = perComp.flat();
+        }
+      } catch {
+        snapsList = [];
+      }
+
+      const snapsByComp = new Map<string, any[]>();
+      for (const s of snapsList) {
+        if (!s.competitor_id) continue;
+        let list = snapsByComp.get(s.competitor_id);
+        if (!list) {
+          list = [];
+          snapsByComp.set(s.competitor_id, list);
+        }
+        if (list.length < 2) {
+          list.push(s);
+        }
+      }
+
+      const calc = (c: number, p: number) => ({
+        change: c - p,
+        percent: p > 0 ? Number((((c - p) / p) * 100).toFixed(1)) : 0,
+      });
+
+      for (const compId of ids) {
+        const sList = snapsByComp.get(compId) || [];
+        if (sList.length < 2) {
+          deltasMap[compId] = null;
+        } else {
           const curr = sList[0];
           const prev = sList[1];
-          const calc = (c: number, p: number) => ({
-            change: c - p,
-            percent: p > 0 ? Number((((c - p) / p) * 100).toFixed(1)) : 0,
-          });
-          return {
-            id: compId,
-            deltas: {
-              reachChange: calc(curr.profile_reach || 0, prev.profile_reach || 0).change,
-              reachPercent: calc(curr.profile_reach || 0, prev.profile_reach || 0).percent,
-              viewsChange: calc(curr.profile_views || 0, prev.profile_views || 0).change,
-              viewsPercent: calc(curr.profile_views || 0, prev.profile_views || 0).percent,
-              followersChange: calc(curr.follower_count || 0, prev.follower_count || 0).change,
-              followersPercent: calc(curr.follower_count || 0, prev.follower_count || 0).percent,
-              pinsChange: calc(curr.pin_count || 0, prev.pin_count || 0).change,
-              pinsPercent: calc(curr.pin_count || 0, prev.pin_count || 0).percent,
-              reach: calc(curr.profile_reach || 0, prev.profile_reach || 0),
-              views: calc(curr.profile_views || 0, prev.profile_views || 0),
-              followers: calc(curr.follower_count || 0, prev.follower_count || 0),
-              pins: calc(curr.pin_count || 0, prev.pin_count || 0),
-            }
+          deltasMap[compId] = {
+            reachChange: calc(curr.profile_reach || 0, prev.profile_reach || 0).change,
+            reachPercent: calc(curr.profile_reach || 0, prev.profile_reach || 0).percent,
+            viewsChange: calc(curr.profile_views || 0, prev.profile_views || 0).change,
+            viewsPercent: calc(curr.profile_views || 0, prev.profile_views || 0).percent,
+            followersChange: calc(curr.follower_count || 0, prev.follower_count || 0).change,
+            followersPercent: calc(curr.follower_count || 0, prev.follower_count || 0).percent,
+            pinsChange: calc(curr.pin_count || 0, prev.pin_count || 0).change,
+            pinsPercent: calc(curr.pin_count || 0, prev.pin_count || 0).percent,
+            reach: calc(curr.profile_reach || 0, prev.profile_reach || 0),
+            views: calc(curr.profile_views || 0, prev.profile_views || 0),
+            followers: calc(curr.follower_count || 0, prev.follower_count || 0),
+            pins: calc(curr.pin_count || 0, prev.pin_count || 0),
           };
-        }))
-      ]);
+        }
+      }
 
-      for (const b of (bRowsRes.data || []) as any[]) countMap[b.competitor_id] = (countMap[b.competitor_id] || 0) + 1;
-      for (const d of deltasList) deltasMap[d.id] = d.deltas;
+      try {
+        const bRes = await g.ok!.db.from('competitor_boards').select('competitor_id').in('competitor_id', ids);
+        for (const b of (bRes?.data || []) as any[]) countMap[b.competitor_id] = (countMap[b.competitor_id] || 0) + 1;
+      } catch {
+        // Non-blocking fallback
+      }
     }
 
     return json({
@@ -178,19 +209,60 @@ export const GET: APIRoute = async ({ request, locals }) => {
   return json({ success: true, competitor, snapshots: snapsList, boards: boardsList, topPins: topPinsList, deltas });
 };
 
-// POST: add new competitor to Competitors DB
+// POST: add new competitor(s) to Competitors DB (single or bulk)
 export const POST: APIRoute = async ({ request, locals }) => {
   let body: any = {}; try { body = JSON.parse(await request.text() || '{}'); } catch { return json({ error: 'Invalid JSON' }, 400); }
   const g = await guard(locals, body.workspace_id); if (g.err) return g.err;
+
+  // Bulk creation support
+  if (Array.isArray(body.competitors) && body.competitors.length > 0) {
+    const rawTags = Array.isArray(body.tags) ? body.tags : String(body.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean);
+    const rows = body.competitors.map((item: any) => {
+      const u = typeof item === 'string' ? item : item.username;
+      const username = String(u || '').trim().replace(/^@/, '');
+      if (!username) return null;
+      return {
+        workspace_id: g.ok!.ws,
+        username,
+        full_name: (typeof item === 'object' && item.full_name) ? item.full_name : username,
+        niche: (typeof item === 'object' && item.niche) ? item.niche : (body.niche || null),
+        notes: (typeof item === 'object' && item.notes) ? item.notes : (body.notes || null),
+        tags: (typeof item === 'object' && Array.isArray(item.tags)) ? item.tags : rawTags,
+        account_type: (typeof item === 'object' && item.account_type) ? item.account_type : (body.account_type || 'competitor'),
+        is_active: true,
+      };
+    }).filter(Boolean);
+
+    if (rows.length === 0) return json({ error: 'No valid usernames provided' }, 400);
+
+    const { data, error } = await g.ok!.db
+      .from('competitors')
+      .upsert(rows, { onConflict: 'workspace_id,username' })
+      .select();
+    if (error) return json({ error: error.message }, 500);
+    return json({ success: true, count: data?.length || 0, competitors: data }, 201);
+  }
+
+  // Single creation
   const username = String(body.username || '').trim().replace(/^@/, '');
   if (!username) return json({ error: 'username required' }, 400);
-  const { data, error } = await g.ok!.db.from('competitors').insert({
-    workspace_id: g.ok!.ws, username,
-    full_name: body.full_name || username,
-    niche: body.niche || null, notes: body.notes || null,
-    tags: Array.isArray(body.tags) ? body.tags : String(body.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean),
-    account_type: body.account_type || 'competitor', is_active: true,
-  }).select().single();
+  const { data, error } = await g.ok!.db
+    .from('competitors')
+    .upsert(
+      {
+        workspace_id: g.ok!.ws,
+        username,
+        full_name: body.full_name || username,
+        niche: body.niche || null,
+        notes: body.notes || null,
+        tags: Array.isArray(body.tags) ? body.tags : String(body.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean),
+        account_type: body.account_type || 'competitor',
+        is_active: true,
+      },
+      { onConflict: 'workspace_id,username' }
+    )
+    .select()
+    .single();
   return error ? json({ error: error.message }, 500) : json({ success: true, competitor: data }, 201);
 };
 

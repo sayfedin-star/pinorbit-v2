@@ -3,11 +3,12 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import { assertWorkspaceAccess } from '../../../../server/auth/workspace-guard';
 import { validateUserSession } from '../../../../server/auth/session';
-import { getEffectiveSecret } from '../../../../server/services/webhook-secrets';
+import * as webhookSecrets from '../../../../server/services/webhook-secrets';
+import { isProductionEnv, isKnownDefaultIngestSecret } from '../../../../server/db/clients';
 import { timingSafeEqual } from '../../../../server/lib/timing-safe';
+import { USERNAME_REGEX } from '../../../../lib/validation/pinterest';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const USERNAME_REGEX = /^[a-zA-Z0-9_]{1,30}$/;
 
 const json = (o: any, s = 200) =>
   new Response(JSON.stringify(o), {
@@ -27,27 +28,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const runtimeEnv =
     (locals as { runtime?: { env?: Record<string, any> }; runtimeEnv?: Record<string, any> })?.runtime?.env ||
     (locals as { runtimeEnv?: Record<string, any> })?.runtimeEnv ||
-    (typeof process !== 'undefined' ? process.env : {}) ||
     {};
 
   // 1. Parse JSON body
-  let body: any;
+  let body: any = {};
   try {
-    const text = await request.text();
-    if (!text || text.trim().length === 0) {
-      return json({ success: false, error: 'Empty request payload.' }, 400);
-    }
-    body = JSON.parse(text);
+    body = await request.json();
   } catch {
-    return json({ success: false, error: 'Malformed JSON payload.' }, 400);
+    return json({ success: false, error: 'Invalid JSON request body.' }, 400);
   }
 
-  // 2. Validate workspace_id (required UUID)
-  const rawWorkspaceId = body?.workspace_id;
-  if (!rawWorkspaceId || typeof rawWorkspaceId !== 'string' || !UUID_REGEX.test(rawWorkspaceId.trim())) {
+  // 2. Validate workspace_id
+  const workspaceId = body?.workspace_id;
+  if (!workspaceId || typeof workspaceId !== 'string' || !UUID_REGEX.test(workspaceId)) {
     return json({ success: false, error: 'Invalid workspace identifier format.' }, 400);
   }
-  const workspaceId = rawWorkspaceId.trim();
 
   // Validate optional usernames / username
   let validatedUsernames: string[] = [];
@@ -58,20 +53,25 @@ export const POST: APIRoute = async ({ request, locals }) => {
         ? body.usernames.split(',')
         : [];
 
-    const parsed = rawList
-      .map((u: any) => String(u).trim().toLowerCase())
-      .filter((u: string) => u.length > 0);
-
-    for (const u of parsed) {
-      if (!USERNAME_REGEX.test(u)) {
+    const parsed: string[] = [];
+    for (const u of rawList) {
+      if (typeof u !== 'string') {
+        return json({ success: false, error: 'usernames elements must be strings.' }, 400);
+      }
+      const trimmed = u.trim().toLowerCase();
+      if (!USERNAME_REGEX.test(trimmed)) {
         return json({ success: false, error: `Invalid username format: ${u}` }, 400);
       }
+      parsed.push(trimmed);
     }
     validatedUsernames = Array.from(new Set<string>(parsed)).slice(0, 50);
   }
 
   let username: string | undefined;
-  if (body?.username !== undefined && body?.username !== null && String(body.username).trim() !== '') {
+  if (body?.username !== undefined && body?.username !== null) {
+    if (typeof body.username !== 'string') {
+      return json({ success: false, error: 'username must be a string.' }, 400);
+    }
     const trimmed = String(body.username).trim().toLowerCase();
     if (!USERNAME_REGEX.test(trimmed)) {
       return json({ success: false, error: 'Invalid username format.' }, 400);
@@ -83,15 +83,30 @@ export const POST: APIRoute = async ({ request, locals }) => {
   let authPassed = false;
 
   // Auth Method A: x-ingest-secret header
-  const secretHeader = request.headers.get('x-ingest-secret');
+  const secretHeader = request.headers.get('x-ingest-secret') || request.headers.get('x-dispatch-secret');
   if (secretHeader) {
     try {
-      const eff = await getEffectiveSecret(workspaceId, runtimeEnv);
-      if (eff?.value && (await timingSafeEqual(secretHeader, eff.value))) {
-        authPassed = true;
+      const eff = webhookSecrets.getEffectiveSecret ? await webhookSecrets.getEffectiveSecret(workspaceId, runtimeEnv) : null;
+      if (isProductionEnv(runtimeEnv) && eff?.source === 'env' && isKnownDefaultIngestSecret(eff.value)) {
+        return json({ success: false, error: 'Service unavailable: ingest secret not configured on server.' }, 503);
       }
-    } catch {
-      // Secret evaluation failed
+      try {
+        if ('verifyIngestSecret' in webhookSecrets && typeof (webhookSecrets as any).verifyIngestSecret === 'function') {
+          const verification = await (webhookSecrets as any).verifyIngestSecret(secretHeader, workspaceId, runtimeEnv);
+          if (verification?.valid) {
+            authPassed = true;
+          }
+        }
+      } catch (err: any) {
+        console.warn('[PinArchiveRefresh] verifyIngestSecret error:', err?.message || err);
+      }
+      if (!authPassed && eff?.value) {
+        if (await timingSafeEqual(secretHeader, eff.value)) {
+          authPassed = true;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[PinArchiveRefresh] Secret evaluation error:', err?.message || err);
     }
   }
 
@@ -109,8 +124,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
       try {
         await assertWorkspaceAccess(schedulingClient, workspaceId, user.id, 'admin');
         authPassed = true;
-      } catch {
-        // Access denied or insufficient role
+      } catch (err: any) {
+        console.warn('[PinArchiveRefresh] Session admin check failed:', err?.message || err);
       }
     }
   }
@@ -120,18 +135,26 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   // 4. GitHub Relay
-  const tok = runtimeEnv.GH_REFRESH_TOKEN || (typeof process !== 'undefined' ? process.env.GH_REFRESH_TOKEN : '');
+  const tok =
+    runtimeEnv.GH_REFRESH_TOKEN ||
+    runtimeEnv.GITHUB_DISPATCH_TOKEN ||
+    (typeof process !== 'undefined' ? process.env.GH_REFRESH_TOKEN || process.env.GITHUB_DISPATCH_TOKEN : '');
   if (!tok || !String(tok).trim()) {
     return json({ success: false, error: 'refresh_not_configured' }, 503);
   }
 
-  const dispatchUrl = 'https://api.github.com/repos/sayfedin-star/pinorbit-v2/actions/workflows/pinarchive-refresh.yml/dispatches';
+  const githubRepo =
+    (runtimeEnv.GITHUB_REPO as string) ||
+    (typeof process !== 'undefined' ? process.env.GITHUB_REPO : '') ||
+    'sayfedin-star/pinorbit-v2';
+
+  const dispatchUrl = `https://api.github.com/repos/${githubRepo}/actions/workflows/pinarchive-pipeline.yml/dispatches`;
   const dispatchPayload = {
     ref: 'main',
     inputs: {
       workspace_id: workspaceId,
-      username: validatedUsernames.length > 0 ? '' : (username || ''),
-      usernames: validatedUsernames.length > 0 ? validatedUsernames.join(',') : '',
+      usernames: validatedUsernames.length > 0 ? validatedUsernames.join(',') : (username || ''),
+      mode: 'all',
     },
   };
 

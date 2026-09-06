@@ -83,6 +83,12 @@ describe('PinArchive Ingest Settings & Account Toggle API Suite', () => {
       expect(json.pin_filter_min_repins).toBe(0);
       expect(json.pin_filter_rising_age_days).toBe(14);
       expect(json.pin_filter_rising_saves).toBe(34);
+      expect(json.refresh_min_saves).toBe(0);
+      expect(json.discovery_stop_pages).toBe(3);
+      expect(json.discovery_max_pages).toBe(50);
+      expect(json.audit_sweep_enabled).toBe(true);
+      expect(json.daily_sheet_sync_enabled).toBe(false);
+      expect(json.github_schedule_enabled).toBe(true);
       expect(json.pin_filter_max_age_days).toBeUndefined();
       expect(json.is_default).toBe(true);
     });
@@ -101,6 +107,12 @@ describe('PinArchive Ingest Settings & Account Toggle API Suite', () => {
                 pin_filter_min_repins: 100,
                 pin_filter_rising_age_days: 10,
                 pin_filter_rising_saves: 50,
+                refresh_min_saves: 25,
+                discovery_stop_pages: 5,
+                discovery_max_pages: 150,
+                audit_sweep_enabled: true,
+                daily_sheet_sync_enabled: true,
+                github_schedule_enabled: false,
                 updated_at: '2026-08-23T12:00:00Z',
               },
               error: null,
@@ -118,6 +130,8 @@ describe('PinArchive Ingest Settings & Account Toggle API Suite', () => {
       expect(res.status).toBe(200);
       const json = await res.json();
       expect(json.success).toBe(true);
+      expect(json.refresh_min_saves).toBe(25);
+      expect(json.workspace_id).toBe(mockWsId);
       expect(json.ingest_enabled).toBe(false);
       expect(json.paused_account_policy).toBe('accept');
       expect(json.max_batch_pins).toBe(1200);
@@ -125,7 +139,11 @@ describe('PinArchive Ingest Settings & Account Toggle API Suite', () => {
       expect(json.pin_filter_min_repins).toBe(100);
       expect(json.pin_filter_rising_age_days).toBe(10);
       expect(json.pin_filter_rising_saves).toBe(50);
-      expect(json.pin_filter_max_age_days).toBeUndefined();
+      expect(json.discovery_stop_pages).toBe(5);
+      expect(json.discovery_max_pages).toBe(150);
+      expect(json.audit_sweep_enabled).toBe(true);
+      expect(json.daily_sheet_sync_enabled).toBe(true);
+      expect(json.github_schedule_enabled).toBe(false);
       expect(json.is_default).toBe(false);
     });
   });
@@ -256,6 +274,18 @@ describe('PinArchive Ingest Settings & Account Toggle API Suite', () => {
         locals: { user: mockUser, supabase: {}, activeWorkspaceId: mockWsId },
       } as any);
       expect(res8.status).toBe(422);
+
+      // Invalid discovery_max_pages > 500
+      const req9 = new Request('http://localhost:4321/api/pinarchive/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_id: mockWsId, discovery_max_pages: 999 }),
+      });
+      const res9 = await patchSettingsHandler({
+        request: req9,
+        locals: { user: mockUser, supabase: {}, activeWorkspaceId: mockWsId },
+      } as any);
+      expect(res9.status).toBe(422);
     });
 
     it('successfully upserts settings for admin and returns saved row', async () => {
@@ -293,6 +323,10 @@ describe('PinArchive Ingest Settings & Account Toggle API Suite', () => {
           pin_filter_min_repins: 50,
           pin_filter_rising_age_days: 10,
           pin_filter_rising_saves: 30,
+          discovery_stop_pages: 5,
+          audit_sweep_enabled: true,
+          daily_sheet_sync_enabled: true,
+          github_schedule_enabled: false,
         }),
       });
 
@@ -311,10 +345,17 @@ describe('PinArchive Ingest Settings & Account Toggle API Suite', () => {
       expect(json.pin_filter_min_repins).toBe(50);
       expect(json.pin_filter_rising_age_days).toBe(10);
       expect(json.pin_filter_rising_saves).toBe(30);
+      expect(json.discovery_stop_pages).toBe(5);
+      expect(json.audit_sweep_enabled).toBe(true);
+      expect(json.daily_sheet_sync_enabled).toBe(true);
+      expect(json.github_schedule_enabled).toBe(false);
       expect(savedPayload.workspace_id).toBe(mockWsId);
       expect(savedPayload.default_interval_days).toBeUndefined();
       expect(savedPayload.pin_filter_rising_age_days).toBe(10);
       expect(savedPayload.pin_filter_rising_saves).toBe(30);
+      expect(savedPayload.discovery_stop_pages).toBe(5);
+      expect(savedPayload.audit_sweep_enabled).toBe(true);
+      expect(savedPayload.daily_sheet_sync_enabled).toBe(true);
     });
   });
 
@@ -392,7 +433,7 @@ describe('PinArchive Ingest Settings & Account Toggle API Suite', () => {
       const json = await res.json();
       expect(json.success).toBe(true);
       expect(json.updated).toBe(2);
-      expect(updatePayload).toEqual({ ingest_enabled: false });
+      expect(updatePayload).toEqual({ ingest_enabled: false, status: 'paused' });
       expect(scopedWsId).toBe(mockWsId);
       expect(scopedInIds).toEqual([mockAccId1, mockAccId2]);
     });

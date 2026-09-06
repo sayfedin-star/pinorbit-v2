@@ -70,8 +70,8 @@ export const analyticsDb = {
 
     const analyticsClient = dbClients.getAnalytics();
 
-    // R5.2 Stale Sweeper: update prior processing runs older than 30 minutes to failed
     try {
+      // R5.2 Stale Sweeper: update prior processing runs older than 30 minutes to failed across all channels
       const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       await analyticsClient
         .from('analytics_ingestion_runs')
@@ -81,7 +81,6 @@ export const analyticsDb = {
           completed_at: new Date().toISOString(),
         })
         .eq('connection_id', run.connection_id)
-        .eq('channel', run.channel)
         .eq('status', 'processing')
         .lt('started_at', thirtyMinutesAgo);
     } catch (sweepErr) {
@@ -323,15 +322,20 @@ export const analyticsDb = {
       recorded_at: new Date().toISOString(),
     }));
 
-    const { error } = await analyticsClient
+    const { error, count } = await analyticsClient
       .from('account_analytics_daily')
       .upsert(payload, {
         onConflict: 'workspace_id,connection_id,metric_date',
         ignoreDuplicates: false,
+        count: 'exact',
       });
 
     if (error) throw error;
-    return rows.length;
+    if (count === null || count === undefined) {
+      console.warn('[AnalyticsDB] count was null on upsertAccountDailyMetrics, defaulting to 0');
+      return 0;
+    }
+    return count;
   },
 
   /**
@@ -385,15 +389,20 @@ export const analyticsDb = {
       recorded_at: new Date().toISOString(),
     }));
 
-    const { error } = await analyticsClient
+    const { error, count } = await analyticsClient
       .from('top_pins_snapshots')
       .upsert(payload, {
         onConflict: 'workspace_id,connection_id,pin_id,window_start,window_end,sort_by',
         ignoreDuplicates: false,
+        count: 'exact',
       });
 
     if (error) throw error;
-    return pins.length;
+    if (count === null || count === undefined) {
+      console.warn('[AnalyticsDB] count was null on upsertTopPinsSnapshots, defaulting to 0');
+      return 0;
+    }
+    return count;
   },
 
   /**
@@ -415,51 +424,20 @@ export const analyticsDb = {
       recorded_at: new Date().toISOString(),
     }));
 
-    const { error } = await analyticsClient
+    const { error, count } = await analyticsClient
       .from('daily_workspace_metrics')
       .upsert(payload, {
         onConflict: 'workspace_id,metric_date',
         ignoreDuplicates: false,
+        count: 'exact',
       });
 
     if (error) throw error;
-    return metrics.length;
-  },
-
-  /**
-   * Upserts URL performance metrics (Project 3 url_performance_history).
-   */
-  async upsertUrlPerformance(
-    workspaceId: string,
-    urls: Array<{
-      destination_url: string;
-      period_date: string;
-      total_impressions: number;
-      total_clicks: number;
-      total_pins_active: number;
-    }>
-  ): Promise<number> {
-    if (!workspaceId) {
-      throw new Error('Tenant Boundary Violation: workspaceId is required.');
+    if (count === null || count === undefined) {
+      console.warn('[AnalyticsDB] count was null on upsertDailyWorkspaceMetrics, defaulting to 0');
+      return 0;
     }
-    if (!urls || urls.length === 0) return 0;
-
-    const analyticsClient = dbClients.getAnalytics();
-    const payload = urls.map((u) => ({
-      ...u,
-      workspace_id: workspaceId,
-      created_at: new Date().toISOString(),
-    }));
-
-    const { error } = await analyticsClient
-      .from('url_performance_history')
-      .upsert(payload, {
-        onConflict: 'workspace_id,destination_url,period_date',
-        ignoreDuplicates: false,
-      });
-
-    if (error) throw error;
-    return urls.length;
+    return count;
   },
 
   // ============================================================================
@@ -478,18 +456,24 @@ export const analyticsDb = {
       throw new Error('Tenant Boundary Violation: workspaceId and connectionId are required.');
     }
 
+    const clampedDays = Math.min(Math.max(windowDays || 30, 1), 365);
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - windowDays);
+    startDate.setDate(startDate.getDate() - clampedDays);
     const startDateStr = startDate.toISOString().split('T')[0];
-
     const analyticsClient = dbClients.getAnalytics();
-    const { data, error } = await analyticsClient
+    let q: any = analyticsClient
       .from('account_analytics_daily')
       .select('*')
       .eq('workspace_id', workspaceId)
       .eq('connection_id', connectionId)
       .gte('metric_date', startDateStr)
       .order('metric_date', { ascending: true });
+
+    if (typeof q?.limit === 'function') {
+      q = q.limit(1000);
+    }
+
+    const { data, error } = await q;
 
     if (error) throw error;
     return (data as AccountAnalyticsDaily[]) || [];
@@ -569,8 +553,9 @@ export const analyticsDb = {
       p_connection_id: connectionId,
       p_sort_by: sortBy,
       p_days: days,
-      p_limit: 1000,
+      p_limit: Math.min(Math.max((limit || 25) * 40, 1000), 5000),
       p_search: cleanSearch,
+      p_workspace_id: workspaceId,
     });
 
     let allItems: PinLeaderboardItem[] = [];
@@ -783,10 +768,11 @@ export const analyticsDb = {
       throw new Error('Tenant Boundary Violation: workspaceId, connectionId, and pinId are required.');
     }
 
+    const clampedDays = Math.min(Math.max(days || 90, 1), 365);
     const analyticsClient = dbClients.getAnalytics();
-    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+    const cutoff = new Date(Date.now() - clampedDays * 86400000).toISOString();
 
-    const { data, error } = await analyticsClient
+    let q: any = analyticsClient
       .from('top_pins_snapshots')
       .select('window_end, rank_position, impressions, engagement, saves, outbound_clicks, pin_clicks, engagement_rate, outbound_click_rate, pin_click_rate, save_rate, title, image_url, destination_url')
       .eq('workspace_id', workspaceId)
@@ -795,6 +781,12 @@ export const analyticsDb = {
       .eq('sort_by', sortBy)
       .gte('window_end', cutoff)
       .order('window_end', { ascending: true });
+
+    if (typeof q?.limit === 'function') {
+      q = q.limit(1000);
+    }
+
+    const { data, error } = await q;
 
     if (error || !data) {
       return [];
@@ -844,12 +836,13 @@ export const analyticsDb = {
       throw new Error('Tenant Boundary Violation: workspaceId and connectionId are required.');
     }
 
+    const clampedDays = Math.min(Math.max(windowDays || 30, 1), 365);
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - windowDays);
+    startDate.setDate(startDate.getDate() - clampedDays);
     const startDateStr = startDate.toISOString().split('T')[0];
 
     const analyticsClient = dbClients.getAnalytics();
-    const { data: dailyRows, error: dailyError } = await analyticsClient
+    let qDaily: any = analyticsClient
       .from('account_analytics_daily')
       .select('*')
       .eq('workspace_id', workspaceId)
@@ -857,6 +850,12 @@ export const analyticsDb = {
       .eq('data_status', 'READY')
       .gte('metric_date', startDateStr)
       .order('metric_date', { ascending: true });
+
+    if (typeof qDaily?.limit === 'function') {
+      qDaily = qDaily.limit(1000);
+    }
+
+    const { data: dailyRows, error: dailyError } = await qDaily;
 
     if (dailyError) throw dailyError;
 
@@ -1059,21 +1058,27 @@ export const analyticsDb = {
     if (fromDate) totalsQuery = totalsQuery.gte('metric_date', fromDate);
     if (toDate) totalsQuery = totalsQuery.lte('metric_date', toDate);
 
-    const { data: totalsData } = await totalsQuery;
-    const totalsRows = totalsData || [];
-
     let impressions = 0;
     let engagements = 0;
     let outbound_clicks = 0;
     let pin_clicks = 0;
     let saves = 0;
 
-    for (const row of totalsRows) {
-      impressions += Number(row.impressions || 0);
-      engagements += Number(row.engagements || 0);
-      outbound_clicks += Number(row.outbound_clicks || 0);
-      pin_clicks += Number(row.pin_clicks || 0);
-      saves += Number(row.saves || 0);
+    let totalsOffset = 0;
+    const totalsBatchSize = 1000;
+    while (true) {
+      const { data: chunk, error: totalsErr } = await totalsQuery.range(totalsOffset, totalsOffset + totalsBatchSize - 1);
+      if (totalsErr) throw totalsErr;
+      const rows = chunk || [];
+      for (const row of rows) {
+        impressions += Number(row.impressions || 0);
+        engagements += Number(row.engagements || 0);
+        outbound_clicks += Number(row.outbound_clicks || 0);
+        pin_clicks += Number(row.pin_clicks || 0);
+        saves += Number(row.saves || 0);
+      }
+      if (rows.length < totalsBatchSize) break;
+      totalsOffset += totalsBatchSize;
     }
 
     const engagement_rate = impressions > 0 ? engagements / impressions : 0.0;
@@ -1317,21 +1322,25 @@ export const analyticsDb = {
     if (startDate) query = query.gte('metric_date', startDate);
     if (endDate) query = query.lte('metric_date', endDate);
 
-    const { data, error } = await query;
-    if (error) throw error;
-
     let total_impressions = 0;
     let total_engagements = 0;
     let total_saves = 0;
     let total_clicks = 0;
 
-    if (data && data.length > 0) {
-      for (const row of data) {
+    let offset = 0;
+    const batchSize = 1000;
+    while (true) {
+      const { data, error } = await query.range(offset, offset + batchSize - 1);
+      if (error) throw error;
+      const rows = data || [];
+      for (const row of rows) {
         total_impressions += Number(row.total_impressions || 0);
         total_engagements += Number(row.total_engagements || 0);
         total_saves += Number(row.total_saves || 0);
         total_clicks += Number(row.total_pin_clicks || 0);
       }
+      if (rows.length < batchSize) break;
+      offset += batchSize;
     }
 
     const engagement_rate =
@@ -1573,12 +1582,11 @@ export const analyticsDb = {
 
   /**
    * Preview data purge record counts and affected rollup dates.
-   * Scoped across the 5 analytics data layers:
+   * Scoped across the analytics data layers:
    * - D1: account_analytics_daily (daily metrics per connection)
    * - D2: account_analytics_summaries (period summaries per connection)
    * - D3: daily_workspace_metrics (workspace rollups recalculated across remaining connections)
    * - D4: top_pins_snapshots (ranked top pins snapshots)
-   * - D5: url_performance_history (destination URL performance history)
    */
   async previewPurge(
     workspaceId: string,
@@ -1603,7 +1611,6 @@ export const analyticsDb = {
     let daily_count = 0;
     let summaries_count = 0;
     let top_pins_count = 0;
-    let url_perf_count = 0;
     let affected_rollup_dates: string[] = [];
 
     if (p_daily) {
@@ -1636,33 +1643,23 @@ export const analyticsDb = {
     }
 
     if (p_top_pins) {
-      const [pinsRes, urlRes] = await Promise.all([
-        analyticsClient
-          .from('top_pins_snapshots')
-          .select('*', { count: 'exact', head: true })
-          .eq('workspace_id', workspaceId)
-          .eq('connection_id', connectionId)
-          .gte('window_end', fromTs)
-          .lt('window_start', toExclTs),
-        analyticsClient
-          .from('url_performance_history')
-          .select('*', { count: 'exact', head: true })
-          .eq('workspace_id', workspaceId)
-          .gte('period_date', fromDate)
-          .lte('period_date', toDate),
-      ]);
+      const pinsRes = await analyticsClient
+        .from('top_pins_snapshots')
+        .select('*', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+        .eq('connection_id', connectionId)
+        .gte('window_end', fromTs)
+        .lt('window_start', toExclTs);
 
       top_pins_count = pinsRes.count ?? 0;
-      url_perf_count = urlRes.count ?? 0;
     }
 
-    const total_records = daily_count + summaries_count + top_pins_count + url_perf_count;
+    const total_records = daily_count + summaries_count + top_pins_count;
 
     return {
       daily_count,
       summaries_count,
       top_pins_count,
-      url_perf_count,
       affected_rollup_dates,
       total_records,
     };

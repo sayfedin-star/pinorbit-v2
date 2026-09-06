@@ -4,9 +4,9 @@ import Layout from '../../layouts/Layout.astro';
 import SectionHeader from '../../components/ui/SectionHeader.astro';
 ---
 
-<Layout title="Winning Pins — PinArchive" description="Historical pin performance archive, high-velocity winners, and canonical groupings.">
+<Layout title="Winning Pins Intelligence — PinArchive" description="Cross-account high-velocity winners, delta growth analytics (24h/3d/7d), evergreen strategy matrix, and keyword mining.">
   <!-- ═══ Back Link & Top Bar ═══ -->
-  <div class="mb-4">
+  <div class="mb-5">
     <a
       href="/pinarchive"
       class="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors group mb-3"
@@ -17,41 +17,78 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
 
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <SectionHeader
-          title="🏆 Winning Pins"
-          description="High-velocity winning pins, multi-board breakdown, cluster analysis, and side-by-side trajectory comparisons."
-        />
-        <div id="refresh-meta-line" class="text-xs text-muted-foreground -mt-3 mb-2 flex items-center gap-1.5">
-          <span class="inline-block h-2 w-2 rounded-full bg-emerald-500"></span>
-          <span id="refresh-meta-text">Historical archive active</span>
+        <div class="flex items-center gap-2.5">
+          <SectionHeader
+            title="🏆 Winning Pins Intelligence"
+            description="Cross-account performance, 24h / 3d / 7d delta growth momentum, evergreen strategy matrix, and SEO keywords mining."
+          />
+        </div>
+        <div id="refresh-meta-line" class="text-xs text-muted-foreground -mt-3 mb-2 flex items-center gap-2">
+          <span class="relative flex h-2 w-2">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          <span id="refresh-meta-text" class="font-medium text-foreground">Cross-account archive active</span>
         </div>
       </div>
 
       <div class="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
-        <!-- View Toggle -->
-        <div class="flex items-center bg-card border border-border rounded-xl p-1 shadow-sm">
+        <!-- Multi-View Segmented Switcher -->
+        <div class="flex items-center bg-card border border-border rounded-xl p-1 shadow-xs">
           <button
             id="view-grid-btn"
             type="button"
-            class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-primary text-primary-foreground shadow-xs transition-all cursor-pointer"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-primary text-primary-foreground shadow-xs transition-all cursor-pointer"
+            title="Modern card grid view"
           >
-            Grid View
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+            <span>Grid</span>
+          </button>
+          <button
+            id="view-table-btn"
+            type="button"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-muted-foreground hover:text-foreground transition-all cursor-pointer"
+            title="Dense data sheet view"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            <span>Table</span>
           </button>
           <button
             id="view-board-btn"
             type="button"
-            class="px-2.5 py-1 text-xs font-semibold rounded-lg text-muted-foreground hover:text-foreground transition-all cursor-pointer"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-muted-foreground hover:text-foreground transition-all cursor-pointer"
+            title="Grouped by Pinterest board"
           >
-            By Board
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            <span>By Board</span>
+          </button>
+          <button
+            id="view-clusters-btn"
+            type="button"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-muted-foreground hover:text-foreground transition-all cursor-pointer"
+            title="Canonical pin duplicate clusters"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+            <span>Clusters</span>
           </button>
         </div>
+
+        <!-- Topic Clusters Link -->
+        <a
+          href="/pinarchive/topics"
+          title="Explore Topic Clusters"
+          class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-xs hover:bg-muted transition-all"
+        >
+          <span class="text-amber-500 font-bold">🏷️</span>
+          <span>Topics</span>
+        </a>
 
         <!-- CSV Export Button -->
         <button
           id="export-csv-btn"
           type="button"
           title="Export current filtered view to CSV"
-          class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground shadow-sm hover:bg-muted transition-all cursor-pointer"
+          class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-xs hover:bg-muted transition-all cursor-pointer"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
@@ -64,7 +101,7 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
           id="refresh-btn"
           type="button"
           title="Refresh pins data"
-          class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground shadow-sm hover:bg-muted transition-all cursor-pointer"
+          class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-xs font-semibold text-foreground shadow-xs hover:bg-muted transition-all cursor-pointer"
         >
           <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/>
@@ -75,177 +112,531 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     </div>
   </div>
 
-  <!-- ═══ Filter & Search Control Toolbar ═══ -->
-  <div class="rounded-xl border border-border bg-card p-4 shadow-sm mb-8 space-y-3">
-    <div class="flex flex-wrap items-center gap-3 justify-between">
-      <!-- Left Controls -->
+  <!-- ═══ 1. Executive Winning KPIs Summary Header ═══ -->
+  <div id="kpi-header-section" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <!-- Card 1: Top Growth Champion (Dynamic by Timeframe) -->
+    <div class="relative overflow-hidden rounded-2xl border border-border bg-card p-4 shadow-xs hover:border-primary/40 transition-all group flex flex-col justify-between">
+      <div class="flex items-center justify-between">
+        <span class="text-[10.5px] font-bold text-muted-foreground uppercase tracking-wider" id="kpi-top-label">🔥 Top 24h Growth</span>
+        <span class="flex h-7 w-7 items-center justify-center rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        </span>
+      </div>
+      <div class="mt-3 flex items-center gap-3">
+        <div id="kpi-top-thumb-wrapper" class="h-12 w-12 rounded-xl bg-muted shrink-0 overflow-hidden border border-border/80 flex items-center justify-center">
+          <span class="text-xs text-muted-foreground font-mono">#1</span>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-1.5">
+            <span id="kpi-top-velocity" class="text-xl font-extrabold tracking-tight text-emerald-500 font-mono tabular-nums">+0 saves</span>
+            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" id="kpi-top-timeframe-tag">24h</span>
+          </div>
+          <p id="kpi-top-title" class="text-xs font-semibold text-foreground truncate mt-0.5" title="Top Performer">Loading...</p>
+          <span id="kpi-top-saves" class="text-[11px] text-muted-foreground">0 total saves · @account</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 2: Average Daily Velocity -->
+    <div class="relative overflow-hidden rounded-2xl border border-border bg-card p-4 shadow-xs hover:border-primary/40 transition-all group flex flex-col justify-between">
+      <div class="flex items-center justify-between">
+        <span class="text-[10.5px] font-bold text-muted-foreground uppercase tracking-wider">Average Velocity</span>
+        <span class="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </span>
+      </div>
+      <div class="mt-3">
+        <div class="flex items-baseline gap-2">
+          <span id="kpi-avg-velocity" class="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground font-mono tabular-nums">0.0/d</span>
+          <span class="text-[11px] font-semibold text-emerald-500 font-mono">avg saves/day</span>
+        </div>
+        <div class="mt-1 text-xs text-muted-foreground flex items-center justify-between">
+          <span id="kpi-total-analyzed-saves">0 total saves</span>
+          <span id="kpi-active-sample-count" class="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground font-semibold">0 pins</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 3: Dominant Winning Board -->
+    <div class="relative overflow-hidden rounded-2xl border border-border bg-card p-4 shadow-xs hover:border-primary/40 transition-all group flex flex-col justify-between">
+      <div class="flex items-center justify-between">
+        <span class="text-[10.5px] font-bold text-muted-foreground uppercase tracking-wider">Dominant Board</span>
+        <span class="flex h-7 w-7 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+        </span>
+      </div>
+      <div class="mt-3">
+        <div id="kpi-dominant-board-name" class="text-base font-bold text-foreground truncate" title="Board Name">—</div>
+        <div class="mt-1 text-xs text-muted-foreground flex items-center justify-between">
+          <span id="kpi-dominant-board-saves" class="text-rose-500 font-semibold">0 saves</span>
+          <span id="kpi-dominant-board-pins" class="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">0 winners</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 4: Strategy Matrix Breakdown -->
+    <div class="relative overflow-hidden rounded-2xl border border-border bg-card p-4 shadow-xs hover:border-primary/40 transition-all group flex flex-col justify-between">
+      <div class="flex items-center justify-between">
+        <span class="text-[10.5px] font-bold text-muted-foreground uppercase tracking-wider">Strategy Matrix</span>
+        <span class="flex h-7 w-7 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500 border border-purple-500/20">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        </span>
+      </div>
+      <div class="mt-3 space-y-1.5">
+        <!-- Visual Distribution Bar -->
+        <div class="h-2 w-full bg-muted rounded-full overflow-hidden flex" id="kpi-stage-bar">
+          <div id="kpi-bar-evergreen" class="bg-emerald-600 h-full" style="width: 0%" title="Evergreen Giants"></div>
+          <div id="kpi-bar-rocket" class="bg-rose-500 h-full" style="width: 0%" title="Viral Rockets"></div>
+          <div id="kpi-bar-virality" class="bg-primary h-full" style="width: 0%" title="High Virality"></div>
+          <div id="kpi-bar-mature" class="bg-purple-500 h-full" style="width: 0%" title="Mature Stable"></div>
+        </div>
+        <div class="flex items-center justify-between text-[10px] font-bold text-muted-foreground pt-0.5">
+          <span class="flex items-center gap-1" title="Evergreen Giants (>45d + steady high saves)"><span class="h-1.5 w-1.5 rounded-full bg-emerald-600"></span> <span id="kpi-count-evergreen">0</span> 🌲</span>
+          <span class="flex items-center gap-1" title="Viral Rockets (≤14d + fast pace)"><span class="h-1.5 w-1.5 rounded-full bg-rose-500"></span> <span id="kpi-count-rocket">0</span> 🚀</span>
+          <span class="flex items-center gap-1" title="High Virality (>90% Repin/Save Ratio)"><span class="h-1.5 w-1.5 rounded-full bg-primary"></span> <span id="kpi-count-virality">0</span> 💎</span>
+          <span class="flex items-center gap-1" title="Mature Content"><span class="h-1.5 w-1.5 rounded-full bg-purple-500"></span> <span id="kpi-count-mature">0</span> 🟣</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 2. In-Depth Keyword & SEO Mining Box ═══ -->
+  <div id="keyword-mining-box" class="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-xs mb-6 space-y-3">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border/60 pb-3">
+      <div class="flex items-center gap-2.5">
+        <span class="flex h-7 w-7 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-sm">
+          🏷️
+        </span>
+        <div>
+          <h3 class="text-xs sm:text-sm font-bold text-foreground flex items-center gap-1.5">
+            <span>Winning SEO Keywords Mining</span>
+            <span class="text-[10px] font-semibold text-muted-foreground">(Top recurring Pinterest annotations in active filtered scope)</span>
+          </h3>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button
+          id="copy-all-keywords-btn"
+          type="button"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-background text-xs font-bold text-foreground hover:bg-muted shadow-2xs transition-all cursor-pointer"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          <span>Copy All Tags</span>
+        </button>
+        <a
+          href="/pinarchive/topics"
+          class="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
+        >
+          <span>All Topic Clusters →</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- Active Keywords Cloud -->
+    <div id="keywords-cloud-container" class="flex flex-wrap items-center gap-1.5 min-h-[36px]">
+      <span class="text-xs text-muted-foreground animate-pulse">Mining keyword clusters from active winners...</span>
+    </div>
+  </div>
+
+  <!-- ═══ 3. Growth Timeframe Slicers & Filter Controls Toolbar ═══ -->
+  <div class="rounded-2xl border border-border bg-card p-4 shadow-xs mb-6 space-y-3.5">
+    <!-- Growth Timeframe Slicer Pills (24h / 3d / 7d / All-Time) -->
+    <div class="flex items-center justify-between flex-wrap gap-2">
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+        <span class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider shrink-0 flex items-center gap-1">
+          <span>⚡ Growth Pace:</span>
+        </span>
+        <button
+          type="button"
+          data-timeframe="24h"
+          class="timeframe-pill px-3 py-1.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground shadow-2xs transition-all cursor-pointer shrink-0"
+        >
+          🔥 Last 24 Hours
+        </button>
+        <button
+          type="button"
+          data-timeframe="3d"
+          class="timeframe-pill px-3 py-1.5 rounded-xl text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+        >
+          📈 Last 3 Days
+        </button>
+        <button
+          type="button"
+          data-timeframe="7d"
+          class="timeframe-pill px-3 py-1.5 rounded-xl text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+        >
+          🗓️ Last 7 Days
+        </button>
+        <button
+          type="button"
+          data-timeframe="all"
+          class="timeframe-pill px-3 py-1.5 rounded-xl text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+        >
+          ⭐ All-Time Total
+        </button>
+      </div>
+
+      <!-- Quick Matrix Slicers -->
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+        <button
+          type="button"
+          data-quick-filter="all"
+          class="quick-pill active px-2.5 py-1 rounded-lg text-xs font-bold bg-muted text-foreground transition-all cursor-pointer shrink-0"
+        >
+          All (<span id="quick-count-all">0</span>)
+        </button>
+        <button
+          type="button"
+          data-quick-filter="evergreen"
+          class="quick-pill px-2.5 py-1 rounded-lg text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+        >
+          🌲 Evergreen (<span id="quick-count-evergreen">0</span>)
+        </button>
+        <button
+          type="button"
+          data-quick-filter="rocket"
+          class="quick-pill px-2.5 py-1 rounded-lg text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+        >
+          🚀 Rockets (<span id="quick-count-rocket">0</span>)
+        </button>
+        <button
+          type="button"
+          data-quick-filter="spike"
+          class="quick-pill px-2.5 py-1 rounded-lg text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+        >
+          🔥 Spikes (<span id="quick-count-spike">0</span>)
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Filter Controls Row -->
+    <div class="flex flex-wrap items-center gap-3 justify-between pt-2 border-t border-border/60">
+      <!-- Left Controls: Search & Account & Board & Stage -->
       <div class="flex flex-wrap items-center gap-2.5 flex-1 min-w-[280px]">
-        <!-- Search -->
+        <!-- Search Input -->
         <div class="relative flex-1 min-w-[180px] max-w-xs">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input
             id="filter-search-input"
             type="text"
-            placeholder="Search pin title…"
-            class="w-full rounded-xl border border-border bg-background py-1.5 pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            placeholder="Search pin title, keywords, tags…"
+            class="w-full rounded-xl border border-border bg-background py-1.5 pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary shadow-2xs"
           />
           <kbd class="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-muted px-1 text-[9px] font-bold text-muted-foreground">/</kbd>
         </div>
 
-        <!-- Board Filter -->
-        <div class="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2.5 py-1.5">
+        <!-- Account Filter Dropdown -->
+        <div class="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2.5 py-1.5 shadow-2xs">
+          <label for="filter-account-select" class="text-xs font-semibold text-muted-foreground">Account:</label>
+          <select id="filter-account-select" class="bg-transparent text-xs font-medium text-foreground focus:outline-none cursor-pointer max-w-[140px] truncate">
+            <option value="">All Accounts</option>
+          </select>
+        </div>
+
+        <!-- Board Filter Dropdown -->
+        <div class="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2.5 py-1.5 shadow-2xs">
           <label for="filter-board-select" class="text-xs font-semibold text-muted-foreground">Board:</label>
-          <select id="filter-board-select" class="bg-transparent text-xs font-medium text-foreground focus:outline-none cursor-pointer max-w-[140px] truncate">
+          <select id="filter-board-select" class="bg-transparent text-xs font-medium text-foreground focus:outline-none cursor-pointer max-w-[130px] truncate">
             <option value="">All Boards</option>
           </select>
         </div>
 
         <!-- Stage Filter -->
-        <div class="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2.5 py-1.5">
+        <div class="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2.5 py-1.5 shadow-2xs">
           <label for="filter-stage-select" class="text-xs font-semibold text-muted-foreground">Stage:</label>
           <select id="filter-stage-select" class="bg-transparent text-xs font-medium text-foreground focus:outline-none cursor-pointer">
             <option value="">All Stages</option>
-            <option value="NEW">🟢 NEW (≤14d)</option>
-            <option value="GROWING">🚀 GROWING (≥10/d)</option>
-            <option value="MATURE">🟣 MATURE (&gt;14d)</option>
-            <option value="COOLING">❄️ COOLING (&lt;2/d)</option>
-            <option value="DORMANT">⚪ DORMANT (&lt;0.5/d)</option>
+            <option value="NEW">🟢 NEW</option>
+            <option value="GROWING">🚀 GROWING</option>
+            <option value="MATURE">🟣 MATURE</option>
+            <option value="COOLING">❄️ COOLING</option>
           </select>
         </div>
 
-        <!-- In-Cluster Toggle -->
-        <label class="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
-          <input id="filter-cluster-toggle" type="checkbox" class="rounded border-border text-primary focus:ring-primary h-4 w-4" />
-          <span>In Cluster Only</span>
+        <!-- In-Cluster Toggle Checkbox -->
+        <label class="inline-flex items-center gap-1.5 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground select-none px-1">
+          <input id="filter-cluster-toggle" type="checkbox" class="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer" />
+          <span>In Cluster</span>
         </label>
       </div>
 
-      <!-- Right Controls: Sort & Limit -->
+      <!-- Right Controls: Sort & Limit & Clear -->
       <div class="flex items-center gap-2">
-        <div class="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2.5 py-1.5">
+        <div class="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2.5 py-1.5 shadow-2xs">
           <label for="pins-sort-select" class="text-xs font-semibold text-muted-foreground">Sort:</label>
           <select id="pins-sort-select" class="bg-transparent text-xs font-medium text-foreground focus:outline-none cursor-pointer">
-            <option value="saves">Total Saves</option>
-            <option value="velocity">Velocity (Saves/Day)</option>
+            <option value="delta_24h_desc">🔥 24h Growth (High → Low)</option>
+            <option value="delta_3d_desc">📈 3-Day Growth (High → Low)</option>
+            <option value="delta_7d_desc">🗓️ 7-Day Growth (High → Low)</option>
+            <option value="saves_desc">Total Saves (High → Low)</option>
+            <option value="velocity_desc">Daily Velocity (High → Low)</option>
+            <option value="repins_desc">Total Repins (High → Low)</option>
+            <option value="virality_desc">Virality Ratio %</option>
+            <option value="newest">Newest on Pinterest</option>
           </select>
         </div>
 
-        <div class="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2.5 py-1.5">
-          <label for="pins-limit-select" class="text-xs font-semibold text-muted-foreground">Limit:</label>
+        <div class="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2.5 py-1.5 shadow-2xs">
+          <label for="pins-limit-select" class="text-xs font-semibold text-muted-foreground">Per Page:</label>
           <select id="pins-limit-select" class="bg-transparent text-xs font-medium text-foreground focus:outline-none cursor-pointer">
-            <option value="25">25</option>
-            <option value="50" selected>50</option>
-            <option value="100">100</option>
-            <option value="200">200</option>
+            <option value="24" selected>24</option>
+            <option value="48">48</option>
+            <option value="96">96</option>
+            <option value="200">200 (All)</option>
           </select>
         </div>
 
-        <button id="clear-filters-btn" type="button" class="text-xs font-semibold text-muted-foreground hover:text-primary px-2 py-1 cursor-pointer">
-          Clear
+        <button id="clear-filters-btn" type="button" class="text-xs font-bold text-muted-foreground hover:text-rose-500 px-2.5 py-1.5 rounded-lg hover:bg-rose-500/10 transition-all cursor-pointer">
+          Reset
         </button>
       </div>
     </div>
   </div>
 
-  <!-- ═══ Winners Grid / By Board Section ═══ -->
-  <section class="mb-12" aria-labelledby="winners-section-heading">
-    <div class="flex items-center justify-between mb-4">
+  <!-- ═══ 4. Active Winners Presentation Area ═══ -->
+  <section class="mb-8" aria-labelledby="winners-section-heading">
+    <!-- Header Section Info & Top Action Button -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-2">
       <div>
         <h2 id="winners-section-heading" class="text-base font-bold text-foreground flex items-center gap-2">
-          <span>Pinned Intelligence</span>
-          <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary" id="winners-badge-count">0</span>
+          <span>Ranked Intelligence</span>
+          <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20" id="winners-badge-count">0</span>
         </h2>
-        <p class="text-xs text-muted-foreground mt-0.5">Top performing archived pins ranked by selected metric (persisted workspace filters apply server-side).</p>
+        <p class="text-xs text-muted-foreground mt-0.5" id="winners-showing-range-text">Showing 0-0 of 0 winning pins</p>
+      </div>
+
+      <!-- Quick AI Prompt Export Action Button -->
+      <div class="flex items-center gap-2">
+        <button
+          id="bulk-ai-prompt-btn"
+          type="button"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-primary/30 bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground text-xs font-bold shadow-2xs transition-all cursor-pointer"
+          title="Extract titles & keywords formatted as AI Content Generation Prompt"
+        >
+          <span>🤖 AI Prompt Generator</span>
+        </button>
       </div>
     </div>
 
-    <!-- Main Pins Container (Grid View or By Board View) -->
+    <!-- VIEW 1: Modern Grid View (Default) -->
     <div id="winners-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-      <!-- Shimmer skeletons -->
-      <div class="rounded-xl border border-border bg-card p-4 shadow-sm animate-pulse space-y-3">
-        <div class="h-44 bg-muted rounded-lg"></div>
+      <!-- Loading Shimmer Skeletons -->
+      <div class="rounded-2xl border border-border bg-card p-4 shadow-xs animate-pulse space-y-3">
+        <div class="h-44 bg-muted rounded-xl"></div>
         <div class="h-4 w-3/4 bg-muted rounded"></div>
         <div class="h-3 w-1/2 bg-muted rounded"></div>
       </div>
-      <div class="rounded-xl border border-border bg-card p-4 shadow-sm animate-pulse space-y-3">
-        <div class="h-44 bg-muted rounded-lg"></div>
+      <div class="rounded-2xl border border-border bg-card p-4 shadow-xs animate-pulse space-y-3">
+        <div class="h-44 bg-muted rounded-xl"></div>
         <div class="h-4 w-3/4 bg-muted rounded"></div>
         <div class="h-3 w-1/2 bg-muted rounded"></div>
       </div>
-      <div class="rounded-xl border border-border bg-card p-4 shadow-sm animate-pulse space-y-3">
-        <div class="h-44 bg-muted rounded-lg"></div>
+      <div class="rounded-2xl border border-border bg-card p-4 shadow-xs animate-pulse space-y-3">
+        <div class="h-44 bg-muted rounded-xl"></div>
         <div class="h-4 w-3/4 bg-muted rounded"></div>
         <div class="h-3 w-1/2 bg-muted rounded"></div>
       </div>
-      <div class="rounded-xl border border-border bg-card p-4 shadow-sm animate-pulse space-y-3">
-        <div class="h-44 bg-muted rounded-lg"></div>
+      <div class="rounded-2xl border border-border bg-card p-4 shadow-xs animate-pulse space-y-3">
+        <div class="h-44 bg-muted rounded-xl"></div>
         <div class="h-4 w-3/4 bg-muted rounded"></div>
         <div class="h-3 w-1/2 bg-muted rounded"></div>
       </div>
     </div>
 
-    <!-- By Board Container (hidden by default) -->
+    <!-- VIEW 2: Pro Data Table View (Hidden by default) -->
+    <div id="winners-table-container" class="hidden rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-border bg-muted/40 text-muted-foreground font-bold">
+              <th class="py-3 px-3 text-center w-12">#</th>
+              <th class="py-3 px-3 min-w-[220px]">Pin Title &amp; Account</th>
+              <th class="py-3 px-3 min-w-[120px]">Board</th>
+              <th class="py-3 px-3 text-center min-w-[100px]">Strategy Matrix</th>
+              <th class="py-3 px-3 text-right cursor-pointer hover:text-foreground table-sort-header select-none text-emerald-600 dark:text-emerald-400" data-sort="delta">
+                <span id="table-col-delta-label">Δ Growth (24h)</span> <span class="sort-indicator" id="sort-icon-delta">↕</span>
+              </th>
+              <th class="py-3 px-3 text-right cursor-pointer hover:text-foreground table-sort-header select-none" data-sort="saves">
+                Saves <span class="sort-indicator" id="sort-icon-saves">↕</span>
+              </th>
+              <th class="py-3 px-3 text-right cursor-pointer hover:text-foreground table-sort-header select-none" data-sort="velocity">
+                Velocity <span class="sort-indicator" id="sort-icon-velocity">↕</span>
+              </th>
+              <th class="py-3 px-3 text-center cursor-pointer hover:text-foreground table-sort-header select-none" data-sort="virality">
+                Virality <span class="sort-indicator" id="sort-icon-virality">↕</span>
+              </th>
+              <th class="py-3 px-3 text-right w-28">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="winners-table-body" class="divide-y divide-border/60">
+            <!-- Rows rendered dynamically -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- VIEW 3: By Board Container (Hidden by default) -->
     <div id="by-board-container" class="hidden space-y-6"></div>
-  </section>
 
-  <!-- ═══ Canonical Duplicate Clusters Section ═══ -->
-  <section class="mb-12" aria-labelledby="canonical-section-heading">
-    <div class="flex items-center justify-between mb-4">
-      <div>
-        <h2 id="canonical-section-heading" class="text-base font-bold text-foreground flex items-center gap-2">
-          <span>🧬 Canonical Clusters</span>
-          <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-500" id="canonical-badge-count">0 Clusters</span>
-        </h2>
-        <p class="text-xs text-muted-foreground mt-0.5">Grouped pin variations sharing the same underlying Pinterest canonical ID.</p>
-      </div>
-    </div>
-
-    <div class="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-      <div id="canonical-container" class="divide-y divide-border">
-        <!-- Skeleton -->
-        <div class="p-4 animate-pulse space-y-2">
-          <div class="h-4 w-48 bg-muted rounded"></div>
-          <div class="h-3 w-72 bg-muted rounded"></div>
+    <!-- VIEW 4: Canonical Clusters View (Hidden by default) -->
+    <div id="clusters-view-container" class="hidden space-y-6">
+      <div class="rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
+        <div class="p-4 bg-muted/30 border-b border-border flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="flex h-7 w-7 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500 border border-purple-500/20">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+            </span>
+            <div>
+              <h3 class="text-sm font-bold text-foreground">🧬 Canonical Duplicate Clusters</h3>
+              <p class="text-xs text-muted-foreground">Pin variations sharing the same underlying Pinterest canonical asset ID.</p>
+            </div>
+          </div>
+          <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-500 border border-purple-500/20" id="canonical-badge-count">0 Clusters</span>
+        </div>
+        <div id="canonical-container" class="divide-y divide-border">
+          <div class="p-6 text-center text-xs text-muted-foreground">Loading cluster intelligence...</div>
         </div>
       </div>
     </div>
+
+    <!-- ═══ 5. Full Pagination Bar ═══ -->
+    <div id="pagination-wrapper" class="mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 bg-card rounded-2xl border border-border shadow-xs">
+      <div class="text-xs text-muted-foreground font-medium" id="pagination-info-text">
+        Showing 1 to 24 of 0 winning pins
+      </div>
+
+      <div class="flex items-center gap-1.5 self-center sm:self-auto" id="pagination-controls-container">
+        <!-- Injected via JavaScript -->
+      </div>
+    </div>
   </section>
 
-  <!-- ═══ Floating Compare Bar ═══ -->
-  <div id="floating-compare-bar" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-card border border-primary/40 rounded-2xl shadow-2xl px-5 py-3 flex items-center gap-4 animate-in fade-in duration-200">
-    <div class="flex items-center gap-2">
-      <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+  <!-- ═══ 6. Floating Multi-Pin Compare & Bulk Actions Bar ═══ -->
+  <div id="floating-compare-bar" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-card/95 backdrop-blur-md border border-primary/40 rounded-2xl shadow-2xl px-5 py-3 flex items-center gap-4 animate-in fade-in slide-in-from-bottom-2 duration-200">
+    <div class="flex items-center gap-2.5">
+      <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>
       </span>
-      <span id="compare-count-text" class="text-xs font-bold text-foreground">2 Pins Selected</span>
+      <div>
+        <span id="compare-count-text" class="text-xs font-bold text-foreground block">2 Pins Selected</span>
+        <span class="text-[10px] text-muted-foreground">Compare growth or extract AI prompt</span>
+      </div>
     </div>
     <div class="flex items-center gap-2">
-      <button id="launch-compare-btn" type="button" class="rounded-xl bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-sm hover:bg-primary/90 transition-all cursor-pointer">
-        Compare Trajectories
+      <button id="launch-compare-btn" type="button" class="rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground shadow-xs hover:bg-primary/90 transition-all cursor-pointer">
+        Compare (Up to 4)
       </button>
-      <button id="clear-compare-btn" type="button" class="rounded-xl border border-border bg-background px-2.5 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-all cursor-pointer">
+      <button id="launch-bulk-ai-btn" type="button" class="rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-bold text-primary hover:bg-primary hover:text-primary-foreground transition-all cursor-pointer">
+        🤖 Copy AI Prompt
+      </button>
+      <button id="clear-compare-btn" type="button" class="rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-all cursor-pointer">
         Clear
       </button>
     </div>
   </div>
 
-  <!-- ═══ Compare Modal Dialog ═══ -->
+  <!-- ═══ 7. Quick-Peek Slide-Over Drawer ═══ -->
+  <div id="quick-peek-backdrop" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-xs transition-opacity duration-300"></div>
+  <div
+    id="quick-peek-drawer"
+    class="fixed top-0 right-0 bottom-0 z-50 w-full max-w-xl bg-card border-l border-border shadow-2xl transform translate-x-full transition-transform duration-300 ease-out flex flex-col"
+  >
+    <!-- Drawer Header -->
+    <div class="p-4 sm:p-5 border-b border-border flex items-center justify-between bg-muted/20">
+      <div class="flex items-center gap-2.5">
+        <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </span>
+        <div>
+          <h3 class="text-sm font-bold text-foreground">Quick-Peek Intelligence</h3>
+          <span id="peek-drawer-meta" class="text-[10px] text-muted-foreground">Snapshot metrics, forecasts &amp; trajectory</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <!-- Prev/Next Pin Navigation in Drawer -->
+        <button id="peek-prev-btn" type="button" title="Previous pin" class="p-1.5 rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button id="peek-next-btn" type="button" title="Next pin" class="p-1.5 rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <button id="peek-close-btn" type="button" class="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer ml-1">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Drawer Scrollable Content -->
+    <div id="quick-peek-content" class="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+      <!-- Loading Skeleton inside drawer -->
+      <div class="animate-pulse space-y-4">
+        <div class="h-64 bg-muted rounded-2xl"></div>
+        <div class="h-6 w-3/4 bg-muted rounded"></div>
+        <div class="h-20 bg-muted rounded-xl"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 8. AI Prompt Generator Modal ═══ -->
+  <div id="ai-prompt-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+    <div class="relative w-full max-w-2xl rounded-3xl border border-border bg-card p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-border">
+        <div class="flex items-center gap-2.5">
+          <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20 text-base">
+            🤖
+          </span>
+          <div>
+            <h3 class="text-sm font-bold text-foreground">AI Content Generation Prompt</h3>
+            <span class="text-[10px] text-muted-foreground">Formatted prompt extracted from winning pins &amp; keywords</span>
+          </div>
+        </div>
+        <button id="close-ai-modal-btn" type="button" class="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-muted cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <textarea
+        id="ai-prompt-textarea"
+        rows="8"
+        readonly
+        class="w-full rounded-2xl border border-border bg-muted/40 p-3.5 text-xs font-mono text-foreground focus:outline-none leading-relaxed select-all"
+      ></textarea>
+
+      <div class="flex items-center justify-between pt-2">
+        <span class="text-[11px] text-muted-foreground">Paste directly into ChatGPT, Claude, or Midjourney</span>
+        <button
+          id="copy-ai-prompt-btn"
+          type="button"
+          class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold shadow-xs hover:bg-primary/90 transition-all cursor-pointer"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          <span id="copy-ai-prompt-text">Copy Prompt to Clipboard</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 9. Compare Modal Dialog (Up to 4 Pins) ═══ -->
   <div id="compare-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-    <div class="relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl">
+    <div class="relative w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-3xl border border-border bg-card p-6 shadow-2xl">
       <div class="flex items-center justify-between pb-4 border-b border-border mb-4">
-        <div class="flex items-center gap-2">
-          <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+        <div class="flex items-center gap-2.5">
+          <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/></svg>
           </span>
-          <h3 class="text-base font-bold text-foreground">Pin Trajectory Comparison</h3>
+          <div>
+            <h3 class="text-base font-bold text-foreground">Pin Trajectory Comparison (Up to 4)</h3>
+            <span class="text-[10px] text-muted-foreground">Side-by-side growth pace, evergreen diagnostics &amp; snapshot histories</span>
+          </div>
         </div>
-        <button id="close-compare-modal" type="button" class="text-muted-foreground hover:text-foreground p-1 rounded-lg cursor-pointer">
+        <button id="close-compare-modal" type="button" class="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-muted cursor-pointer">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
 
       <div id="compare-modal-content" class="space-y-6">
-        <!-- Dynamic comparison content injected here -->
+        <!-- Injected dynamically -->
       </div>
     </div>
   </div>
@@ -253,10 +644,16 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
 
 <script>
   let rawPins: any[] = [];
-  let currentSort = 'saves';
-  let currentLimit = 50;
-  let activeView: 'grid' | 'board' = 'grid';
+  let rawAccounts: any[] = [];
+  let filteredPins: any[] = [];
+  let activeTimeframe: '24h' | '3d' | '7d' | 'all' = '24h';
+  let currentSort = 'delta_24h_desc';
+  let currentPage = 1;
+  let pageSize = 24;
+  let activeView: 'grid' | 'table' | 'board' | 'clusters' = 'grid';
+  let activeQuickFilter = 'all';
   const selectedForCompare = new Set<string>();
+  let currentPeekIndex = -1;
 
   function escapeHtml(str?: string | null): string {
     if (!str) return '';
@@ -268,10 +665,15 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
       .replace(/'/g, '&#039;');
   }
 
-  // Full numbers formatting (no k/M abbreviations)
   function fmtNumber(n: number | string | null | undefined): string {
     const num = Number(n) || 0;
     return num.toLocaleString('en-US');
+  }
+
+  function fmtCompact(n: number): string {
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+    if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k';
+    return String(Math.round(n));
   }
 
   function fmtDate(isoString?: string | null): string {
@@ -285,36 +687,254 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     }
   }
 
-  function renderStageBadge(stage?: string | null): string {
-    switch (stage) {
-      case 'NEW':
-        return '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20">🟢 NEW</span>';
-      case 'GROWING':
-        return '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">🚀 GROWING</span>';
-      case 'MATURE':
-        return '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">🟣 MATURE</span>';
-      case 'COOLING':
-        return '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">❄️ COOLING</span>';
+  function getPinDeltaByActiveTimeframe(p: any): number {
+    switch (activeTimeframe) {
+      case '3d':
+        return Number(p.delta_saves_3d ?? p.delta_saves ?? 0);
+      case '7d':
+        return Number(p.delta_saves_7d ?? p.delta_saves ?? 0);
+      case 'all':
+        return Number(p.saves ?? 0);
+      case '24h':
       default:
-        return '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-500/10 text-slate-500 border border-slate-500/20">⚪ DORMANT</span>';
+        return Number(p.delta_saves_24h ?? p.delta_saves ?? 0);
     }
   }
 
-  function renderAnomalyBadge(anomaly?: string | null): string {
-    if (anomaly === 'SPIKE') {
-      return '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-500 border border-rose-500/20 animate-pulse">🔥 SPIKE</span>';
-    }
-    if (anomaly === 'COOLING') {
-      return '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20">❄️ COOLING</span>';
-    }
-    return '';
-  }
+  // ═══ Strategy Matrix ═══
+  type PinStrategy = 'EVERGREEN' | 'ROCKET' | 'VIRAL' | 'MATURE' | 'COOLING';
 
-  function renderSinglePinCard(p: any): string {
+  function getPinStrategy(p: any): PinStrategy {
     const saves = Number(p.saves || 0);
     const repins = Number(p.repins || 0);
     const velocity = Number(p.velocity || 0);
-    const shares = Number(p.share_count || 0);
+    const ageDays = Number(p.age_days) || (p.created_at_pinterest ? Math.max(0, (Date.now() - new Date(p.created_at_pinterest).getTime()) / 86400000) : 30);
+    const viralityRatio = saves > 0 ? (repins / saves) * 100 : 0;
+
+    if (ageDays <= 14 && velocity >= 15) return 'ROCKET';
+    if (ageDays > 45 && velocity >= 8 && saves >= 2500) return 'EVERGREEN';
+    if (viralityRatio >= 90) return 'VIRAL';
+    if (p.stage === 'COOLING' || velocity < 2) return 'COOLING';
+    return 'MATURE';
+  }
+
+  function renderStrategyBadge(strategy: PinStrategy): string {
+    switch (strategy) {
+      case 'EVERGREEN':
+        return '<span class="inline-flex items-center gap-1 text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 border border-emerald-600/20" title="Evergreen Giant (>45d, steady high saves)">🌲 EVERGREEN</span>';
+      case 'ROCKET':
+        return '<span class="inline-flex items-center gap-1 text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-500 border border-rose-500/20 animate-pulse" title="Viral Rocket (≤14d, high velocity)">🚀 ROCKET</span>';
+      case 'VIRAL':
+        return '<span class="inline-flex items-center gap-1 text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20" title="High Repin/Save Ratio (>90%)">💎 VIRAL</span>';
+      case 'COOLING':
+        return '<span class="inline-flex items-center gap-1 text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20" title="Slowing growth pace">❄️ COOLING</span>';
+      default:
+        return '<span class="inline-flex items-center gap-1 text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">🟣 MATURE</span>';
+    }
+  }
+
+  function renderRankBadge(index: number): string {
+    if (index === 0) {
+      return '<span class="inline-flex items-center justify-center h-6 px-2 rounded-lg bg-amber-500 text-white font-extrabold text-[10px] shadow-xs border border-amber-400">🥇 #1</span>';
+    }
+    if (index === 1) {
+      return '<span class="inline-flex items-center justify-center h-6 px-2 rounded-lg bg-slate-400 text-white font-extrabold text-[10px] shadow-xs border border-slate-300">🥈 #2</span>';
+    }
+    if (index === 2) {
+      return '<span class="inline-flex items-center justify-center h-6 px-2 rounded-lg bg-amber-700 text-white font-extrabold text-[10px] shadow-xs border border-amber-600">🥉 #3</span>';
+    }
+    return `<span class="inline-flex items-center justify-center h-5 px-1.5 rounded-md bg-muted/90 text-muted-foreground font-bold text-[9px] border border-border">#${index + 1}</span>`;
+  }
+
+  // ═══ Keyword Mining Extraction ═══
+  function updateKeywordMining(pins: any[]) {
+    const container = document.getElementById('keywords-cloud-container');
+    if (!container) return;
+
+    if (!pins || pins.length === 0) {
+      container.innerHTML = '<span class="text-xs text-muted-foreground">No keyword annotations found for active filters.</span>';
+      return;
+    }
+
+    const keywordStats: Record<string, { count: number; totalSaves: number }> = {};
+
+    pins.forEach((p) => {
+      const pinSaves = Number(p.saves || 0);
+      const annotations = Array.isArray(p.annotations) ? p.annotations : [];
+      const seenForPin = new Set<string>();
+
+      annotations.forEach((a: any) => {
+        const name = typeof a === 'string' ? a.trim() : a?.name ? String(a.name).trim() : '';
+        if (name && !seenForPin.has(name.toLowerCase())) {
+          seenForPin.add(name.toLowerCase());
+          if (!keywordStats[name]) keywordStats[name] = { count: 0, totalSaves: 0 };
+          keywordStats[name].count += 1;
+          keywordStats[name].totalSaves += pinSaves;
+        }
+      });
+    });
+
+    const sortedKeywords = Object.entries(keywordStats)
+      .sort((a, b) => b[1].count !== a[1].count ? b[1].count - a[1].count : b[1].totalSaves - a[1].totalSaves)
+      .slice(0, 14);
+
+    if (sortedKeywords.length === 0) {
+      container.innerHTML = '<span class="text-xs text-muted-foreground">No Pinterest SEO annotations found on selected pins.</span>';
+      return;
+    }
+
+    container.innerHTML = sortedKeywords.map(([name, stat]) => `
+      <a
+        href="/pinarchive/topics?q=${encodeURIComponent(name)}"
+        title="${escapeHtml(name)} — ${stat.count} winning pins, ${fmtNumber(stat.totalSaves)} saves"
+        class="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-muted/60 hover:bg-primary/15 hover:text-primary border border-border/80 text-xs font-semibold text-foreground transition-all group"
+      >
+        <span class="text-amber-500 font-bold">#</span>
+        <span class="truncate max-w-[160px]">${escapeHtml(name)}</span>
+        <span class="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-background text-muted-foreground group-hover:text-primary font-bold border border-border/40">
+          ${stat.count}
+        </span>
+      </a>
+    `).join('');
+  }
+
+  // ═══ KPI Computation ═══
+  function updateExecutiveKPIs(pins: any[]) {
+    if (!pins || pins.length === 0) {
+      const topTitle = document.getElementById('kpi-top-title');
+      const topVel = document.getElementById('kpi-top-velocity');
+      const topSaves = document.getElementById('kpi-top-saves');
+      const avgVelElem = document.getElementById('kpi-avg-velocity');
+      const totalSavesElem = document.getElementById('kpi-total-analyzed-saves');
+      const sampleCountElem = document.getElementById('kpi-active-sample-count');
+      const domName = document.getElementById('kpi-dominant-board-name');
+      const domSaves = document.getElementById('kpi-dominant-board-saves');
+      const domPins = document.getElementById('kpi-dominant-board-pins');
+
+      if (topTitle) topTitle.textContent = 'No active pins';
+      if (topVel) topVel.textContent = '+0 saves';
+      if (topSaves) topSaves.textContent = '0 total saves';
+      if (avgVelElem) avgVelElem.textContent = '0.0/d';
+      if (totalSavesElem) totalSavesElem.textContent = '0 total saves';
+      if (sampleCountElem) sampleCountElem.textContent = '0 pins';
+      if (domName) domName.textContent = '—';
+      if (domSaves) domSaves.textContent = '0 saves';
+      if (domPins) domPins.textContent = '0 winners';
+      return;
+    }
+
+    // 1. Top Growth Champion (Dynamic based on active timeframe)
+    const sortedByGrowth = [...pins].sort((a, b) => getPinDeltaByActiveTimeframe(b) - getPinDeltaByActiveTimeframe(a));
+    const topPin = sortedByGrowth[0];
+    if (topPin) {
+      const topLabel = document.getElementById('kpi-top-label');
+      const topTitle = document.getElementById('kpi-top-title');
+      const topVel = document.getElementById('kpi-top-velocity');
+      const topTag = document.getElementById('kpi-top-timeframe-tag');
+      const topSaves = document.getElementById('kpi-top-saves');
+      const thumbWrapper = document.getElementById('kpi-top-thumb-wrapper');
+
+      const deltaVal = getPinDeltaByActiveTimeframe(topPin);
+      if (topLabel) topLabel.textContent = `🔥 Top ${activeTimeframe.toUpperCase()} Growth`;
+      if (topTag) topTag.textContent = activeTimeframe.toUpperCase();
+      if (topTitle) topTitle.textContent = topPin.title || `Pin ${topPin.pin_id}`;
+      if (topVel) topVel.textContent = `+${fmtNumber(deltaVal)} saves`;
+      if (topSaves) topSaves.textContent = `${fmtNumber(topPin.saves)} total · @${topPin.account_username || topPin.board_name || 'account'}`;
+      if (thumbWrapper && topPin.image_url) {
+        thumbWrapper.innerHTML = `<img src="${escapeHtml(topPin.image_url)}" class="w-full h-full object-cover rounded-xl" />`;
+      }
+    }
+
+    // 2. Average Velocity & Total Saves
+    const totalSaves = pins.reduce((acc, p) => acc + Number(p.saves || 0), 0);
+    const avgVelocity = pins.reduce((acc, p) => acc + Number(p.velocity || 0), 0) / pins.length;
+
+    const avgVelElem = document.getElementById('kpi-avg-velocity');
+    const totalSavesElem = document.getElementById('kpi-total-analyzed-saves');
+    const sampleCountElem = document.getElementById('kpi-active-sample-count');
+
+    if (avgVelElem) avgVelElem.textContent = `${avgVelocity.toFixed(1)}/d`;
+    if (totalSavesElem) totalSavesElem.textContent = `${fmtNumber(totalSaves)} total saves`;
+    if (sampleCountElem) sampleCountElem.textContent = `${pins.length} active pins`;
+
+    // 3. Dominant Board
+    const boardStats: Record<string, { count: number; saves: number }> = {};
+    pins.forEach((p) => {
+      const b = p.board_name || 'Unassigned';
+      if (!boardStats[b]) boardStats[b] = { count: 0, saves: 0 };
+      boardStats[b].count += 1;
+      boardStats[b].saves += Number(p.saves || 0);
+    });
+
+    const dominantEntry = Object.entries(boardStats).sort((a, b) => b[1].saves - a[1].saves)[0];
+    const domName = document.getElementById('kpi-dominant-board-name');
+    const domSaves = document.getElementById('kpi-dominant-board-saves');
+    const domPins = document.getElementById('kpi-dominant-board-pins');
+
+    if (dominantEntry) {
+      if (domName) domName.textContent = dominantEntry[0];
+      if (domSaves) domSaves.textContent = `${fmtNumber(dominantEntry[1].saves)} saves`;
+      if (domPins) domPins.textContent = `${dominantEntry[1].count} winning pins`;
+    }
+
+    // 4. Strategy Matrix Distribution
+    let cEvergreen = 0;
+    let cRocket = 0;
+    let cVirality = 0;
+    let cMature = 0;
+
+    pins.forEach((p) => {
+      const st = getPinStrategy(p);
+      if (st === 'EVERGREEN') cEvergreen++;
+      else if (st === 'ROCKET') cRocket++;
+      else if (st === 'VIRAL') cVirality++;
+      else cMature++;
+    });
+
+    const len = pins.length;
+    const pEvergreen = Math.round((cEvergreen / len) * 100);
+    const pRocket = Math.round((cRocket / len) * 100);
+    const pVirality = Math.round((cVirality / len) * 100);
+    const pMature = Math.max(0, 100 - pEvergreen - pRocket - pVirality);
+
+    const bEvergreen = document.getElementById('kpi-bar-evergreen');
+    const bRocket = document.getElementById('kpi-bar-rocket');
+    const bVirality = document.getElementById('kpi-bar-virality');
+    const bMature = document.getElementById('kpi-bar-mature');
+
+    if (bEvergreen) bEvergreen.style.width = `${pEvergreen}%`;
+    if (bRocket) bRocket.style.width = `${pRocket}%`;
+    if (bVirality) bVirality.style.width = `${pVirality}%`;
+    if (bMature) bMature.style.width = `${pMature}%`;
+
+    const elEver = document.getElementById('kpi-count-evergreen');
+    const elRoc = document.getElementById('kpi-count-rocket');
+    const elVir = document.getElementById('kpi-count-virality');
+    const elMat = document.getElementById('kpi-count-mature');
+
+    if (elEver) elEver.textContent = String(cEvergreen);
+    if (elRoc) elRoc.textContent = String(cRocket);
+    if (elVir) elVir.textContent = String(cVirality);
+    if (elMat) elMat.textContent = String(cMature);
+
+    // Update Quick Filter counts
+    const qAll = document.getElementById('quick-count-all');
+    const qEver = document.getElementById('quick-count-evergreen');
+    const qRoc = document.getElementById('quick-count-rocket');
+    const qSpike = document.getElementById('quick-count-spike');
+
+    if (qAll) qAll.textContent = String(rawPins.length);
+    if (qEver) qEver.textContent = String(rawPins.filter((p) => getPinStrategy(p) === 'EVERGREEN').length);
+    if (qRoc) qRoc.textContent = String(rawPins.filter((p) => getPinStrategy(p) === 'ROCKET').length);
+    if (qSpike) qSpike.textContent = String(rawPins.filter((p) => p.anomaly === 'SPIKE').length);
+  }
+
+  // ═══ Single Card (Grid View) ═══
+  function renderSinglePinCard(p: any, index: number): string {
+    const saves = Number(p.saves || 0);
+    const repins = Number(p.repins || 0);
+    const velocity = Number(p.velocity || 0);
+    const deltaVal = getPinDeltaByActiveTimeframe(p);
     const annotations = Array.isArray(p.annotations) ? p.annotations : [];
     const category = p.seo_category || p.board_name || null;
     const pinterestUrl = `https://www.pinterest.com/pin/${p.pin_id}/`;
@@ -323,40 +943,33 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     const pinId = p.id || '';
     const isSelected = selectedForCompare.has(pinId);
     const createdDate = fmtDate(p.created_at_pinterest);
+    const viralityRatio = saves > 0 ? ((repins / saves) * 100).toFixed(0) : '0';
+    const strategy = getPinStrategy(p);
+    const accountDisplay = p.account_username ? `@${p.account_username}` : p.board_name ? `@${p.board_name}` : 'account';
 
-    // Linked annotations for every chip
-    const tagsHtml = annotations.slice(0, 4).map((a: any) => {
+    const tagsHtml = annotations.slice(0, 3).map((a: any) => {
       const name = typeof a === 'string' ? a : a?.name || '';
       if (!name) return '';
-      let targetUrl = '';
-      if (typeof a === 'object' && a?.url) {
-        targetUrl = `https://www.pinterest.com${a.url.startsWith('/') ? a.url : '/' + a.url}`;
-      } else if (typeof a === 'object' && a?.idea_id) {
-        targetUrl = `https://www.pinterest.com/ideas/${encodeURIComponent(name)}/${a.idea_id}/`;
-      } else {
-        targetUrl = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(name)}`;
-      }
-
       return `
-        <a
-          href="${escapeHtml(targetUrl)}"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-1 text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-0.5 rounded-md font-medium truncate max-w-[130px] transition-colors"
-          title="${escapeHtml(name)} (Pinterest Idea)"
-        >
-          <span class="truncate">${escapeHtml(name)}</span>
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        </a>
+        <span class="inline-flex items-center text-[9.5px] bg-muted/80 text-muted-foreground px-2 py-0.5 rounded-md font-medium truncate max-w-[120px]" title="${escapeHtml(name)}">
+          #${escapeHtml(name)}
+        </span>
       `;
     }).join('');
 
-    const moreTagsCount = annotations.length > 4 ? annotations.length - 4 : 0;
+    const moreTagsCount = annotations.length > 3 ? annotations.length - 3 : 0;
 
     return `
-      <div class="group rounded-xl border border-border bg-card overflow-hidden shadow-sm hover:shadow-md hover:border-primary/40 transition-all flex flex-col justify-between relative">
-        <!-- Compare Checkbox -->
-        <div class="absolute top-2.5 right-2.5 z-20 bg-background/90 backdrop-blur-xs rounded-lg px-2 py-1 border border-border shadow-xs flex items-center gap-1.5">
+      <div class="group rounded-2xl border border-border bg-card overflow-hidden shadow-xs hover:shadow-md hover:border-primary/40 transition-all flex flex-col justify-between relative">
+        <!-- Top Overlays: Rank Badge + Compare Checkbox -->
+        <div class="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5">
+          ${renderRankBadge(index)}
+          <span class="inline-flex items-center gap-1 text-[9.5px] font-extrabold px-2 py-0.5 rounded-lg bg-emerald-500/90 text-white shadow-2xs backdrop-blur-xs font-mono">
+            +${fmtNumber(deltaVal)} <span class="text-[8.5px] opacity-90">${activeTimeframe}</span>
+          </span>
+        </div>
+
+        <div class="absolute top-2.5 right-2.5 z-20 bg-background/90 backdrop-blur-xs rounded-xl px-2 py-1 border border-border/80 shadow-2xs flex items-center gap-1.5">
           <input
             type="checkbox"
             data-pin-compare="${escapeHtml(pinId)}"
@@ -364,18 +977,18 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
             class="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer"
             id="compare-${escapeHtml(pinId)}"
           />
-          <label for="compare-${escapeHtml(pinId)}" class="text-[10px] font-semibold text-muted-foreground cursor-pointer select-none">Compare</label>
+          <label for="compare-${escapeHtml(pinId)}" class="text-[10px] font-bold text-muted-foreground cursor-pointer select-none">Select</label>
         </div>
 
         <div>
-          <!-- Image preview -->
-          <a href="/pinarchive/details?id=${encodeURIComponent(pinId)}" class="relative w-full h-44 bg-muted/50 overflow-hidden flex items-center justify-center block">
+          <!-- Image preview with hover zoom & Quick Peek Trigger -->
+          <div class="relative w-full h-44 bg-muted/50 overflow-hidden flex items-center justify-center block cursor-pointer group/img" data-peek-trigger="${escapeHtml(pinId)}">
             ${imageUrl ? `
               <img
                 src="${escapeHtml(imageUrl)}"
                 alt="${escapeHtml(p.title || 'Pinterest Pin')}"
                 loading="lazy"
-                class="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
+                class="w-full h-full object-cover object-center group-hover/img:scale-105 transition-transform duration-300"
                 onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');"
               />
               <div class="hidden absolute inset-0 flex items-center justify-center text-muted-foreground">
@@ -386,59 +999,65 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
               </div>
             `}
+            
+            <!-- Quick Peek Overlay Pill on Hover -->
+            <div class="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-2xs">
+              <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-background/90 text-foreground font-bold text-xs shadow-md border border-border">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                <span>Quick Peek</span>
+              </span>
+            </div>
+
             ${category ? `
-              <span class="absolute top-2.5 left-2.5 text-[10px] font-bold bg-background/90 backdrop-blur-xs text-foreground px-2 py-0.5 rounded-md shadow-xs max-w-[140px] truncate" title="${escapeHtml(category)}">
+              <span class="absolute bottom-2.5 left-2.5 text-[9.5px] font-bold bg-background/90 backdrop-blur-xs text-foreground px-2 py-0.5 rounded-lg shadow-2xs max-w-[150px] truncate border border-border/40" title="${escapeHtml(category)}">
                 ${escapeHtml(category)}
               </span>
             ` : ''}
-          </a>
+          </div>
 
-          <!-- Content -->
+          <!-- Card Body -->
           <div class="p-4 space-y-2.5">
             <div class="flex flex-wrap items-center gap-1.5">
-              ${renderStageBadge(p.stage)}
-              ${renderAnomalyBadge(p.anomaly)}
+              ${renderStrategyBadge(strategy)}
+              ${p.account_username ? `<span class="inline-flex items-center text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">@${escapeHtml(p.account_username)}</span>` : ''}
+              ${p.canonical_pin_id ? '<span class="text-[9.5px] font-bold px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-500 border border-purple-500/20">🧬 Cluster</span>' : ''}
             </div>
 
             <div>
-              <a href="/pinarchive/details?id=${encodeURIComponent(pinId)}" class="block group/link">
-                <h3 class="text-xs font-bold text-foreground line-clamp-2 group-hover/link:text-primary transition-colors" title="${escapeHtml(p.title || 'Untitled Pin')}">
-                  ${escapeHtml(p.title || `Pin ${p.pin_id}`)}
-                </h3>
-              </a>
-              <div class="text-[10px] text-muted-foreground mt-0.5">
-                Created: <span class="font-medium text-foreground">${createdDate}</span>
+              <h3
+                class="text-xs font-bold text-foreground line-clamp-2 hover:text-primary transition-colors cursor-pointer"
+                data-peek-trigger="${escapeHtml(pinId)}"
+                title="${escapeHtml(p.title || 'Untitled Pin')}"
+              >
+                ${escapeHtml(p.title || `Pin ${p.pin_id}`)}
+              </h3>
+              <div class="text-[10px] text-muted-foreground mt-1 flex items-center justify-between">
+                <span>Created: <strong class="text-foreground font-medium">${createdDate}</strong></span>
+                <span class="text-[10px] font-mono text-muted-foreground">VR: <strong class="text-foreground">${viralityRatio}%</strong></span>
               </div>
             </div>
 
-            <!-- Metrics Row (Full Numbers) -->
+            <!-- Metrics Grid -->
             <div class="grid grid-cols-3 gap-1.5 pt-1">
-              <div class="bg-muted/40 rounded-lg p-1.5 text-center border border-border/40">
-                <span class="text-[9px] text-muted-foreground uppercase block font-semibold">Saves</span>
-                <span class="text-xs font-bold text-rose-500">${fmtNumber(saves)}</span>
+              <div class="bg-muted/40 rounded-xl p-1.5 text-center border border-border/50">
+                <span class="text-[9px] text-muted-foreground uppercase block font-bold">Saves</span>
+                <span class="text-xs font-extrabold text-rose-500 font-mono">${fmtNumber(saves)}</span>
               </div>
-              <div class="bg-muted/40 rounded-lg p-1.5 text-center border border-border/40">
-                <span class="text-[9px] text-muted-foreground uppercase block font-semibold">Repins</span>
-                <span class="text-xs font-bold text-foreground">${fmtNumber(repins)}</span>
+              <div class="bg-muted/40 rounded-xl p-1.5 text-center border border-border/50">
+                <span class="text-[9px] text-muted-foreground uppercase block font-bold">Repins</span>
+                <span class="text-xs font-extrabold text-foreground font-mono">${fmtNumber(repins)}</span>
               </div>
-              <div class="bg-muted/40 rounded-lg p-1.5 text-center border border-border/40">
-                <span class="text-[9px] text-muted-foreground uppercase block font-semibold">Velocity</span>
-                <span class="text-xs font-bold text-emerald-500">${velocity.toFixed(1)}/d</span>
+              <div class="bg-muted/40 rounded-xl p-1.5 text-center border border-border/50">
+                <span class="text-[9px] text-muted-foreground uppercase block font-bold">Velocity</span>
+                <span class="text-xs font-extrabold text-emerald-500 font-mono">${velocity.toFixed(1)}/d</span>
               </div>
             </div>
 
-            <!-- Social & Tags -->
-            ${shares > 0 ? `
-              <div class="flex items-center gap-1 text-[10px] text-blue-500 font-medium">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                <span>${fmtNumber(shares)} shares</span>
-              </div>
-            ` : ''}
-
+            <!-- Compact Tag Row -->
             ${tagsHtml ? `
               <div class="flex flex-wrap items-center gap-1 pt-1">
                 ${tagsHtml}
-                ${moreTagsCount > 0 ? `<span class="text-[9px] text-muted-foreground font-semibold">+${moreTagsCount}</span>` : ''}
+                ${moreTagsCount > 0 ? `<span class="text-[9px] text-muted-foreground font-bold px-1">+${moreTagsCount}</span>` : ''}
               </div>
             ` : ''}
           </div>
@@ -446,15 +1065,15 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
 
         <!-- Footer link -->
         <div class="px-4 py-2.5 bg-muted/20 border-t border-border/60 flex items-center justify-between text-[11px] gap-2">
-          <span class="text-muted-foreground text-[10px] truncate max-w-[100px]">${p.board_name ? escapeHtml(p.board_name) : ''}</span>
+          <span class="text-muted-foreground text-[10.5px] truncate max-w-[110px] font-medium" title="${escapeHtml(accountDisplay)}">${escapeHtml(accountDisplay)}</span>
           <div class="flex items-center gap-2">
             ${destinationUrl ? `
-              <a href="${escapeHtml(destinationUrl)}" target="_blank" rel="noopener noreferrer nofollow" class="text-[10px] font-medium text-muted-foreground hover:text-foreground hover:underline">
-                Visit Site ↗
+              <a href="${escapeHtml(destinationUrl)}" target="_blank" rel="noopener noreferrer nofollow" class="text-[10.5px] font-medium text-muted-foreground hover:text-foreground hover:underline">
+                Site ↗
               </a>
             ` : ''}
-            <a href="${escapeHtml(pinterestUrl)}" target="_blank" rel="noopener noreferrer" class="font-semibold text-primary hover:underline inline-flex items-center gap-1">
-              <span>View on Pinterest</span>
+            <a href="${escapeHtml(pinterestUrl)}" target="_blank" rel="noopener noreferrer" class="font-bold text-primary hover:underline inline-flex items-center gap-1 text-[11px]">
+              <span>Pinterest</span>
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
             </a>
           </div>
@@ -463,33 +1082,343 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     `;
   }
 
-  function renderPins(pins: any[]) {
-    const grid = document.getElementById('winners-grid');
-    const badge = document.getElementById('winners-badge-count');
-    if (badge) badge.textContent = `${pins.length}`;
+  // ═══ Pro Data Table View ═══
+  function renderTableView(pagePins: any[], startIdx: number) {
+    const tbody = document.getElementById('winners-table-body');
+    const colLabel = document.getElementById('table-col-delta-label');
+    if (!tbody) return;
 
-    if (!grid) return;
+    if (colLabel) colLabel.textContent = `Δ Growth (${activeTimeframe.toUpperCase()})`;
 
-    if (pins.length === 0) {
-      grid.innerHTML = `
-        <div class="col-span-full py-12 text-center text-xs text-muted-foreground bg-muted/20 rounded-xl border border-dashed border-border">
-          No archived winning pins matched your active filters.
-        </div>
+    if (pagePins.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" class="py-12 text-center text-xs text-muted-foreground">
+            No archived winning pins matched your active filters.
+          </td>
+        </tr>
       `;
       return;
     }
 
-    grid.innerHTML = pins.map((p) => renderSinglePinCard(p)).join('');
-    attachCompareListeners();
+    tbody.innerHTML = pagePins.map((p, i) => {
+      const globalIdx = startIdx + i;
+      const saves = Number(p.saves || 0);
+      const repins = Number(p.repins || 0);
+      const velocity = Number(p.velocity || 0);
+      const deltaVal = getPinDeltaByActiveTimeframe(p);
+      const viralityRatio = saves > 0 ? ((repins / saves) * 100).toFixed(0) : '0';
+      const pinterestUrl = `https://www.pinterest.com/pin/${p.pin_id}/`;
+      const isSelected = selectedForCompare.has(p.id);
+      const strategy = getPinStrategy(p);
+      const accountDisplay = p.account_username ? `@${p.account_username}` : p.board_name || 'account';
+
+      return `
+        <tr class="hover:bg-muted/30 transition-colors group">
+          <!-- Rank -->
+          <td class="py-3 px-3 text-center font-bold text-muted-foreground font-mono">
+            ${renderRankBadge(globalIdx)}
+          </td>
+
+          <!-- Details & Image -->
+          <td class="py-3 px-3">
+            <div class="flex items-center gap-3">
+              <div class="h-11 w-11 rounded-xl bg-muted shrink-0 overflow-hidden border border-border cursor-pointer group-hover:border-primary/40 transition-colors" data-peek-trigger="${escapeHtml(p.id)}">
+                ${p.image_url ? `<img src="${escapeHtml(p.image_url)}" class="h-full w-full object-cover" />` : '<div class="h-full w-full bg-muted"></div>'}
+              </div>
+              <div class="min-w-0 max-w-sm">
+                <a
+                  href="javascript:void(0)"
+                  data-peek-trigger="${escapeHtml(p.id)}"
+                  class="font-bold text-foreground hover:text-primary transition-colors truncate block text-xs"
+                  title="${escapeHtml(p.title || 'Untitled Pin')}"
+                >
+                  ${escapeHtml(p.title || `Pin ${p.pin_id}`)}
+                </a>
+                <div class="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-2">
+                  <span>${fmtDate(p.created_at_pinterest)}</span>
+                  ${p.account_username ? `<span class="text-primary font-semibold">@${escapeHtml(p.account_username)}</span>` : ''}
+                  ${p.canonical_pin_id ? '<span class="text-purple-500 font-semibold font-mono">🧬 Cluster</span>' : ''}
+                </div>
+              </div>
+            </div>
+          </td>
+
+          <!-- Board -->
+          <td class="py-3 px-3">
+            <span class="inline-flex items-center gap-1 text-[11px] font-semibold text-foreground px-2 py-0.5 rounded-lg bg-muted/60 max-w-[140px] truncate" title="${escapeHtml(p.board_name)}">
+              @${escapeHtml(p.board_name || 'board')}
+            </span>
+          </td>
+
+          <!-- Strategy Matrix -->
+          <td class="py-3 px-3 text-center">
+            ${renderStrategyBadge(strategy)}
+          </td>
+
+          <!-- Delta Growth -->
+          <td class="py-3 px-3 text-right font-extrabold text-emerald-600 dark:text-emerald-400 font-mono text-xs">
+            +${fmtNumber(deltaVal)}
+          </td>
+
+          <!-- Saves -->
+          <td class="py-3 px-3 text-right font-extrabold text-rose-500 font-mono">
+            ${fmtNumber(saves)}
+          </td>
+
+          <!-- Velocity -->
+          <td class="py-3 px-3 text-right font-extrabold text-foreground font-mono">
+            ${velocity.toFixed(1)}/d
+          </td>
+
+          <!-- Virality -->
+          <td class="py-3 px-3 text-center">
+            <span class="inline-block text-[10px] font-bold px-2 py-0.5 rounded bg-muted font-mono">
+              ${viralityRatio}%
+            </span>
+          </td>
+
+          <!-- Actions -->
+          <td class="py-3 px-3 text-right">
+            <div class="flex items-center justify-end gap-1.5">
+              <button
+                type="button"
+                data-peek-trigger="${escapeHtml(p.id)}"
+                class="p-1.5 rounded-lg bg-muted/60 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                title="Quick Peek"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+              <a
+                href="${escapeHtml(pinterestUrl)}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="p-1.5 rounded-lg bg-muted/60 hover:bg-muted text-primary transition-colors inline-block"
+                title="Open on Pinterest"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+              <input
+                type="checkbox"
+                data-pin-compare="${escapeHtml(p.id)}"
+                ${isSelected ? 'checked' : ''}
+                class="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer ml-1"
+                title="Select for compare / bulk actions"
+              />
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    attachListeners();
   }
 
+  // ═══ Pagination Renderer ═══
+  function updatePaginationControls() {
+    const container = document.getElementById('pagination-controls-container');
+    const info = document.getElementById('pagination-info-text');
+    const rangeText = document.getElementById('winners-showing-range-text');
+    if (!container || !info) return;
+
+    const total = filteredPins.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
+
+    const start = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    const end = Math.min(currentPage * pageSize, total);
+
+    const txt = `Showing ${start} to ${end} of ${total} winning pins`;
+    info.textContent = txt;
+    if (rangeText) rangeText.textContent = txt;
+
+    if (totalPages <= 1) {
+      container.innerHTML = '';
+      return;
+    }
+
+    let buttonsHtml = `
+      <button
+        type="button"
+        data-page="1"
+        ${currentPage === 1 ? 'disabled class="opacity-40 cursor-not-allowed"' : 'class="cursor-pointer hover:bg-muted"'}
+        class="px-2.5 py-1 text-xs font-bold rounded-lg border border-border bg-background transition-all"
+        title="First page"
+      >
+        «
+      </button>
+      <button
+        type="button"
+        data-page="${currentPage - 1}"
+        ${currentPage === 1 ? 'disabled class="opacity-40 cursor-not-allowed"' : 'class="cursor-pointer hover:bg-muted"'}
+        class="px-2.5 py-1 text-xs font-bold rounded-lg border border-border bg-background transition-all"
+        title="Previous page"
+      >
+        ‹
+      </button>
+    `;
+
+    const startPage = Math.max(1, currentPage - 2);
+    const endPage = Math.min(totalPages, currentPage + 2);
+
+    for (let p = startPage; p <= endPage; p++) {
+      const isActive = p === currentPage;
+      buttonsHtml += `
+        <button
+          type="button"
+          data-page="${p}"
+          class="px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+            isActive
+              ? 'bg-primary text-primary-foreground shadow-xs'
+              : 'border border-border bg-background text-foreground hover:bg-muted'
+          }"
+        >
+          ${p}
+        </button>
+      `;
+    }
+
+    buttonsHtml += `
+      <button
+        type="button"
+        data-page="${currentPage + 1}"
+        ${currentPage === totalPages ? 'disabled class="opacity-40 cursor-not-allowed"' : 'class="cursor-pointer hover:bg-muted"'}
+        class="px-2.5 py-1 text-xs font-bold rounded-lg border border-border bg-background transition-all"
+        title="Next page"
+      >
+        ›
+      </button>
+      <button
+        type="button"
+        data-page="${totalPages}"
+        ${currentPage === totalPages ? 'disabled class="opacity-40 cursor-not-allowed"' : 'class="cursor-pointer hover:bg-muted"'}
+        class="px-2.5 py-1 text-xs font-bold rounded-lg border border-border bg-background transition-all"
+        title="Last page"
+      >
+        »
+      </button>
+    `;
+
+    container.innerHTML = buttonsHtml;
+
+    container.querySelectorAll<HTMLButtonElement>('[data-page]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const p = parseInt(btn.getAttribute('data-page') || '1', 10);
+        if (p >= 1 && p <= totalPages && p !== currentPage) {
+          currentPage = p;
+          renderActiveView();
+          window.scrollTo({ top: 400, behavior: 'smooth' });
+        }
+      });
+    });
+  }
+
+  // ═══ Multi-Sort Evaluator ═══
+  function sortPins(list: any[]) {
+    return [...list].sort((a, b) => {
+      const sA = Number(a.saves || 0);
+      const sB = Number(b.saves || 0);
+      const vA = Number(a.velocity || 0);
+      const vB = Number(b.velocity || 0);
+      const rA = Number(a.repins || 0);
+      const rB = Number(b.repins || 0);
+      const vrA = sA > 0 ? (rA / sA) * 100 : 0;
+      const vrB = sB > 0 ? (rB / sB) * 100 : 0;
+      const d24A = Number(a.delta_saves_24h ?? a.delta_saves ?? 0);
+      const d24B = Number(b.delta_saves_24h ?? b.delta_saves ?? 0);
+      const d3A = Number(a.delta_saves_3d ?? a.delta_saves ?? 0);
+      const d3B = Number(b.delta_saves_3d ?? b.delta_saves ?? 0);
+      const d7A = Number(a.delta_saves_7d ?? a.delta_saves ?? 0);
+      const d7B = Number(b.delta_saves_7d ?? b.delta_saves ?? 0);
+      const tA = new Date(a.created_at_pinterest || 0).getTime();
+      const tB = new Date(b.created_at_pinterest || 0).getTime();
+
+      switch (currentSort) {
+        case 'delta_24h_desc':
+        case 'delta_desc':
+          return d24B - d24A;
+        case 'delta_3d_desc':
+          return d3B - d3A;
+        case 'delta_7d_desc':
+          return d7B - d7A;
+        case 'saves_asc':
+          return sA - sB;
+        case 'velocity_desc':
+          return vB - vA;
+        case 'velocity_asc':
+          return vA - vB;
+        case 'repins_desc':
+          return rB - rA;
+        case 'virality_desc':
+          return vrB - vrA;
+        case 'newest':
+          return tB - tA;
+        case 'oldest':
+          return tA - tB;
+        case 'saves_desc':
+        default:
+          return sB - sA;
+      }
+    });
+  }
+
+  // ═══ Render Active View ═══
+  function renderActiveView() {
+    const total = filteredPins.length;
+    const startIdx = (currentPage - 1) * pageSize;
+    const pagePins = filteredPins.slice(startIdx, startIdx + pageSize);
+
+    const badge = document.getElementById('winners-badge-count');
+    if (badge) badge.textContent = `${total}`;
+
+    // Update Header Sort Icons
+    ['delta', 'saves', 'velocity', 'virality'].forEach((col) => {
+      const icon = document.getElementById(`sort-icon-${col}`);
+      if (icon) {
+        if (currentSort.startsWith(col)) {
+          icon.textContent = currentSort.endsWith('asc') ? '▲' : '▼';
+          icon.classList.add('text-primary');
+        } else {
+          icon.textContent = '↕';
+          icon.classList.remove('text-primary');
+        }
+      }
+    });
+
+    if (activeView === 'grid') {
+      const grid = document.getElementById('winners-grid');
+      if (grid) {
+        if (pagePins.length === 0) {
+          grid.innerHTML = `
+            <div class="col-span-full py-16 text-center text-xs text-muted-foreground bg-muted/20 rounded-2xl border border-dashed border-border">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 opacity-40 mx-auto mb-2 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              No archived winning pins matched your active filters.
+            </div>
+          `;
+        } else {
+          grid.innerHTML = pagePins.map((p, i) => renderSinglePinCard(p, startIdx + i)).join('');
+          attachListeners();
+        }
+      }
+    } else if (activeView === 'table') {
+      renderTableView(pagePins, startIdx);
+    } else if (activeView === 'board') {
+      renderByBoard(filteredPins);
+    } else if (activeView === 'clusters') {
+      renderCanonicalClusters(filteredPins);
+    }
+
+    updatePaginationControls();
+  }
+
+  // ═══ Render By Board View ═══
   function renderByBoard(pins: any[]) {
     const container = document.getElementById('by-board-container');
     if (!container) return;
 
     if (pins.length === 0) {
       container.innerHTML = `
-        <div class="py-12 text-center text-xs text-muted-foreground bg-muted/20 rounded-xl border border-dashed border-border">
+        <div class="py-12 text-center text-xs text-muted-foreground bg-muted/20 rounded-2xl border border-dashed border-border">
           No pins available to group by board.
         </div>
       `;
@@ -506,30 +1435,38 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     container.innerHTML = Object.entries(groups)
       .map(([boardName, boardPins]) => {
         const boardSaves = boardPins.reduce((acc, p) => acc + Number(p.saves || 0), 0);
+        const boardAvgVel = boardPins.reduce((acc, p) => acc + Number(p.velocity || 0), 0) / boardPins.length;
+
         return `
-          <div class="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4">
-            <div class="flex items-center justify-between border-b border-border/60 pb-3">
-              <div class="flex items-center gap-2">
-                <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <div class="rounded-2xl border border-border bg-card p-5 shadow-xs space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-border/60 pb-3 gap-2">
+              <div class="flex items-center gap-2.5">
+                <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
                 </span>
                 <div>
-                  <h3 class="text-sm font-bold text-foreground">${escapeHtml(boardName)}</h3>
-                  <span class="text-[11px] text-muted-foreground">${boardPins.length} pin${boardPins.length === 1 ? '' : 's'} · ${fmtNumber(boardSaves)} total saves</span>
+                  <h3 class="text-sm font-bold text-foreground">@${escapeHtml(boardName)}</h3>
+                  <span class="text-[11px] text-muted-foreground font-medium">${boardPins.length} winning pin${boardPins.length === 1 ? '' : 's'}</span>
                 </div>
+              </div>
+              <div class="flex items-center gap-3 text-xs">
+                <span class="text-rose-500 font-extrabold font-mono">${fmtNumber(boardSaves)} total saves</span>
+                <span class="text-border">|</span>
+                <span class="text-emerald-500 font-bold font-mono">avg ${boardAvgVel.toFixed(1)}/d</span>
               </div>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              ${boardPins.map((p) => renderSinglePinCard(p)).join('')}
+              ${boardPins.map((p, idx) => renderSinglePinCard(p, idx)).join('')}
             </div>
           </div>
         `;
       })
       .join('');
 
-    attachCompareListeners();
+    attachListeners();
   }
 
+  // ═══ Render Canonical Clusters View ═══
   function renderCanonicalClusters(pins: any[]) {
     const container = document.getElementById('canonical-container');
     const badge = document.getElementById('canonical-badge-count');
@@ -565,16 +1502,19 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
             const pinSaves = Number(p.saves || 0);
             const sharePct = clusterTotalSaves > 0 ? Math.round((pinSaves / clusterTotalSaves) * 100) : 0;
             return `
-              <li class="flex items-center justify-between py-1.5 px-3 text-xs rounded-lg hover:bg-muted/40 transition-colors">
-                <div class="flex items-center gap-2 min-w-0">
-                  <a href="/pinarchive/details?id=${encodeURIComponent(p.id)}" class="font-medium text-foreground hover:text-primary transition-colors truncate max-w-md">
+              <li class="flex items-center justify-between py-2 px-3 text-xs rounded-xl hover:bg-muted/40 transition-colors">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <div class="h-8 w-8 rounded-lg bg-muted overflow-hidden shrink-0 border border-border cursor-pointer" data-peek-trigger="${escapeHtml(p.id)}">
+                    ${p.image_url ? `<img src="${escapeHtml(p.image_url)}" class="h-full w-full object-cover" />` : ''}
+                  </div>
+                  <a href="javascript:void(0)" data-peek-trigger="${escapeHtml(p.id)}" class="font-bold text-foreground hover:text-primary transition-colors truncate max-w-md">
                     ${escapeHtml(p.title || `Pin ${p.pin_id}`)}
                   </a>
                   <span class="text-[10px] text-muted-foreground">(@${escapeHtml(p.board_name || 'board')})</span>
                 </div>
-                <div class="flex items-center gap-2 shrink-0 ml-2">
+                <div class="flex items-center gap-3 shrink-0 ml-2">
                   <span class="text-[10px] text-muted-foreground font-mono">(${sharePct}%)</span>
-                  <span class="font-bold text-rose-500">${fmtNumber(pinSaves)} saves</span>
+                  <span class="font-extrabold text-rose-500 font-mono">${fmtNumber(pinSaves)} saves</span>
                 </div>
               </li>
             `;
@@ -585,87 +1525,260 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
           <div class="p-5 hover:bg-muted/10 transition-colors">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
               <div class="flex items-center gap-2">
-                <span class="flex h-6 w-6 items-center justify-center rounded-md bg-purple-500/10 text-purple-500">
+                <span class="flex h-6 w-6 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
                 </span>
-                <span class="font-bold text-xs text-foreground font-mono">Canonical #${escapeHtml(canonicalId)}</span>
-                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-500">
-                  ${clusterPins.length} Pin Variations
+                <span class="font-extrabold text-xs text-foreground font-mono">Canonical #${escapeHtml(canonicalId)}</span>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-500 border border-purple-500/20">
+                  ${clusterPins.length} Variations
                 </span>
               </div>
               <span class="text-xs font-semibold text-muted-foreground">
-                Cluster Saves: <strong class="text-foreground">${fmtNumber(clusterTotalSaves)}</strong>
+                Cluster Total: <strong class="text-foreground font-extrabold font-mono">${fmtNumber(clusterTotalSaves)} saves</strong>
               </span>
             </div>
-            <ul class="space-y-0.5 bg-muted/20 rounded-xl p-2 border border-border/40">
+            <ul class="space-y-1 bg-muted/20 rounded-2xl p-2.5 border border-border/40">
               ${itemsList}
             </ul>
           </div>
         `;
       })
       .join('');
+
+    attachListeners();
   }
 
-  function populateBoardFilter(pins: any[]) {
-    const select = document.getElementById('filter-board-select') as HTMLSelectElement | null;
-    if (!select) return;
+  // ═══ Quick-Peek Drawer Logic & Forecast Projections ═══
+  async function openQuickPeek(pinId: string) {
+    const backdrop = document.getElementById('quick-peek-backdrop');
+    const drawer = document.getElementById('quick-peek-drawer');
+    const content = document.getElementById('quick-peek-content');
+    if (!backdrop || !drawer || !content) return;
 
-    const currentVal = select.value;
-    const boards = Array.from(new Set(pins.map((p) => p.board_name).filter(Boolean))).sort();
+    currentPeekIndex = filteredPins.findIndex((p) => p.id === pinId);
 
-    select.innerHTML = '<option value="">All Boards</option>' +
-      boards.map((b) => `<option value="${escapeHtml(b)}" ${b === currentVal ? 'selected' : ''}>${escapeHtml(b)}</option>`).join('');
-  }
-
-  async function loadPins() {
-    const searchInput = document.getElementById('filter-search-input') as HTMLInputElement | null;
-    const boardSelect = document.getElementById('filter-board-select') as HTMLSelectElement | null;
-    const stageSelect = document.getElementById('filter-stage-select') as HTMLSelectElement | null;
-    const clusterToggle = document.getElementById('filter-cluster-toggle') as HTMLInputElement | null;
-
-    const params = new URLSearchParams();
-    if (searchInput?.value) params.set('q', searchInput.value.trim());
-    if (boardSelect?.value) params.set('board', boardSelect.value);
-    if (stageSelect?.value) params.set('stage', stageSelect.value);
-    if (clusterToggle?.checked) params.set('in_cluster', '1');
-    params.set('sort', currentSort);
-    params.set('limit', String(currentLimit));
+    backdrop.classList.remove('hidden');
+    drawer.classList.remove('translate-x-full');
+    content.innerHTML = `
+      <div class="animate-pulse space-y-4 py-8">
+        <div class="h-64 bg-muted rounded-2xl"></div>
+        <div class="h-6 w-3/4 bg-muted rounded"></div>
+        <div class="h-20 bg-muted rounded-xl"></div>
+      </div>
+    `;
 
     try {
-      const res = await fetch(`/api/pinarchive/pins?${params.toString()}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await fetch(`/api/pinarchive/pin?id=${encodeURIComponent(pinId)}`, { signal: AbortSignal.timeout(8000) });
       const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'Failed to load pins');
+      if (!json.success || !json.pin) throw new Error(json.error || 'Failed to load pin data');
 
-      rawPins = json.pins || [];
+      const p = json.pin;
+      const metrics = Array.isArray(json.metrics) ? json.metrics : [];
+      const annotations = Array.isArray(p.annotations) ? p.annotations : [];
+      const pinterestUrl = `https://www.pinterest.com/pin/${p.pin_id}/`;
+      const destinationUrl = p.link || null;
+      const saves = Number(p.saves || 0);
+      const repins = Number(p.repins || 0);
+      const velocity = Number(p.velocity || 0);
+      const viralityRatio = saves > 0 ? ((repins / saves) * 100).toFixed(0) : '0';
+      const strategy = getPinStrategy(p);
 
-      // Populate Board select if not set
-      if (!boardSelect?.value) {
-        populateBoardFilter(rawPins);
-      }
+      const d24 = Number(p.delta_saves_24h ?? 0);
+      const d3d = Number(p.delta_saves_3d ?? 0);
+      const d7d = Number(p.delta_saves_7d ?? 0);
 
-      // Render based on active view
-      if (activeView === 'grid') {
-        renderPins(rawPins);
-      } else {
-        renderByBoard(rawPins);
-      }
+      const proj7d = Math.round(saves + velocity * 7);
+      const proj30d = Math.round(saves + velocity * 30);
 
-      renderCanonicalClusters(rawPins);
+      const tagsHtml = annotations.map((a: any) => {
+        const name = typeof a === 'string' ? a : a?.name || '';
+        if (!name) return '';
+        return `
+          <a
+            href="/pinarchive/topics?q=${encodeURIComponent(name)}"
+            class="inline-flex items-center gap-1 text-xs bg-primary/10 hover:bg-primary/20 text-primary px-2.5 py-1 rounded-xl font-semibold transition-colors"
+          >
+            <span>#${escapeHtml(name)}</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          </a>
+        `;
+      }).join('');
+
+      content.innerHTML = `
+        <!-- Image & Top Badges -->
+        <div class="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-muted/60 border border-border shadow-md group">
+          <img src="${escapeHtml(p.image_url)}" class="w-full h-full object-cover" />
+          <a href="${escapeHtml(p.image_url)}" target="_blank" rel="noopener noreferrer" class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white font-bold text-xs gap-1.5 backdrop-blur-xs">
+            <span>Open High-Resolution</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          </a>
+        </div>
+
+        <!-- Badges & Title -->
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center gap-1.5">
+            ${renderStrategyBadge(strategy)}
+            ${p.account_username ? `<span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">@${escapeHtml(p.account_username)}</span>` : ''}
+            <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-muted text-foreground border border-border">
+              @${escapeHtml(p.board_name || 'board')}
+            </span>
+            ${p.canonical_pin_id ? `<span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-500 border border-purple-500/20">Canonical #${escapeHtml(p.canonical_pin_id)}</span>` : ''}
+          </div>
+          <h2 class="text-base font-extrabold text-foreground leading-snug">${escapeHtml(p.title || `Pin ${p.pin_id}`)}</h2>
+          ${p.description ? `<p class="text-xs text-muted-foreground leading-relaxed line-clamp-3">${escapeHtml(p.description)}</p>` : ''}
+          <div class="text-[11px] text-muted-foreground pt-1">
+            Created on Pinterest: <strong class="text-foreground">${fmtDate(p.created_at_pinterest)}</strong>
+          </div>
+        </div>
+
+        <!-- Quick Copy Action Bar -->
+        <div class="flex flex-wrap items-center gap-2 pt-1">
+          <button id="drawer-copy-id-btn" type="button" class="inline-flex items-center gap-1.5 text-xs font-bold bg-muted/60 hover:bg-muted text-foreground px-3 py-1.5 rounded-xl border border-border shadow-2xs transition-all cursor-pointer">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            <span>Copy ID</span>
+          </button>
+          <button id="drawer-copy-url-btn" type="button" class="inline-flex items-center gap-1.5 text-xs font-bold bg-muted/60 hover:bg-muted text-foreground px-3 py-1.5 rounded-xl border border-border shadow-2xs transition-all cursor-pointer">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span>Copy Link</span>
+          </button>
+          <a href="/pinarchive/details?id=${encodeURIComponent(p.id)}" class="inline-flex items-center gap-1.5 text-xs font-bold bg-primary text-primary-foreground px-3.5 py-1.5 rounded-xl shadow-xs hover:bg-primary/90 transition-all ml-auto">
+            <span>Full Deep-Dive →</span>
+          </a>
+        </div>
+
+        <!-- 3-Pillar Delta Growth Cards (24h / 3d / 7d) -->
+        <div class="grid grid-cols-3 gap-2.5">
+          <div class="bg-emerald-500/10 rounded-2xl p-3 border border-emerald-500/20 text-center">
+            <span class="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 uppercase block">🔥 24h Saves</span>
+            <span class="text-base font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">+${fmtNumber(d24)}</span>
+          </div>
+          <div class="bg-emerald-500/10 rounded-2xl p-3 border border-emerald-500/20 text-center">
+            <span class="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 uppercase block">📈 3-Day Saves</span>
+            <span class="text-base font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">+${fmtNumber(d3d)}</span>
+          </div>
+          <div class="bg-emerald-500/10 rounded-2xl p-3 border border-emerald-500/20 text-center">
+            <span class="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 uppercase block">🗓️ 7-Day Saves</span>
+            <span class="text-base font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">+${fmtNumber(d7d)}</span>
+          </div>
+        </div>
+
+        <!-- 4-Grid Cumulative Metrics -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div class="bg-muted/30 rounded-2xl p-3 border border-border text-center">
+            <span class="text-[10px] font-bold text-muted-foreground uppercase block">Total Saves</span>
+            <span class="text-base font-extrabold text-rose-500 font-mono">${fmtNumber(p.saves)}</span>
+          </div>
+          <div class="bg-muted/30 rounded-2xl p-3 border border-border text-center">
+            <span class="text-[10px] font-bold text-muted-foreground uppercase block">Repins</span>
+            <span class="text-base font-extrabold text-foreground font-mono">${fmtNumber(p.repins)}</span>
+          </div>
+          <div class="bg-muted/30 rounded-2xl p-3 border border-border text-center">
+            <span class="text-[10px] font-bold text-muted-foreground uppercase block">Velocity</span>
+            <span class="text-base font-extrabold text-emerald-500 font-mono">${velocity.toFixed(1)}/d</span>
+          </div>
+          <div class="bg-muted/30 rounded-2xl p-3 border border-border text-center">
+            <span class="text-[10px] font-bold text-muted-foreground uppercase block">Virality Ratio</span>
+            <span class="text-base font-extrabold text-primary font-mono">${viralityRatio}%</span>
+          </div>
+        </div>
+
+        <!-- Growth Forecasting Box -->
+        <div class="p-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+              <span>📈 Growth Pace Forecast</span>
+            </span>
+            <span class="text-[10px] font-semibold text-muted-foreground">Based on ${velocity.toFixed(1)}/d pace</span>
+          </div>
+          <div class="grid grid-cols-2 gap-3 pt-1">
+            <div class="bg-background/80 rounded-xl p-2.5 border border-border/80 text-center">
+              <span class="text-[10px] text-muted-foreground block font-semibold">Projected in 7 Days</span>
+              <span class="text-sm font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">${fmtNumber(proj7d)}</span>
+              <span class="text-[9px] text-emerald-500 block font-bold mt-0.5">+${fmtNumber(Math.round(velocity * 7))} saves</span>
+            </div>
+            <div class="bg-background/80 rounded-xl p-2.5 border border-border/80 text-center">
+              <span class="text-[10px] text-muted-foreground block font-semibold">Projected in 30 Days</span>
+              <span class="text-sm font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">${fmtNumber(proj30d)}</span>
+              <span class="text-[9px] text-emerald-500 block font-bold mt-0.5">+${fmtNumber(Math.round(velocity * 30))} saves</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Trajectory Chart -->
+        <div class="space-y-2">
+          <span class="text-xs font-bold text-foreground block">Historical Growth Trajectory</span>
+          ${renderPinSvgChart(metrics, 'drawerGrad')}
+        </div>
+
+        <!-- Annotations Tags -->
+        ${tagsHtml ? `
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-foreground block">Pinterest SEO Annotations (${annotations.length})</span>
+              <a href="/pinarchive/topics" class="text-[10px] font-bold text-primary hover:underline">Explore Topics →</a>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5">
+              ${tagsHtml}
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- Outbound Link Details -->
+        ${destinationUrl ? `
+          <div class="p-3 bg-muted/30 rounded-xl border border-border text-xs flex items-center justify-between">
+            <span class="text-muted-foreground truncate max-w-xs">Destination: <strong class="text-foreground">${escapeHtml(destinationUrl)}</strong></span>
+            <a href="${escapeHtml(destinationUrl)}" target="_blank" rel="noopener noreferrer nofollow" class="text-primary font-bold hover:underline shrink-0 ml-2">Visit Site ↗</a>
+          </div>
+        ` : ''}
+      `;
+
+      // Copy listeners in drawer
+      document.getElementById('drawer-copy-id-btn')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(p.pin_id);
+        const btn = document.getElementById('drawer-copy-id-btn');
+        if (btn) btn.innerHTML = '<span>Copied!</span>';
+        setTimeout(() => { if (btn) btn.innerHTML = '<span>Copy ID</span>'; }, 1500);
+      });
+
+      document.getElementById('drawer-copy-url-btn')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(pinterestUrl);
+        const btn = document.getElementById('drawer-copy-url-btn');
+        if (btn) btn.innerHTML = '<span>Copied!</span>';
+        setTimeout(() => { if (btn) btn.innerHTML = '<span>Copy Link</span>'; }, 1500);
+      });
     } catch (e: any) {
-      console.error('Error loading PinArchive pins:', e);
+      content.innerHTML = `<div class="p-8 text-center text-xs text-rose-500 bg-rose-500/10 rounded-2xl border border-rose-500/20">${escapeHtml(e.message)}</div>`;
     }
   }
 
-  function attachCompareListeners() {
+  function closeQuickPeek() {
+    const backdrop = document.getElementById('quick-peek-backdrop');
+    const drawer = document.getElementById('quick-peek-drawer');
+    if (backdrop) backdrop.classList.add('hidden');
+    if (drawer) drawer.classList.add('translate-x-full');
+  }
+
+  // ═══ Attach Click & Checkbox Listeners ═══
+  function attachListeners() {
+    // Quick Peek Triggers
+    document.querySelectorAll<HTMLElement>('[data-peek-trigger]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = el.getAttribute('data-peek-trigger');
+        if (id) openQuickPeek(id);
+      });
+    });
+
+    // Compare Checkboxes
     document.querySelectorAll<HTMLInputElement>('[data-pin-compare]').forEach((cb) => {
-      cb.addEventListener('change', () => {
+      cb.addEventListener('change', (e) => {
+        e.stopPropagation();
         const id = cb.getAttribute('data-pin-compare');
         if (!id) return;
         if (cb.checked) {
-          if (selectedForCompare.size >= 2) {
+          if (selectedForCompare.size >= 4) {
             cb.checked = false;
-            alert('You can select a maximum of 2 pins for side-by-side comparison.');
+            alert('You can select a maximum of 4 pins simultaneously for comparison / AI prompt generation.');
             return;
           }
           selectedForCompare.add(id);
@@ -684,24 +1797,25 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
 
     if (selectedForCompare.size > 0) {
       bar.classList.remove('hidden');
-      text.textContent = `${selectedForCompare.size} of 2 Pins Selected`;
+      text.textContent = `${selectedForCompare.size} of 4 Pins Selected`;
     } else {
       bar.classList.add('hidden');
     }
   }
 
+  // ═══ SVG Growth Trajectory Chart ═══
   function renderPinSvgChart(metrics: any[], gradId: string): string {
     if (!Array.isArray(metrics) || metrics.length === 0) {
-      return '<div class="h-44 flex items-center justify-center text-xs text-muted-foreground bg-muted/10 rounded-xl border border-dashed border-border/80">No historical snapshots recorded yet</div>';
+      return '<div class="h-44 flex items-center justify-center text-xs text-muted-foreground bg-muted/10 rounded-2xl border border-dashed border-border/80">No historical snapshots recorded yet</div>';
     }
 
     if (metrics.length === 1) {
       const m = metrics[0];
       return `
-        <div class="h-44 flex flex-col items-center justify-center text-xs text-muted-foreground bg-muted/10 rounded-xl border border-dashed border-border/80 p-4 text-center">
-          <span class="font-semibold text-foreground mb-1">1 Snapshot Recorded</span>
+        <div class="h-44 flex flex-col items-center justify-center text-xs text-muted-foreground bg-muted/10 rounded-2xl border border-dashed border-border/80 p-4 text-center">
+          <span class="font-bold text-foreground mb-1">1 Snapshot Recorded</span>
           <span>${fmtDate(m.recorded_at)}: ${fmtNumber(m.saves)} saves · ${fmtNumber(m.repins)} repins</span>
-          <span class="text-[10px] text-muted-foreground mt-1">Refresh cycle will plot trajectory curve</span>
+          <span class="text-[10px] text-muted-foreground mt-1">Subsequent refresh cycles will plot the growth curve</span>
         </div>
       `;
     }
@@ -735,7 +1849,7 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     const gridY3 = padY;
 
     return `
-      <div class="h-48 w-full bg-card rounded-xl border border-border/60 p-2">
+      <div class="h-48 w-full bg-card rounded-2xl border border-border/60 p-2 shadow-2xs">
         <svg width="100%" height="100%" viewBox="0 0 ${width} ${height}" class="overflow-visible" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
@@ -750,9 +1864,9 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
           <line x1="${padX}" y1="${gridY3}" x2="${width - padX}" y2="${gridY3}" stroke="currentColor" class="text-border" stroke-dasharray="4 4" stroke-width="1" />
 
           <!-- Y Axis Labels -->
-          <text x="${padX - 6}" y="${gridY1}" text-anchor="end" class="fill-muted-foreground text-[9px]" dominant-baseline="middle">${fmtCompact(minVal)}</text>
-          <text x="${padX - 6}" y="${gridY2}" text-anchor="end" class="fill-muted-foreground text-[9px]" dominant-baseline="middle">${fmtCompact(Math.round(maxVal / 2))}</text>
-          <text x="${padX - 6}" y="${gridY3}" text-anchor="end" class="fill-muted-foreground text-[9px]" dominant-baseline="middle">${fmtCompact(maxVal)}</text>
+          <text x="${padX - 6}" y="${gridY1}" text-anchor="end" class="fill-muted-foreground text-[9px] font-mono" dominant-baseline="middle">${fmtCompact(minVal)}</text>
+          <text x="${padX - 6}" y="${gridY2}" text-anchor="end" class="fill-muted-foreground text-[9px] font-mono" dominant-baseline="middle">${fmtCompact(Math.round(maxVal / 2))}</text>
+          <text x="${padX - 6}" y="${gridY3}" text-anchor="end" class="fill-muted-foreground text-[9px] font-mono" dominant-baseline="middle">${fmtCompact(maxVal)}</text>
 
           <!-- Area Fill -->
           <path d="${savesArea}" fill="url(#${gradId})" />
@@ -784,6 +1898,53 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     `;
   }
 
+  // ═══ AI Prompt Generation Logic ═══
+  function generateAIPrompt(pinsToUse?: any[]) {
+    const list = pinsToUse && pinsToUse.length > 0 ? pinsToUse : selectedForCompare.size > 0 ? rawPins.filter((p) => selectedForCompare.has(p.id)) : filteredPins.slice(0, 10);
+
+    if (list.length === 0) {
+      alert('No winning pins available to generate prompt.');
+      return;
+    }
+
+    const titles = list.map((p) => `- ${p.title || `Pin ${p.pin_id}`} (@${p.account_username || p.board_name || 'account'} | ${fmtNumber(p.saves)} saves | +${fmtNumber(getPinDeltaByActiveTimeframe(p))} in ${activeTimeframe})`).join('\n');
+
+    const tagSet = new Set<string>();
+    list.forEach((p) => {
+      if (Array.isArray(p.annotations)) {
+        p.annotations.forEach((a: any) => {
+          const name = typeof a === 'string' ? a : a?.name || '';
+          if (name) tagSet.add(name);
+        });
+      }
+    });
+
+    const tagsStr = Array.from(tagSet).slice(0, 12).join(', ');
+
+    const promptText = `Act as an elite Pinterest growth and content strategist.
+Analyze these high-velocity winning pins from our top performing archive:
+
+TOP WINNING PINS:
+${titles}
+
+HIGH-IMPACT KEYWORDS & TOPIC CLUSTERS:
+${tagsStr || 'N/A'}
+
+TASK:
+1. Extract the core psychological hook and winning title formula behind these pins.
+2. Generate 10 brand-new viral pin title variations optimized for high CTR and saves.
+3. Write 3 high-converting Pinterest pin descriptions incorporating the top keywords naturally.
+4. Suggest 3 visual concept angles (image composition, text overlay placement, color palette) to replicate this success.`;
+
+    const modal = document.getElementById('ai-prompt-modal');
+    const textarea = document.getElementById('ai-prompt-textarea') as HTMLTextAreaElement | null;
+    if (modal && textarea) {
+      textarea.value = promptText;
+      modal.classList.remove('hidden');
+    }
+  }
+
+  // ═══ Compare Modal Dialog (Up to 4 Pins) ═══
   async function openCompareModal() {
     const modal = document.getElementById('compare-modal');
     const content = document.getElementById('compare-modal-content');
@@ -794,120 +1955,198 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
 
     const ids = Array.from(selectedForCompare);
     try {
-      const [resA, resB] = await Promise.all([
-        fetch(`/api/pinarchive/pin?id=${encodeURIComponent(ids[0])}`).then((r) => r.json()),
-        fetch(`/api/pinarchive/pin?id=${encodeURIComponent(ids[1])}`).then((r) => r.json()),
-      ]);
+      const pinPromises = ids.map((id) => fetch(`/api/pinarchive/pin?id=${encodeURIComponent(id)}`).then((r) => r.json()));
+      const results = await Promise.all(pinPromises);
 
-      if (!resA.success || !resB.success) throw new Error('Could not fetch one of the compared pins.');
+      const validPins = results.filter((r) => r.success && r.pin);
+      if (validPins.length < 2) throw new Error('Could not fetch selected pins for comparison.');
 
-      const pinA = resA.pin;
-      const pinB = resB.pin;
-      const metricsA = Array.isArray(resA.metrics) ? resA.metrics : [];
-      const metricsB = Array.isArray(resB.metrics) ? resB.metrics : [];
+      const cols = validPins.length >= 3 ? (validPins.length === 4 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 md:grid-cols-3') : 'grid-cols-1 md:grid-cols-2';
 
       content.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <!-- Pin A -->
-          <div class="rounded-xl border border-border bg-card p-4 space-y-4">
-            <div class="flex items-center gap-3">
-              <img src="${escapeHtml(pinA.image_url)}" class="h-16 w-16 object-cover rounded-lg border border-border" />
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-1 mb-1">
-                  ${renderStageBadge(pinA.stage)}
-                  ${renderAnomalyBadge(pinA.anomaly)}
+        <div class="grid ${cols} gap-4">
+          ${validPins
+            .map((res, i) => {
+              const p = res.pin;
+              const m = Array.isArray(res.metrics) ? res.metrics : [];
+              const st = getPinStrategy(p);
+              const d24 = Number(p.delta_saves_24h ?? p.delta_saves ?? 0);
+              return `
+                <div class="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-xs">
+                  <div class="flex items-center gap-3">
+                    <img src="${escapeHtml(p.image_url)}" class="h-14 w-14 object-cover rounded-xl border border-border" />
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1 mb-1">
+                        ${renderStrategyBadge(st)}
+                      </div>
+                      <h4 class="text-xs font-bold text-foreground line-clamp-1">${escapeHtml(p.title || `Pin ${i + 1}`)}</h4>
+                      <span class="text-[10px] text-muted-foreground">@${escapeHtml(p.account_username || p.board_name || 'account')}</span>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-3 gap-1.5 pt-2 border-t border-border text-center">
+                    <div class="bg-emerald-500/10 p-2 rounded-xl border border-emerald-500/20">
+                      <span class="text-[9px] font-bold text-emerald-700 dark:text-emerald-300 block">24h Growth</span>
+                      <span class="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">+${fmtNumber(d24)}</span>
+                    </div>
+                    <div class="bg-muted/30 p-2 rounded-xl">
+                      <span class="text-[9px] font-bold text-muted-foreground block">Total Saves</span>
+                      <span class="text-xs font-extrabold text-rose-500 font-mono">${fmtNumber(p.saves)}</span>
+                    </div>
+                    <div class="bg-muted/30 p-2 rounded-xl">
+                      <span class="text-[9px] font-bold text-muted-foreground block">Velocity</span>
+                      <span class="text-xs font-extrabold text-foreground font-mono">${Number(p.velocity || 0).toFixed(1)}/d</span>
+                    </div>
+                  </div>
+                  <div class="space-y-1 pt-1">
+                    <span class="text-[10px] font-bold text-muted-foreground block">Trajectory</span>
+                    ${renderPinSvgChart(m, `compareGrad${i}`)}
+                  </div>
                 </div>
-                <h4 class="text-xs font-bold text-foreground line-clamp-1">${escapeHtml(pinA.title || 'Pin A')}</h4>
-                <span class="text-[10px] text-muted-foreground">@${escapeHtml(pinA.board_name || 'board')}</span>
-              </div>
-            </div>
-            <div class="grid grid-cols-3 gap-2 pt-2 border-t border-border text-center">
-              <div class="bg-muted/30 p-2 rounded-lg">
-                <span class="text-[10px] text-muted-foreground block">Saves</span>
-                <span class="text-sm font-bold text-rose-500">${fmtNumber(pinA.saves)}</span>
-              </div>
-              <div class="bg-muted/30 p-2 rounded-lg">
-                <span class="text-[10px] text-muted-foreground block">Repins</span>
-                <span class="text-sm font-bold text-foreground">${fmtNumber(pinA.repins)}</span>
-              </div>
-              <div class="bg-muted/30 p-2 rounded-lg">
-                <span class="text-[10px] text-muted-foreground block">Velocity</span>
-                <span class="text-sm font-bold text-emerald-500">${Number(pinA.velocity || 0).toFixed(1)}/d</span>
-              </div>
-            </div>
-            <!-- Trajectory Chart A -->
-            <div class="space-y-1.5 pt-2 border-t border-border">
-              <span class="text-[11px] font-bold text-foreground block">Historical Growth Trajectory</span>
-              ${renderPinSvgChart(metricsA, 'compareGradA')}
-            </div>
-          </div>
-
-          <!-- Pin B -->
-          <div class="rounded-xl border border-border bg-card p-4 space-y-4">
-            <div class="flex items-center gap-3">
-              <img src="${escapeHtml(pinB.image_url)}" class="h-16 w-16 object-cover rounded-lg border border-border" />
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-1 mb-1">
-                  ${renderStageBadge(pinB.stage)}
-                  ${renderAnomalyBadge(pinB.anomaly)}
-                </div>
-                <h4 class="text-xs font-bold text-foreground line-clamp-1">${escapeHtml(pinB.title || 'Pin B')}</h4>
-                <span class="text-[10px] text-muted-foreground">@${escapeHtml(pinB.board_name || 'board')}</span>
-              </div>
-            </div>
-            <div class="grid grid-cols-3 gap-2 pt-2 border-t border-border text-center">
-              <div class="bg-muted/30 p-2 rounded-lg">
-                <span class="text-[10px] text-muted-foreground block">Saves</span>
-                <span class="text-sm font-bold text-rose-500">${fmtNumber(pinB.saves)}</span>
-              </div>
-              <div class="bg-muted/30 p-2 rounded-lg">
-                <span class="text-[10px] text-muted-foreground block">Repins</span>
-                <span class="text-sm font-bold text-foreground">${fmtNumber(pinB.repins)}</span>
-              </div>
-              <div class="bg-muted/30 p-2 rounded-lg">
-                <span class="text-[10px] text-muted-foreground block">Velocity</span>
-                <span class="text-sm font-bold text-emerald-500">${Number(pinB.velocity || 0).toFixed(1)}/d</span>
-              </div>
-            </div>
-            <!-- Trajectory Chart B -->
-            <div class="space-y-1.5 pt-2 border-t border-border">
-              <span class="text-[11px] font-bold text-foreground block">Historical Growth Trajectory</span>
-              ${renderPinSvgChart(metricsB, 'compareGradB')}
-            </div>
-          </div>
+              `;
+            })
+            .join('')}
         </div>
       `;
     } catch (err: any) {
-      content.innerHTML = `<div class="p-6 text-center text-xs text-rose-500">Failed to render comparison: ${escapeHtml(err.message)}</div>`;
+      content.innerHTML = `<div class="p-6 text-center text-xs text-rose-500">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  // ═══ Apply Filters, Sort, and Keyword Mining ═══
+  function applyActiveFilters() {
+    let result = [...rawPins];
+
+    const accountSelect = document.getElementById('filter-account-select') as HTMLSelectElement | null;
+    if (accountSelect && accountSelect.value) {
+      result = result.filter((p) => p.account_id === accountSelect.value || p.account_username === accountSelect.value);
+    }
+
+    // Quick Matrix Slicing
+    if (activeQuickFilter === 'evergreen') {
+      result = result.filter((p) => getPinStrategy(p) === 'EVERGREEN');
+    } else if (activeQuickFilter === 'rocket') {
+      result = result.filter((p) => getPinStrategy(p) === 'ROCKET');
+    } else if (activeQuickFilter === 'spike') {
+      result = result.filter((p) => p.anomaly === 'SPIKE');
+    } else if (activeQuickFilter === 'cluster') {
+      result = result.filter((p) => Boolean(p.canonical_pin_id));
+    }
+
+    filteredPins = sortPins(result);
+    currentPage = 1;
+
+    updateExecutiveKPIs(filteredPins);
+    updateKeywordMining(filteredPins);
+    renderActiveView();
+  }
+
+  function populateAccountFilter(accounts: any[]) {
+    const select = document.getElementById('filter-account-select') as HTMLSelectElement | null;
+    if (!select) return;
+
+    const currentVal = select.value;
+    select.innerHTML = '<option value="">All Accounts</option>' +
+      accounts.map((acc) => `<option value="${escapeHtml(acc.id)}" ${acc.id === currentVal ? 'selected' : ''}>@${escapeHtml(acc.username)}</option>`).join('');
+  }
+
+  function populateBoardFilter(pins: any[]) {
+    const select = document.getElementById('filter-board-select') as HTMLSelectElement | null;
+    if (!select) return;
+
+    const currentVal = select.value;
+    const boards = Array.from(new Set(pins.map((p) => p.board_name).filter(Boolean))).sort();
+
+    select.innerHTML = '<option value="">All Boards</option>' +
+      boards.map((b) => `<option value="${escapeHtml(b)}" ${b === currentVal ? 'selected' : ''}>${escapeHtml(b)}</option>`).join('');
+  }
+
+  async function loadPins(retries = 2) {
+    const searchInput = document.getElementById('filter-search-input') as HTMLInputElement | null;
+    const accountSelect = document.getElementById('filter-account-select') as HTMLSelectElement | null;
+    const boardSelect = document.getElementById('filter-board-select') as HTMLSelectElement | null;
+    const stageSelect = document.getElementById('filter-stage-select') as HTMLSelectElement | null;
+    const clusterToggle = document.getElementById('filter-cluster-toggle') as HTMLInputElement | null;
+
+    const params = new URLSearchParams();
+    if (searchInput?.value) params.set('q', searchInput.value.trim());
+    if (accountSelect?.value) params.set('account_id', accountSelect.value);
+    if (boardSelect?.value) params.set('board', boardSelect.value);
+    if (stageSelect?.value) params.set('stage', stageSelect.value);
+    if (clusterToggle?.checked) params.set('in_cluster', '1');
+    params.set('sort', currentSort.startsWith('velocity') ? 'velocity' : 'saves');
+    params.set('limit', '500');
+
+    try {
+      const res = await fetch(`/api/pinarchive/pins?${params.toString()}`, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed to load pins');
+
+      rawPins = json.pins || [];
+      rawAccounts = json.accounts || [];
+
+      if (!accountSelect?.value) {
+        populateAccountFilter(rawAccounts);
+      }
+
+      if (!boardSelect?.value) {
+        populateBoardFilter(rawPins);
+      }
+
+      applyActiveFilters();
+    } catch (e: any) {
+      if (retries > 0) {
+        setTimeout(() => loadPins(retries - 1), 1500);
+        return;
+      }
+      console.error('Error loading PinArchive pins:', e);
+      const grid = document.getElementById('winners-grid');
+      if (grid) {
+        grid.innerHTML = `
+          <div class="col-span-full py-12 text-center text-xs text-rose-500 bg-rose-500/10 rounded-2xl border border-rose-500/20 p-6">
+            Failed to load winning pins. <button id="retry-load-pins-btn" class="underline font-bold cursor-pointer ml-1">Retry</button>
+          </div>
+        `;
+        document.getElementById('retry-load-pins-btn')?.addEventListener('click', () => loadPins(2));
+      }
     }
   }
 
   function exportCSV() {
-    if (!rawPins.length) {
-      alert('No pins available in the current view to export.');
+    if (!filteredPins.length) {
+      alert('No pins available in the current filtered view to export.');
       return;
     }
 
-    const headers = ['Pin ID', 'Title', 'Board', 'Saves', 'Repins', 'Velocity', 'Stage', 'Anomaly', 'Pinterest Link', 'Created At'];
-    const rows = rawPins.map((p) => [
-      p.pin_id,
-      `"${(p.title || '').replace(/"/g, '""')}"`,
-      `"${(p.board_name || '').replace(/"/g, '""')}"`,
-      p.saves || 0,
-      p.repins || 0,
-      p.velocity || 0,
-      p.stage || 'DORMANT',
-      p.anomaly || 'NONE',
-      `"https://www.pinterest.com/pin/${p.pin_id}/"`,
-      p.created_at_pinterest || '',
-    ]);
+    const headers = ['Pin ID', 'Title', 'Account', 'Board', 'Strategy Matrix', '24h Growth', '3d Growth', '7d Growth', 'Total Saves', 'Repins', 'Velocity', 'Virality %', 'Pinterest Link', 'Created At'];
+    const rows = filteredPins.map((p) => {
+      const saves = Number(p.saves || 0);
+      const repins = Number(p.repins || 0);
+      const virality = saves > 0 ? ((repins / saves) * 100).toFixed(0) : '0';
+      return [
+        p.pin_id,
+        `"${(p.title || '').replace(/"/g, '""')}"`,
+        `"${(p.account_username || '').replace(/"/g, '""')}"`,
+        `"${(p.board_name || '').replace(/"/g, '""')}"`,
+        getPinStrategy(p),
+        Number(p.delta_saves_24h || 0),
+        Number(p.delta_saves_3d || 0),
+        Number(p.delta_saves_7d || 0),
+        saves,
+        repins,
+        p.velocity || 0,
+        virality,
+        `"https://www.pinterest.com/pin/${p.pin_id}/"`,
+        p.created_at_pinterest || '',
+      ];
+    });
 
     const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `pinarchive-winning-pins-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `pinarchive-delta-growth-${activeTimeframe}-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -917,34 +2156,79 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
   function init() {
     loadPins();
 
-    // View switcher
+    // Growth Timeframe Slicer Pills (24h / 3d / 7d / all)
+    document.querySelectorAll<HTMLButtonElement>('[data-timeframe]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        activeTimeframe = (btn.getAttribute('data-timeframe') || '24h') as any;
+        document.querySelectorAll<HTMLButtonElement>('[data-timeframe]').forEach((b) => {
+          b.className = 'timeframe-pill px-3 py-1.5 rounded-xl text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0';
+        });
+        btn.className = 'timeframe-pill px-3 py-1.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground shadow-2xs transition-all cursor-pointer shrink-0';
+
+        // Auto align sort
+        if (activeTimeframe === '24h') currentSort = 'delta_24h_desc';
+        else if (activeTimeframe === '3d') currentSort = 'delta_3d_desc';
+        else if (activeTimeframe === '7d') currentSort = 'delta_7d_desc';
+        else currentSort = 'saves_desc';
+
+        const sortSelect = document.getElementById('pins-sort-select') as HTMLSelectElement | null;
+        if (sortSelect) sortSelect.value = currentSort;
+
+        applyActiveFilters();
+      });
+    });
+
+    // View Switcher Buttons
     const gridBtn = document.getElementById('view-grid-btn');
+    const tableBtn = document.getElementById('view-table-btn');
     const boardBtn = document.getElementById('view-board-btn');
+    const clustersBtn = document.getElementById('view-clusters-btn');
+
     const winnersGrid = document.getElementById('winners-grid');
+    const tableContainer = document.getElementById('winners-table-container');
     const byBoardContainer = document.getElementById('by-board-container');
+    const clustersContainer = document.getElementById('clusters-view-container');
+    const paginationWrapper = document.getElementById('pagination-wrapper');
 
-    if (gridBtn && boardBtn && winnersGrid && byBoardContainer) {
-      gridBtn.addEventListener('click', () => {
-        activeView = 'grid';
-        gridBtn.className = 'px-2.5 py-1 text-xs font-semibold rounded-lg bg-primary text-primary-foreground shadow-xs transition-all cursor-pointer';
-        boardBtn.className = 'px-2.5 py-1 text-xs font-semibold rounded-lg text-muted-foreground hover:text-foreground transition-all cursor-pointer';
-        winnersGrid.classList.remove('hidden');
-        byBoardContainer.classList.add('hidden');
-        renderPins(rawPins);
-      });
+    function setActiveView(v: 'grid' | 'table' | 'board' | 'clusters') {
+      activeView = v;
+      const activeCls = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-primary text-primary-foreground shadow-xs transition-all cursor-pointer';
+      const inactiveCls = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-muted-foreground hover:text-foreground transition-all cursor-pointer';
 
-      boardBtn.addEventListener('click', () => {
-        activeView = 'board';
-        boardBtn.className = 'px-2.5 py-1 text-xs font-semibold rounded-lg bg-primary text-primary-foreground shadow-xs transition-all cursor-pointer';
-        gridBtn.className = 'px-2.5 py-1 text-xs font-semibold rounded-lg text-muted-foreground hover:text-foreground transition-all cursor-pointer';
-        winnersGrid.classList.add('hidden');
-        byBoardContainer.classList.remove('hidden');
-        renderByBoard(rawPins);
-      });
+      if (gridBtn) gridBtn.className = v === 'grid' ? activeCls : inactiveCls;
+      if (tableBtn) tableBtn.className = v === 'table' ? activeCls : inactiveCls;
+      if (boardBtn) boardBtn.className = v === 'board' ? activeCls : inactiveCls;
+      if (clustersBtn) clustersBtn.className = v === 'clusters' ? activeCls : inactiveCls;
+
+      winnersGrid?.classList.toggle('hidden', v !== 'grid');
+      tableContainer?.classList.toggle('hidden', v !== 'table');
+      byBoardContainer?.classList.toggle('hidden', v !== 'board');
+      clustersContainer?.classList.toggle('hidden', v !== 'clusters');
+      paginationWrapper?.classList.toggle('hidden', v === 'board' || v === 'clusters');
+
+      renderActiveView();
     }
+
+    gridBtn?.addEventListener('click', () => setActiveView('grid'));
+    tableBtn?.addEventListener('click', () => setActiveView('table'));
+    boardBtn?.addEventListener('click', () => setActiveView('board'));
+    clustersBtn?.addEventListener('click', () => setActiveView('clusters'));
+
+    // Quick Matrix Slicer Pills
+    document.querySelectorAll<HTMLButtonElement>('[data-quick-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        activeQuickFilter = btn.getAttribute('data-quick-filter') || 'all';
+        document.querySelectorAll<HTMLButtonElement>('[data-quick-filter]').forEach((b) => {
+          b.className = 'quick-pill px-2.5 py-1 rounded-lg text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0';
+        });
+        btn.className = 'quick-pill active px-2.5 py-1 rounded-lg text-xs font-bold bg-muted text-foreground transition-all cursor-pointer shrink-0';
+        applyActiveFilters();
+      });
+    });
 
     // Filter controls
     const searchInput = document.getElementById('filter-search-input');
+    const accountSelect = document.getElementById('filter-account-select');
     const boardSelect = document.getElementById('filter-board-select');
     const stageSelect = document.getElementById('filter-stage-select');
     const clusterToggle = document.getElementById('filter-cluster-toggle');
@@ -960,6 +2244,7 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
       });
     }
 
+    if (accountSelect) accountSelect.addEventListener('change', () => applyActiveFilters());
     if (boardSelect) boardSelect.addEventListener('change', loadPins);
     if (stageSelect) stageSelect.addEventListener('change', loadPins);
     if (clusterToggle) clusterToggle.addEventListener('change', loadPins);
@@ -967,9 +2252,18 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     if (clearBtn) {
       clearBtn.addEventListener('click', () => {
         if (searchInput) (searchInput as HTMLInputElement).value = '';
+        if (accountSelect) (accountSelect as HTMLSelectElement).value = '';
         if (boardSelect) (boardSelect as HTMLSelectElement).value = '';
         if (stageSelect) (stageSelect as HTMLSelectElement).value = '';
         if (clusterToggle) (clusterToggle as HTMLInputElement).checked = false;
+        activeQuickFilter = 'all';
+        activeTimeframe = '24h';
+        currentSort = 'delta_24h_desc';
+        document.querySelectorAll<HTMLButtonElement>('[data-timeframe]').forEach((b) => {
+          b.className = b.getAttribute('data-timeframe') === '24h'
+            ? 'timeframe-pill px-3 py-1.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground shadow-2xs transition-all cursor-pointer shrink-0'
+            : 'timeframe-pill px-3 py-1.5 rounded-xl text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0';
+        });
         loadPins();
       });
     }
@@ -980,24 +2274,92 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
         e.preventDefault();
         searchInput?.focus();
       }
+      if (e.key === 'Escape') {
+        closeQuickPeek();
+        document.getElementById('compare-modal')?.classList.add('hidden');
+        document.getElementById('ai-prompt-modal')?.classList.add('hidden');
+      }
     });
 
-    // Sort & Limit
+    // Sort & Limit Selectors
     const sortSelect = document.getElementById('pins-sort-select') as HTMLSelectElement | null;
     if (sortSelect) {
       sortSelect.addEventListener('change', () => {
         currentSort = sortSelect.value;
-        loadPins();
+        filteredPins = sortPins(filteredPins);
+        currentPage = 1;
+        renderActiveView();
       });
     }
 
     const limitSelect = document.getElementById('pins-limit-select') as HTMLSelectElement | null;
     if (limitSelect) {
       limitSelect.addEventListener('change', () => {
-        currentLimit = parseInt(limitSelect.value, 10) || 50;
-        loadPins();
+        pageSize = parseInt(limitSelect.value, 10) || 24;
+        currentPage = 1;
+        renderActiveView();
       });
     }
+
+    // Table Column Sort Headers
+    document.querySelectorAll<HTMLElement>('.table-sort-header').forEach((th) => {
+      th.addEventListener('click', () => {
+        const sortKey = th.getAttribute('data-sort');
+        if (!sortKey) return;
+        if (sortKey === 'delta') {
+          currentSort = currentSort === `delta_${activeTimeframe}_desc` || currentSort === 'delta_desc' ? 'delta_asc' : `delta_${activeTimeframe}_desc`;
+        } else if (currentSort === `${sortKey}_desc`) {
+          currentSort = `${sortKey}_asc`;
+        } else {
+          currentSort = `${sortKey}_desc`;
+        }
+        if (sortSelect) sortSelect.value = currentSort;
+        filteredPins = sortPins(filteredPins);
+        currentPage = 1;
+        renderActiveView();
+      });
+    });
+
+    // Copy All Keywords Button
+    document.getElementById('copy-all-keywords-btn')?.addEventListener('click', () => {
+      const tagSet = new Set<string>();
+      filteredPins.forEach((p) => {
+        if (Array.isArray(p.annotations)) {
+          p.annotations.forEach((a: any) => {
+            const name = typeof a === 'string' ? a : a?.name || '';
+            if (name) tagSet.add(name);
+          });
+        }
+      });
+      const tagsList = Array.from(tagSet).join(', ');
+      navigator.clipboard.writeText(tagsList);
+      const btn = document.getElementById('copy-all-keywords-btn');
+      if (btn) {
+        btn.innerHTML = '<span>Copied All Tags!</span>';
+        setTimeout(() => {
+          if (btn) btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>Copy All Tags</span>';
+        }, 1500);
+      }
+    });
+
+    // AI Prompt Actions
+    document.getElementById('bulk-ai-prompt-btn')?.addEventListener('click', () => generateAIPrompt());
+    document.getElementById('launch-bulk-ai-btn')?.addEventListener('click', () => generateAIPrompt());
+    document.getElementById('close-ai-modal-btn')?.addEventListener('click', () => {
+      document.getElementById('ai-prompt-modal')?.classList.add('hidden');
+    });
+
+    document.getElementById('copy-ai-prompt-btn')?.addEventListener('click', () => {
+      const textarea = document.getElementById('ai-prompt-textarea') as HTMLTextAreaElement | null;
+      if (textarea) {
+        navigator.clipboard.writeText(textarea.value);
+        const textSpan = document.getElementById('copy-ai-prompt-text');
+        if (textSpan) textSpan.textContent = 'Copied to Clipboard!';
+        setTimeout(() => {
+          if (textSpan) textSpan.textContent = 'Copy Prompt to Clipboard';
+        }, 1500);
+      }
+    });
 
     // CSV Export
     const exportBtn = document.getElementById('export-csv-btn');
@@ -1024,6 +2386,26 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
         document.getElementById('compare-modal')?.classList.add('hidden');
       });
     }
+
+    // Quick Peek Drawer Close / Prev / Next
+    document.getElementById('quick-peek-backdrop')?.addEventListener('click', closeQuickPeek);
+    document.getElementById('peek-close-btn')?.addEventListener('click', closeQuickPeek);
+
+    document.getElementById('peek-prev-btn')?.addEventListener('click', () => {
+      if (currentPeekIndex > 0) {
+        currentPeekIndex--;
+        const prevPin = filteredPins[currentPeekIndex];
+        if (prevPin) openQuickPeek(prevPin.id);
+      }
+    });
+
+    document.getElementById('peek-next-btn')?.addEventListener('click', () => {
+      if (currentPeekIndex < filteredPins.length - 1) {
+        currentPeekIndex++;
+        const nextPin = filteredPins[currentPeekIndex];
+        if (nextPin) openQuickPeek(nextPin.id);
+      }
+    });
 
     // Refresh button
     const refreshBtn = document.getElementById('refresh-btn');

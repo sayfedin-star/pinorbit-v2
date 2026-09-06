@@ -51,31 +51,11 @@ async function handlePinArchiveDispatch(
 
   let workspaceId = rawWorkspaceId.trim();
 
-  // If workspaceId is not a full UUID (e.g. 8-char prefix), resolve it from Project 1 DB
   if (!UUID_REGEX.test(workspaceId)) {
-    try {
-      const admin = dbClients.getSchedulingAdmin(runtimeEnv);
-      const { data: wsMatch } = await admin
-        .from('workspaces')
-        .select('id')
-        .ilike('id', `${workspaceId}%`)
-        .limit(1)
-        .maybeSingle();
-
-      if (wsMatch?.id) {
-        workspaceId = wsMatch.id;
-      } else {
-        return new Response(
-          JSON.stringify({ success: false, error: 'Validation Error: valid workspace_id UUID is required.' }),
-          { status: 422, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-    } catch {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Validation Error: valid workspace_id UUID is required.' }),
-        { status: 422, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+    return new Response(
+      JSON.stringify({ success: false, error: 'Validation Error: valid workspace_id UUID is required.' }),
+      { status: 422, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   // 2. Authenticate via verifyIngestSecret (candidate-set verification)
@@ -104,10 +84,6 @@ async function handlePinArchiveDispatch(
         JSON.stringify({
           success: false,
           error: 'Unauthorized: missing or invalid x-ingest-secret header.',
-          debug: {
-            header_present: Boolean(providedSecret),
-            secret_length: providedSecret?.length || 0,
-          },
         }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
       );
@@ -120,11 +96,12 @@ async function handlePinArchiveDispatch(
   }
 
   // 3. Verify workspace existence in Project 1 (Scheduling / Auth Authority)
+  let isMasterScope = false;
   try {
     const admin = dbClients.getSchedulingAdmin(runtimeEnv);
     const { data: ws, error: wsErr } = await admin
       .from('workspaces')
-      .select('id')
+      .select('id, is_master')
       .eq('id', workspaceId)
       .maybeSingle();
 
@@ -134,6 +111,10 @@ async function handlePinArchiveDispatch(
         { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    // Master Scope is strictly restricted to DB-verified master workspaces
+    const isMaster = Boolean(ws.is_master);
+    isMasterScope = isMaster && payload.scope !== 'current' && url.searchParams.get('scope') !== 'current';
   } catch {
     return new Response(
       JSON.stringify({ success: false, error: 'Workspace verification failed.' }),
@@ -160,7 +141,22 @@ async function handlePinArchiveDispatch(
     );
   }
 
-  const dispatchUrl = `https://api.github.com/repos/${githubRepo}/actions/workflows/pinarchive-refresh.yml/dispatches`;
+  const dispatchUrl = `https://api.github.com/repos/${githubRepo}/actions/workflows/pinarchive-pipeline.yml/dispatches`;
+
+  let usernamesVal = '';
+  if (Array.isArray(payload.usernames)) {
+    usernamesVal = payload.usernames.join(',');
+  } else if (typeof payload.usernames === 'string') {
+    usernamesVal = payload.usernames;
+  } else if (typeof payload.username === 'string') {
+    usernamesVal = payload.username;
+  } else if (url.searchParams.get('usernames')) {
+    usernamesVal = url.searchParams.get('usernames')!;
+  } else if (url.searchParams.get('username')) {
+    usernamesVal = url.searchParams.get('username')!;
+  }
+
+  const modeVal = payload.mode || url.searchParams.get('mode') || 'all';
   const forceValue =
     payload.force === 'true' || payload.force === true || url.searchParams.get('force') === 'true'
       ? 'true'
@@ -178,7 +174,9 @@ async function handlePinArchiveDispatch(
       body: JSON.stringify({
         ref: 'main',
         inputs: {
-          workspace_id: workspaceId,
+          workspace_id: isMasterScope ? '' : workspaceId,
+          usernames: usernamesVal,
+          mode: modeVal,
           force: forceValue,
         },
       }),
@@ -188,10 +186,14 @@ async function handlePinArchiveDispatch(
     if (ghRes.status === 204 || (ghRes.status >= 200 && ghRes.status < 300)) {
       try {
         const pinArchive = dbClients.getPinArchive(runtimeEnv);
-        await pinArchive
-          .from('pa_workspace_settings')
-          .update({ updated_at: new Date().toISOString() })
-          .eq('workspace_id', workspaceId);
+        if (pinArchive && typeof pinArchive.from === 'function') {
+          const builder = pinArchive.from('pa_workspace_settings');
+          if (builder && typeof builder.update === 'function') {
+            await builder
+              .update({ updated_at: new Date().toISOString() })
+              .eq('workspace_id', workspaceId);
+          }
+        }
       } catch (dbErr) {
         console.warn('[PinArchive Dispatch] Non-blocking DB touch failed:', dbErr);
       }
@@ -200,7 +202,8 @@ async function handlePinArchiveDispatch(
         JSON.stringify({
           success: true,
           dispatched: true,
-          workspace_id: workspaceId,
+          workspace_id: isMasterScope ? 'all' : workspaceId,
+          is_master_scope: isMasterScope,
           force: forceValue === 'true',
         }),
         { status: 202, headers: { 'Content-Type': 'application/json' } }
@@ -259,12 +262,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     try {
       payload = JSON.parse(text);
     } catch {
-      if (!hasQueryParams) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'Malformed JSON payload.' }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
+      return new Response(
+        JSON.stringify({ success: false, error: 'Malformed JSON payload.' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
     }
   }
 

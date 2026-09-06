@@ -87,6 +87,9 @@ describe('PinArchive Internal Config Endpoint Suite (/api/internal/pinarchive/co
               pin_filter_min_repins: 100,
               pin_filter_rising_age_days: 7,
               pin_filter_rising_saves: 25,
+              discovery_stop_pages: 5,
+              audit_sweep_enabled: true,
+              daily_sheet_sync_enabled: true,
             },
             error: null,
           }),
@@ -106,16 +109,42 @@ describe('PinArchive Internal Config Endpoint Suite (/api/internal/pinarchive/co
     expect(json.pin_filter_min_repins).toBe(100);
     expect(json.pin_filter_rising_age_days).toBe(7);
     expect(json.pin_filter_rising_saves).toBe(25);
+    expect(json.discovery_stop_pages).toBe(5);
+    expect(json.audit_sweep_enabled).toBe(true);
+    expect(json.daily_sheet_sync_enabled).toBe(true);
     expect(json.pin_filter_max_age_days).toBeUndefined();
   });
 
-  it('FAIL-LAZY: returns 200 with fallback {0,0,14,34} when row is absent or on any DB query error', async () => {
+  it('P2-06: returns 503 when DB query fails', async () => {
     mockPinArchiveClient.from.mockReturnValue({
       select: vi.fn().mockReturnValue({
         eq: vi.fn().mockReturnValue({
           maybeSingle: vi.fn().mockResolvedValue({
             data: null,
             error: { message: 'relation pa_workspace_settings does not exist' },
+          }),
+        }),
+      }),
+    });
+
+    const req = new Request(`http://localhost:4321/api/internal/pinarchive/config?workspace_id=${mockWsId}`, {
+      headers: { 'x-ingest-secret': mockSecret },
+    });
+    const res = await configHandler({ request: req, locals: { runtime: { env: mockRuntimeEnv } } } as any);
+
+    expect(res.status).toBe(503);
+    const json = await res.json();
+    expect(json.success).toBe(false);
+    expect(json.error).toContain('Database error reading settings');
+  });
+
+  it('returns 200 with fallback {0,0,14,34,3,true,false} when settings row is absent in DB', async () => {
+    mockPinArchiveClient.from.mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: null,
+            error: null,
           }),
         }),
       }),
@@ -133,6 +162,9 @@ describe('PinArchive Internal Config Endpoint Suite (/api/internal/pinarchive/co
     expect(json.pin_filter_min_repins).toBe(0);
     expect(json.pin_filter_rising_age_days).toBe(14);
     expect(json.pin_filter_rising_saves).toBe(34);
+    expect(json.discovery_stop_pages).toBe(3);
+    expect(json.audit_sweep_enabled).toBe(true);
+    expect(json.daily_sheet_sync_enabled).toBe(false);
     expect(json.pin_filter_max_age_days).toBeUndefined();
   });
 });

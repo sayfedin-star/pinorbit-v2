@@ -1,6 +1,12 @@
 ---
 import RunNowButton from '../cron/RunNowButton.astro';
 import ProviderBadge from '../cron/ProviderBadge.astro';
+
+export interface Props {
+  isMasterWorkspace?: boolean;
+}
+
+const { isMasterWorkspace = false } = Astro.props;
 ---
 
 <div class="space-y-6" id="pinarchive-fastcron-container">
@@ -20,7 +26,7 @@ import ProviderBadge from '../cron/ProviderBadge.astro';
           </span>
         </div>
         <p class="text-xs text-muted-foreground mt-0.5">
-          Stateless multi-job scheduler for PinArchive metric refreshes, engagement velocity updates, and relay syncs.
+          Stateless multi-job scheduler for PinArchive. FastCron schedules execute the <strong>Full Daily Pipeline</strong> (Discovery & Rotation), while <strong>Run Now</strong> performs an instant <strong>Fast Metrics Sync</strong>.
         </p>
       </div>
     </div>
@@ -30,7 +36,7 @@ import ProviderBadge from '../cron/ProviderBadge.astro';
         id="pa-btn-sync-missing"
         type="button"
         class="inline-flex items-center gap-1.5 rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted transition-all shadow-2xs cursor-pointer"
-        title="Creates default daily schedule if none are currently present"
+        title="Creates default daily FastCron schedule (0 3 * * *) for full discovery & refresh if none exists"
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><polyline points="9 11 12 14 22 4"/></svg>
         <span>Sync Missing</span>
@@ -45,6 +51,7 @@ import ProviderBadge from '../cron/ProviderBadge.astro';
         variant="primary"
         buttonId="pa-run-now-btn-unified"
         scope="pinarchive"
+        isMaster={isMasterWorkspace}
       />
     </div>
   </div>
@@ -121,7 +128,7 @@ import ProviderBadge from '../cron/ProviderBadge.astro';
       <span id="pa-sched-pace-val" class="font-bold text-foreground">Calculating cadence...</span>
     </div>
     <p id="pa-sched-pace-desc" class="text-[11px] text-muted-foreground">
-      FastCron controls refresh cadence — every schedule run refreshes all active accounts.
+      FastCron executes the <strong>Full Daily Pipeline</strong> — discovering new published pins and refreshing metrics across all active accounts at scheduled times.
     </p>
   </div>
 
@@ -134,7 +141,7 @@ import ProviderBadge from '../cron/ProviderBadge.astro';
         </div>
         <div>
           <h3 class="text-sm font-bold text-foreground">Automation Schedules</h3>
-          <p class="text-xs text-muted-foreground">Manage multi-schedule FastCron triggers for this workspace</p>
+          <p class="text-xs text-muted-foreground">Automated triggers executing the complete discovery & metrics rotation pipeline for this workspace</p>
         </div>
       </div>
 
@@ -779,9 +786,29 @@ import ProviderBadge from '../cron/ProviderBadge.astro';
         activeCount++;
         const parts = (j.expression || '').trim().split(/\s+/);
         if (parts.length >= 5) {
-          const hours = parts[1] === '*' ? 24 : parts[1].split(',').length;
-          const days = parts[4] === '*' ? 7 : parts[4].split(',').length;
-          totalWeeklyRuns += (hours * days);
+          const [min, hour, , , dow] = parts;
+          let runsPerHour = 1;
+          if (min.startsWith('*/')) {
+            const step = parseInt(min.slice(2), 10) || 15;
+            runsPerHour = Math.round(60 / step);
+          } else if (min === '*') {
+            runsPerHour = 60;
+          } else {
+            runsPerHour = min.split(',').length;
+          }
+
+          let hoursPerDay = 1;
+          if (hour.startsWith('*/')) {
+            const step = parseInt(hour.slice(2), 10) || 1;
+            hoursPerDay = Math.round(24 / step);
+          } else if (hour === '*') {
+            hoursPerDay = 24;
+          } else {
+            hoursPerDay = hour.split(',').length;
+          }
+
+          const daysPerWeek = dow === '*' ? 7 : dow.split(',').length;
+          totalWeeklyRuns += (runsPerHour * hoursPerDay * daysPerWeek);
         }
       }
     }

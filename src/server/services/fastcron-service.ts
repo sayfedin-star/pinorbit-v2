@@ -1,6 +1,7 @@
 import { analyticsDb } from '../db/analytics';
 import { getServerEnv } from '../db/clients';
 import { decryptToken } from '../lib/token-crypto';
+import { evaluateTokenCandidates, maskToken } from '../lib/token-resolver';
 import { getEffectiveSecret } from './webhook-secrets';
 import type {
   ScheduleSyncResponse,
@@ -8,7 +9,17 @@ import type {
 } from '../../lib/types';
 
 export const FASTCRON_BASE = 'https://www.fastcron.com/api/v1';
-export const DISPATCH_ENDPOINT_URL = process.env.DISPATCH_BASE_URL || 'https://pinorbit-v2.o-i.workers.dev/api/internal/pinterest/daily-dispatch';
+
+export function getDispatchEndpointUrl(runtimeEnv?: Record<string, any>): string {
+  const base = (runtimeEnv?.DISPATCH_BASE_URL as string) ||
+    (typeof process !== 'undefined' ? process.env.DISPATCH_BASE_URL : '') ||
+    'https://pinorbit-v2.o-i.workers.dev';
+  return `${base.replace(/\/+$/, '')}/api/internal/pinterest/daily-dispatch`;
+}
+
+export const DISPATCH_ENDPOINT_URL = typeof process !== 'undefined' && process.env.DISPATCH_BASE_URL
+  ? `${process.env.DISPATCH_BASE_URL.replace(/\/+$/, '')}/api/internal/pinterest/daily-dispatch`
+  : 'https://pinorbit-v2.o-i.workers.dev/api/internal/pinterest/daily-dispatch';
 
 const ALLOWED_WEBHOOK_HOSTS = [
   'hook.make.com',
@@ -134,7 +145,7 @@ export const fastcronService = {
     const checkToken = async (tok: string | null | undefined) => {
       if (tok && typeof tok === 'string' && tok.trim().length >= 16) {
         if (tok.startsWith('v1:')) {
-          const dec = await decryptToken(tok, env.TOKEN_KEK);
+          const dec = await decryptToken(tok, env.TOKEN_KEK, envObj);
           if (dec) return dec.trim();
         } else {
           return tok.trim();
@@ -143,16 +154,11 @@ export const fastcronService = {
       return null;
     };
 
-    const res1 = await checkToken(channelToken);
-    if (res1) return res1;
+    const c1 = await checkToken(channelToken);
+    const c2 = await checkToken(wsTok);
+    const c3 = await checkToken(env.FASTCRON_API_TOKEN);
 
-    const res2 = await checkToken(wsTok);
-    if (res2) return res2;
-
-    const res3 = await checkToken(env.FASTCRON_API_TOKEN);
-    if (res3) return res3;
-
-    return null;
+    return evaluateTokenCandidates([c1, c2, c3]);
   },
 
   /**
@@ -278,11 +284,12 @@ export const fastcronService = {
     const jobName = `PinOrbit ${isAnalytics ? 'analytics' : 'top-pins'} — ${workspaceId.substring(0, 8)} — ${connection.display_name}`;
     const httpHeaders = `Content-Type: application/json\r\nx-ingest-secret: ${effectiveSecret}`;
 
+    const dispatchEndpointUrl = getDispatchEndpointUrl(runtimeEnv);
     const jobParams: Record<string, any> = {
       name: jobName,
       expression: cronValidation.cron,
       timezone: settings?.timezone || 'UTC',
-      url: DISPATCH_ENDPOINT_URL,
+      url: dispatchEndpointUrl,
       httpMethod: 'POST',
       http_method: 'POST',
       httpHeaders: httpHeaders,
@@ -341,7 +348,7 @@ export const fastcronService = {
             name: `PinOrbit analytics — ${workspaceId.substring(0, 8)} — ${connection.display_name}`,
             expression: cronValidation.cron,
             timezone: settings?.timezone || 'UTC',
-            url: DISPATCH_ENDPOINT_URL,
+            url: dispatchEndpointUrl,
             httpMethod: 'POST',
             http_method: 'POST',
             httpHeaders: httpHeaders,
@@ -356,7 +363,7 @@ export const fastcronService = {
             name: `PinOrbit top-pins — ${workspaceId.substring(0, 8)} — ${connection.display_name}`,
             expression: cronTopPins.cron || '30 4 * * *',
             timezone: settings?.timezone || 'UTC',
-            url: DISPATCH_ENDPOINT_URL,
+            url: dispatchEndpointUrl,
             httpMethod: 'POST',
             http_method: 'POST',
             httpHeaders: httpHeaders,
@@ -516,7 +523,9 @@ export const fastcronService = {
                 ? job.post_data
                 : JSON.stringify(job.postData || job.post_data || '');
 
-            const isDispatchUrl = jobUrl === DISPATCH_ENDPOINT_URL || jobUrl === webhookUrl?.trim();
+            const isDispatchUrl = jobUrl === DISPATCH_ENDPOINT_URL ||
+              (typeof jobUrl === 'string' && jobUrl.includes('/api/internal/pinterest/daily-dispatch')) ||
+              jobUrl === webhookUrl?.trim();
             let matchesConnection = false;
             try {
               const parsedData = JSON.parse(jobPostData);
@@ -993,6 +1002,8 @@ export async function resolveScheduleToken(schedule: any, runtimeEnv: Record<str
     {
       workspaceId: schedule?.workspace_id,
       tokenId: schedule?.fastcron_token_id,
+      encryptedToken: schedule?.fastcron_token_encrypted,
+      schedule,
     },
     'scheduling',
     runtimeEnv
@@ -1024,11 +1035,12 @@ export async function syncPublishingSchedule(
   } catch (e: any) {
     return { success: false, error: e.message };
   }
-  const base = (typeof process !== 'undefined' && process.env.DISPATCH_BASE_URL)
+  const base = runtimeEnv?.DISPATCH_BASE_URL
+    ? String(runtimeEnv.DISPATCH_BASE_URL).replace(/\/$/, '')
+    : (typeof process !== 'undefined' && process.env.DISPATCH_BASE_URL)
     ? process.env.DISPATCH_BASE_URL.replace(/\/$/, '')
     : 'https://pinorbit-v2.o-i.workers.dev';
-  const dispatchUrl = `${base}/api/internal/pinterest/dispatch-due-pin`
-    + `?schedule_id=${encodeURIComponent(schedule.id)}&dispatch_token=${encodeURIComponent(schedule.dispatch_token)}`;
+  const dispatchUrl = `${base}/api/internal/pinterest/dispatch-due-pin`;
   const jobName = `PinOrbit-pub-${schedule.id.slice(0, 8)}`;
   const postData = JSON.stringify({ schedule_id: schedule.id, dispatch_token: schedule.dispatch_token });
   const jobParams: Record<string, any> = {
@@ -1281,6 +1293,7 @@ export async function triggerBoardAction(
         .from('account_webhooks')
         .select('id, webhook_url')
         .eq('id', targetWhId)
+        .eq('account_id', accountId)
         .maybeSingle();
       if (wh?.webhook_url) {
         webhookUrl = wh.webhook_url;
@@ -1335,19 +1348,11 @@ export async function triggerBoardAction(
     });
 
     if (res.ok && resolvedWebhookId) {
-      const { data: curHook } = await schedulingClient
-        .from('account_webhooks')
-        .select('executions_used')
-        .eq('id', resolvedWebhookId)
-        .maybeSingle();
-
-      await schedulingClient
-        .from('account_webhooks')
-        .update({
-          executions_used: (curHook?.executions_used ?? 0) + 1,
-          last_used_at: new Date().toISOString(),
-        })
-        .eq('id', resolvedWebhookId);
+      await schedulingClient.rpc('increment_webhook_execution', {
+        p_webhook_id: resolvedWebhookId,
+        p_count: 1,
+        p_workspace_id: account.workspace_id,
+      });
     }
 
     return {

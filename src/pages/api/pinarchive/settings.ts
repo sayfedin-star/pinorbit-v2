@@ -22,6 +22,12 @@ const DEFAULT_SETTINGS = {
   pin_filter_rising_age_days: 14,
   pin_filter_rising_saves: 34,
   refresh_max_pins: 0,
+  refresh_min_saves: 0,
+  discovery_stop_pages: 3,
+  discovery_max_pages: 50,
+  audit_sweep_enabled: true,
+  daily_sheet_sync_enabled: false,
+  github_schedule_enabled: true,
 };
 
 const ALLOWED_PATCH_KEYS = new Set([
@@ -34,6 +40,12 @@ const ALLOWED_PATCH_KEYS = new Set([
   'pin_filter_rising_age_days',
   'pin_filter_rising_saves',
   'refresh_max_pins',
+  'refresh_min_saves',
+  'discovery_stop_pages',
+  'discovery_max_pages',
+  'audit_sweep_enabled',
+  'daily_sheet_sync_enabled',
+  'github_schedule_enabled',
 ]);
 
 export const GET: APIRoute = async ({ request, locals }) => {
@@ -92,6 +104,12 @@ export const GET: APIRoute = async ({ request, locals }) => {
       pin_filter_rising_age_days: settings.pin_filter_rising_age_days ?? DEFAULT_SETTINGS.pin_filter_rising_age_days,
       pin_filter_rising_saves: settings.pin_filter_rising_saves ?? DEFAULT_SETTINGS.pin_filter_rising_saves,
       refresh_max_pins: settings.refresh_max_pins ?? DEFAULT_SETTINGS.refresh_max_pins,
+      refresh_min_saves: Number(settings.refresh_min_saves ?? DEFAULT_SETTINGS.refresh_min_saves),
+      discovery_stop_pages: Number(settings.discovery_stop_pages ?? DEFAULT_SETTINGS.discovery_stop_pages),
+      discovery_max_pages: Number(settings.discovery_max_pages ?? DEFAULT_SETTINGS.discovery_max_pages),
+      audit_sweep_enabled: settings.audit_sweep_enabled ?? DEFAULT_SETTINGS.audit_sweep_enabled,
+      daily_sheet_sync_enabled: settings.daily_sheet_sync_enabled ?? DEFAULT_SETTINGS.daily_sheet_sync_enabled,
+      github_schedule_enabled: settings.github_schedule_enabled ?? DEFAULT_SETTINGS.github_schedule_enabled,
       is_default: false,
       updated_at: settings.updated_at,
     });
@@ -199,6 +217,45 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
     }
   }
 
+  // Validate refresh_min_saves
+  if (body.refresh_min_saves !== undefined) {
+    const rms = Number(body.refresh_min_saves);
+    if (!Number.isInteger(rms) || rms < 0 || rms > 1000000) {
+      return json({ success: false, error: 'refresh_min_saves must be an integer between 0 and 1000000.' }, 422);
+    }
+  }
+
+  // Validate discovery_stop_pages
+  if (body.discovery_stop_pages !== undefined) {
+    const dsp = Number(body.discovery_stop_pages);
+    if (!Number.isInteger(dsp) || dsp < 1 || dsp > 10) {
+      return json({ success: false, error: 'discovery_stop_pages must be an integer between 1 and 10.' }, 422);
+    }
+  }
+
+  // Validate discovery_max_pages
+  if (body.discovery_max_pages !== undefined) {
+    const dmp = Number(body.discovery_max_pages);
+    if (!Number.isInteger(dmp) || dmp < 1 || dmp > 500) {
+      return json({ success: false, error: 'discovery_max_pages must be an integer between 1 and 500.' }, 422);
+    }
+  }
+
+  // Validate audit_sweep_enabled
+  if (body.audit_sweep_enabled !== undefined && typeof body.audit_sweep_enabled !== 'boolean') {
+    return json({ success: false, error: 'audit_sweep_enabled must be a boolean.' }, 422);
+  }
+
+  // Validate daily_sheet_sync_enabled
+  if (body.daily_sheet_sync_enabled !== undefined && typeof body.daily_sheet_sync_enabled !== 'boolean') {
+    return json({ success: false, error: 'daily_sheet_sync_enabled must be a boolean.' }, 422);
+  }
+
+  // Validate github_schedule_enabled
+  if (body.github_schedule_enabled !== undefined && typeof body.github_schedule_enabled !== 'boolean') {
+    return json({ success: false, error: 'github_schedule_enabled must be a boolean.' }, 422);
+  }
+
   let wsCtx;
   try {
     wsCtx = await assertWorkspaceAccess(schedulingClient, workspaceId, user.id, 'admin');
@@ -250,6 +307,30 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
         body.refresh_max_pins !== undefined
           ? Number(body.refresh_max_pins)
           : (existing?.refresh_max_pins ?? DEFAULT_SETTINGS.refresh_max_pins),
+      refresh_min_saves:
+        body.refresh_min_saves !== undefined
+          ? Number(body.refresh_min_saves)
+          : (existing?.refresh_min_saves ?? DEFAULT_SETTINGS.refresh_min_saves),
+      discovery_stop_pages:
+        body.discovery_stop_pages !== undefined
+          ? Number(body.discovery_stop_pages)
+          : (existing?.discovery_stop_pages ?? DEFAULT_SETTINGS.discovery_stop_pages),
+      discovery_max_pages:
+        body.discovery_max_pages !== undefined
+          ? Number(body.discovery_max_pages)
+          : (existing?.discovery_max_pages ?? DEFAULT_SETTINGS.discovery_max_pages),
+      audit_sweep_enabled:
+        body.audit_sweep_enabled !== undefined
+          ? body.audit_sweep_enabled
+          : (existing?.audit_sweep_enabled ?? DEFAULT_SETTINGS.audit_sweep_enabled),
+      daily_sheet_sync_enabled:
+        body.daily_sheet_sync_enabled !== undefined
+          ? body.daily_sheet_sync_enabled
+          : (existing?.daily_sheet_sync_enabled ?? DEFAULT_SETTINGS.daily_sheet_sync_enabled),
+      github_schedule_enabled:
+        body.github_schedule_enabled !== undefined
+          ? body.github_schedule_enabled
+          : (existing?.github_schedule_enabled ?? DEFAULT_SETTINGS.github_schedule_enabled),
       updated_at: new Date().toISOString(),
     };
 
@@ -274,6 +355,12 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
       pin_filter_rising_age_days: saved.pin_filter_rising_age_days,
       pin_filter_rising_saves: saved.pin_filter_rising_saves,
       refresh_max_pins: saved.refresh_max_pins ?? DEFAULT_SETTINGS.refresh_max_pins,
+      refresh_min_saves: saved.refresh_min_saves ?? DEFAULT_SETTINGS.refresh_min_saves,
+      discovery_stop_pages: Number(saved.discovery_stop_pages ?? DEFAULT_SETTINGS.discovery_stop_pages),
+      discovery_max_pages: Number(saved.discovery_max_pages ?? DEFAULT_SETTINGS.discovery_max_pages),
+      audit_sweep_enabled: saved.audit_sweep_enabled ?? DEFAULT_SETTINGS.audit_sweep_enabled,
+      daily_sheet_sync_enabled: saved.daily_sheet_sync_enabled ?? DEFAULT_SETTINGS.daily_sheet_sync_enabled,
+      github_schedule_enabled: saved.github_schedule_enabled ?? DEFAULT_SETTINGS.github_schedule_enabled,
       is_default: false,
       updated_at: saved.updated_at,
     });

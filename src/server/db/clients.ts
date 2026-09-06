@@ -74,9 +74,7 @@ export function getServerEnv(runtimeEnv?: Record<string, any>): ServerEnvConfig 
   const PINARCHIVE_SUPABASE_URL =
     env.PINARCHIVE_SUPABASE_URL || 'https://kuuugffvyokywtgmdrfk.supabase.co';
   const PINARCHIVE_SUPABASE_SECRET_KEY = env.PINARCHIVE_SUPABASE_SECRET_KEY || '';
-  const PINARCHIVE_GAS_URL =
-    env.PINARCHIVE_GAS_URL ||
-    'https://script.google.com/macros/s/AKfycbwBFmyisJ59ejbOLimfgLHAfPcGx4E_WhIiSEI56BhFSJ6HkHrM2wfoPeO-v3nJa5CA/exec';
+  const PINARCHIVE_GAS_URL = env.PINARCHIVE_GAS_URL || '';
 
   const INGEST_SECRET_KEY = env.INGEST_SECRET_KEY || 'pinorbit_ingest_secret_dev';
 
@@ -306,8 +304,11 @@ export const dbClients = {
    * Returns the server-only administrative client for Project 1 (Scheduling).
    */
   getSchedulingAdmin(runtimeEnv?: Record<string, any>): SupabaseClient {
-    if (!schedulingAdminClientInstance || runtimeEnv) {
-      schedulingAdminClientInstance = createSchedulingAdminClient(runtimeEnv);
+    if (runtimeEnv) {
+      return createSchedulingAdminClient(runtimeEnv);
+    }
+    if (!schedulingAdminClientInstance) {
+      schedulingAdminClientInstance = createSchedulingAdminClient();
     }
     return schedulingAdminClientInstance;
   },
@@ -317,8 +318,11 @@ export const dbClients = {
    * MUST only be called after verifying workspace membership via Project 1.
    */
   getCompetitors(runtimeEnv?: Record<string, any>): SupabaseClient {
-    if (!competitorsClientInstance || runtimeEnv) {
-      competitorsClientInstance = createCompetitorsClient(runtimeEnv);
+    if (runtimeEnv) {
+      return createCompetitorsClient(runtimeEnv);
+    }
+    if (!competitorsClientInstance) {
+      competitorsClientInstance = createCompetitorsClient();
     }
     return competitorsClientInstance;
   },
@@ -335,8 +339,11 @@ export const dbClients = {
    * MUST only be called after verifying workspace membership via Project 1.
    */
   getAnalytics(runtimeEnv?: Record<string, any>): SupabaseClient {
-    if (!analyticsClientInstance || runtimeEnv) {
-      analyticsClientInstance = createAnalyticsClient(runtimeEnv);
+    if (runtimeEnv) {
+      return createAnalyticsClient(runtimeEnv);
+    }
+    if (!analyticsClientInstance) {
+      analyticsClientInstance = createAnalyticsClient();
     }
     return analyticsClientInstance;
   },
@@ -353,8 +360,11 @@ export const dbClients = {
    * MUST only be called after verifying workspace membership via Project 1.
    */
   getPinArchive(runtimeEnv?: Record<string, any>): SupabaseClient {
-    if (!pinArchiveClientInstance || runtimeEnv) {
-      pinArchiveClientInstance = createPinArchiveClient(runtimeEnv);
+    if (runtimeEnv) {
+      return createPinArchiveClient(runtimeEnv);
+    }
+    if (!pinArchiveClientInstance) {
+      pinArchiveClientInstance = createPinArchiveClient();
     }
     return pinArchiveClientInstance;
   },
