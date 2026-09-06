@@ -205,7 +205,7 @@ export const GET: APIRoute = async ({ locals }) => {
           timezone: sched.timezone || 'UTC',
           status: isPaused ? 'paused' : sched.status || 'active',
           paused: isPaused,
-          dispatch_token: sched.dispatch_token,
+          has_dispatch_token: Boolean(sched.dispatch_token),
           fastcron_token_id: sched.fastcron_token_id,
           token_name: assignedToken?.name || 'Workspace Default',
           masked_token: assignedToken?.masked_token || defaultToken?.masked_token || '••••••••',

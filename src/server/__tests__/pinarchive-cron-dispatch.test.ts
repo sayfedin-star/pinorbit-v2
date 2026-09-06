@@ -254,7 +254,7 @@ describe('PinArchive FastCron Migration & Dispatch Test Suite (v3 Delta)', () =>
             select: () => builder,
             eq: () => builder,
             single: async () => ({ data: { id: 'm1', role: 'admin', name: wsName }, error: null }),
-            maybeSingle: async () => ({ data: { id: 'm1', role: 'admin', name: wsName, token_masked: 'fastcron...' }, error: null }),
+            maybeSingle: async () => ({ data: { id: 'm1', role: 'admin', name: wsName, token: mockToken, token_masked: '••••5678' }, error: null }),
           };
           return builder;
         },
@@ -267,6 +267,7 @@ describe('PinArchive FastCron Migration & Dispatch Test Suite (v3 Delta)', () =>
           activeWorkspaceId: mockWorkspaceId,
           runtimeEnv: {
             FASTCRON_API_TOKEN: mockToken,
+            pinarchiveClient: createMockSupabase(),
           },
         },
       } as any);

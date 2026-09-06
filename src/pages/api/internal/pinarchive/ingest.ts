@@ -326,7 +326,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
         const chunk = pinIds.slice(i, i + CHUNK_SIZE);
         const { data, error } = await pinArchive
           .from('pa_pins')
-          .select('id, pin_id, saves, repins, comments, share_count, reactions, archived_at, annotations, board_pin_count, board_last_modified_at, seo_category, canonical_pin_id, utm_link, image_signature, dominant_color, seo_alt_text, title, description, link, domain, board_name, board_id, created_at_pinterest, image_url, node_id, is_video, is_product, promoted')
+          .select('id, pin_id, saves, repins, comments, share_count, reactions, archived_at, annotations, board_pin_count, board_last_modified_at, seo_category, canonical_pin_id, utm_link, image_signature, dominant_color, seo_alt_text, title, description, link, domain, board_name, board_id, created_at_pinterest, image_url, node_id, is_video, is_product, promoted, price, currency, site_name')
           .eq('workspace_id', workspaceId)
           .in('pin_id', chunk);
 
@@ -368,6 +368,9 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
         is_video: boolean;
         is_product: boolean;
         promoted: boolean;
+        price: any;
+        currency: string | null;
+        site_name: string | null;
       }>();
 
       if (Array.isArray(existingPins)) {
@@ -401,6 +404,9 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
             is_video: Boolean(ep.is_video),
             is_product: Boolean(ep.is_product),
             promoted: Boolean(ep.promoted),
+            price: (ep as any).price !== undefined ? (ep as any).price : null,
+            currency: (ep as any).currency || null,
+            site_name: (ep as any).site_name || null,
           });
         }
       }
@@ -451,9 +457,9 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
           image_url: p.image_url || existing?.image_url || null,
           is_video: p.is_video !== undefined ? Boolean(p.is_video) : (existing?.is_video ?? false),
           is_product: p.is_product !== undefined ? Boolean(p.is_product) : (existing?.is_product ?? false),
-          price: p.price !== undefined ? p.price : null,
-          currency: p.currency || null,
-          site_name: p.site_name || null,
+          price: p.price ?? (existing as any)?.price ?? null,
+          currency: p.currency || (existing as any)?.currency || null,
+          site_name: p.site_name || (existing as any)?.site_name || null,
           saves: Math.max(Number(p.saves || 0), existing?.saves || 0),
           repins: Math.max(Number(p.repins || 0), existing?.repins || 0),
           comments: Math.max(Number(p.comments || 0), existing?.comments || 0),

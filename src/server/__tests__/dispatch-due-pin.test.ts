@@ -174,73 +174,40 @@ describe('Thread-Safe Dispatch Due Pin Concurrency & Hardening Suite', () => {
             }),
             update: vi.fn((payload: any) => {
               updatePayload = payload;
-              return {
+              const ub: any = {
                 eq: vi.fn((col: string, val: any) => {
                   filterEq[col] = val;
-                  return {
-                    eq: vi.fn((col2: string, val2: any) => {
-                      filterEq[col2] = val2;
-                      return {
-                        then: (cb: any) => {
-                          applyUpdate();
-                          return Promise.resolve(cb());
-                        },
-                      };
-                    }),
-                    in: vi.fn((col2: string, vals: any[]) => {
-                      filterIn[col2] = vals;
-                      return {
-                        then: (cb: any) => {
-                          applyUpdate();
-                          return Promise.resolve(cb());
-                        },
-                      };
-                    }),
-                    or: vi.fn((orClause: string) => {
-                      filterOr.push(orClause);
-                      return {
-                        or: vi.fn((orClause2: string) => {
-                          filterOr.push(orClause2);
-                          return {
-                            lt: vi.fn((ltCol: string, ltVal: any) => {
-                              filterLt[ltCol] = ltVal;
-                              return {
-                                then: (cb: any) => {
-                                  applyUpdate();
-                                  return Promise.resolve(cb());
-                                },
-                              };
-                            }),
-                          };
-                        }),
-                        lt: vi.fn((ltCol: string, ltVal: any) => {
-                          filterLt[ltCol] = ltVal;
-                          return {
-                            then: (cb: any) => {
-                              applyUpdate();
-                              return Promise.resolve(cb());
-                            },
-                          };
-                        }),
-                      };
-                    }),
-                    then: (cb: any) => {
-                      applyUpdate();
-                      return Promise.resolve(cb());
-                    },
-                  };
+                  return ub;
                 }),
                 in: vi.fn((col: string, vals: any[]) => {
                   filterIn[col] = vals;
-                  applyUpdate();
-                  return Promise.resolve({ data: null, error: null });
+                  return ub;
                 }),
+                or: vi.fn((orClause: string) => {
+                  filterOr.push(orClause);
+                  return ub;
+                }),
+                lt: vi.fn((col: string, val: any) => {
+                  filterLt[col] = val;
+                  return ub;
+                }),
+                gte: vi.fn((col: string, val: any) => {
+                  filterGte[col] = val;
+                  return ub;
+                }),
+                then: (cb: any) => {
+                  applyUpdate();
+                  return Promise.resolve(cb ? cb({ data: null, error: null }) : { data: null, error: null });
+                },
               };
+              return ub;
 
               function applyUpdate() {
                 if (table === 'pins') {
                   for (const p of pinsDb) {
                     if (filterEq.id && p.id !== filterEq.id) continue;
+                    if (filterEq.workspace_id && p.workspace_id !== filterEq.workspace_id) continue;
+                    if (filterEq.account_id && p.account_id !== filterEq.account_id) continue;
                     if (filterIn.id && !filterIn.id.includes(p.id)) continue;
                     if (filterEq.status && p.status !== filterEq.status) continue;
                     // Scope check for orphan sweep:

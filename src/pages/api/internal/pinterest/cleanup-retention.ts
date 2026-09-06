@@ -35,11 +35,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
   }
 
-  if (!workspaceId) {
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!workspaceId || !UUID_REGEX.test(workspaceId)) {
     return new Response(
       JSON.stringify({
         success: false,
-        error: 'workspace_id is required in JSON body or x-workspace-id header.',
+        error: !workspaceId ? 'workspace_id is required in JSON body or x-workspace-id header.' : 'Invalid workspace UUID',
       }),
       {
         status: 400,

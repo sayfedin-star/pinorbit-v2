@@ -7,37 +7,102 @@ export interface SafeFetchOptions {
   headers?: Record<string, string>;
 }
 
-export function isPrivateOrReservedIp(ip: string): boolean {
-  // IPv4 Loopback
-  if (ip === 'localhost' || ip === '127.0.0.1' || ip === '0.0.0.0') return true;
-
-  // Cloud metadata IMDS
-  if (ip === '169.254.169.254' || ip.startsWith('169.254.')) return true;
-
-  // Parse IPv4 octets
-  const ipv4Parts = ip.split('.').map(Number);
-  if (ipv4Parts.length === 4 && ipv4Parts.every((p) => !isNaN(p) && p >= 0 && p <= 255)) {
-    const [a, b] = ipv4Parts;
-    // 10.0.0.0/8
-    if (a === 10) return true;
-    // 172.16.0.0/12
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    // 192.168.0.0/16
-    if (a === 192 && b === 168) return true;
-    // 127.0.0.0/8
-    if (a === 127) return true;
-    // 0.0.0.0/8
-    if (a === 0) return true;
-    // 100.64.0.0/10 (Carrier-grade NAT)
-    if (a === 100 && b >= 64 && b <= 127) return true;
+export function isPrivateOrReservedIp(rawHost: string): boolean {
+  let host = rawHost.toLowerCase().trim();
+  // Strip IPv6 enclosing brackets if present
+  if (host.startsWith('[') && host.endsWith(']')) {
+    host = host.slice(1, -1);
+  }
+  // Strip trailing dot (e.g. localhost. or 127.0.0.1.)
+  if (host.endsWith('.')) {
+    host = host.slice(0, -1);
   }
 
-  // IPv6 check
-  const lower = ip.toLowerCase();
-  if (lower === '::1' || lower === '::' || lower.startsWith('fe80:') || lower.startsWith('fc00:') || lower.startsWith('fd00:')) {
+  // Common localhost / loopback names
+  if (host === 'localhost' || host === 'ip6-localhost' || host === 'ip6-loopback') return true;
+
+  // IPv6 mapped IPv4 e.g. ::ffff:127.0.0.1 or ::ffff:7f00:1
+  if (host.startsWith('::ffff:')) {
+    const v4Part = host.slice(7);
+    if (v4Part.includes('.')) {
+      host = v4Part;
+    } else {
+      return true;
+    }
+  }
+
+  // IPv6 loopback and reserved ranges
+  if (
+    host === '::1' ||
+    host === '::' ||
+    host.startsWith('fe80:') ||
+    host.startsWith('fc00:') ||
+    host.startsWith('fd00:') ||
+    host.startsWith('2001:db8:')
+  ) {
     return true;
   }
 
+  // Single integer representation (e.g. 2130706433 or 0x7f000001)
+  if (/^0x[0-9a-f]+$/i.test(host)) {
+    const num = parseInt(host, 16);
+    if (!isNaN(num) && num >= 0 && num <= 0xffffffff) {
+      const a = (num >>> 24) & 255;
+      const b = (num >>> 16) & 255;
+      return isPrivateIpv4Octets(a, b);
+    }
+  }
+  if (/^\d+$/.test(host)) {
+    const num = parseInt(host, 10);
+    if (!isNaN(num) && num >= 0 && num <= 0xffffffff) {
+      const a = (num >>> 24) & 255;
+      const b = (num >>> 16) & 255;
+      return isPrivateIpv4Octets(a, b);
+    }
+  }
+
+  // Cloud metadata IMDS
+  if (host === '169.254.169.254' || host.startsWith('169.254.')) return true;
+
+  // Dotted IPv4 notation (allowing decimal, hex 0x, octal 0)
+  const parts = host.split('.');
+  if (parts.length === 4) {
+    const octets: number[] = [];
+    for (const part of parts) {
+      let val: number;
+      if (/^0x[0-9a-f]+$/i.test(part)) {
+        val = parseInt(part, 16);
+      } else if (/^0[0-7]+$/.test(part)) {
+        val = parseInt(part, 8);
+      } else if (/^\d+$/.test(part)) {
+        val = parseInt(part, 10);
+      } else {
+        return false;
+      }
+      if (isNaN(val) || val < 0 || val > 255) return false;
+      octets.push(val);
+    }
+    return isPrivateIpv4Octets(octets[0], octets[1]);
+  }
+
+  return false;
+}
+
+function isPrivateIpv4Octets(a: number, b: number): boolean {
+  // 0.0.0.0/8
+  if (a === 0) return true;
+  // 10.0.0.0/8
+  if (a === 10) return true;
+  // 127.0.0.0/8
+  if (a === 127) return true;
+  // 100.64.0.0/10 (Carrier-grade NAT)
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  // 169.254.0.0/16 (Link-local / APIPA / Cloud IMDS)
+  if (a === 169 && b === 254) return true;
+  // 172.16.0.0/12
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  // 192.168.0.0/16
+  if (a === 192 && b === 168) return true;
   return false;
 }
 

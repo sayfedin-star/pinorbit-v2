@@ -20,7 +20,9 @@ export async function resolveTokenKek(runtimeEnv: Record<string, any>): Promise<
     try {
       const existing = await kv.get('token_kek:global');
       if (existing && String(existing).trim().length >= 32) return String(existing).trim();
-      // 3) Lazy seed: generate once, persist, read back (last-write-wins safety)
+      // 3) Lazy seed: generate once, verify non-existence, persist, read back (read-after-write race mitigation)
+      const preCheck = await kv.get('token_kek:global');
+      if (preCheck && String(preCheck).trim().length >= 32) return String(preCheck).trim();
       const bytes = crypto.getRandomValues(new Uint8Array(32));
       const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
       await kv.put('token_kek:global', hex);
