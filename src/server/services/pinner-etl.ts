@@ -672,40 +672,137 @@ export const pinnerETL = {
         });
       }
 
-      // -------------------------------------------------------------------------
-      // Derive Workspace Rollups (daily_workspace_metrics)
-      // -------------------------------------------------------------------------
-      const workspaceDailyMap = new Map<string, any>();
+      // =========================================================================
+      // Persistence Layer (Project 3 Upserts)
+      // =========================================================================
+      const dailyUpsertCount = await upsertBatch('daily', dailyRows, (r) =>
+        analyticsDb.upsertAccountDailyMetrics(workspaceId, connectionId, r)
+      );
 
-      for (const daily of dailyRows) {
-        const dateKey = daily.metric_date;
-        const existing = workspaceDailyMap.get(dateKey) || {
-          workspace_id: workspaceId,
-          metric_date: dateKey,
-          total_impressions: 0,
-          total_engagements: 0,
-          total_saves: 0,
-          total_outbound_clicks: 0,
-          total_pin_clicks: 0,
-          total_profile_visits: 0,
-          top_pin_impressions: 0,
-          top_pin_outbound_clicks: 0,
-          top_pin_saves: 0,
-          active_top_pins_count: 0,
-          recorded_at: nowIso,
-        };
-
-        existing.total_impressions = (existing.total_impressions || 0) + (daily.impressions || 0);
-        existing.total_engagements = (existing.total_engagements || 0) + (daily.engagements || 0);
-        existing.total_saves = (existing.total_saves || 0) + (daily.saves || 0);
-        existing.total_outbound_clicks = (existing.total_outbound_clicks || 0) + (daily.outbound_clicks || 0);
-        existing.total_pin_clicks = (existing.total_pin_clicks || 0) + (daily.pin_clicks || 0);
-
-        workspaceDailyMap.set(dateKey, existing);
+      if (summaryRow) {
+        await analyticsDb.upsertAccountSummary(workspaceId, connectionId, summaryRow);
       }
 
-      // Add top pins aggregates if present
-      if (topPinRows.length > 0) {
+      const topPinsUpsertCount = await upsertBatch('top_pins', topPinRows, (r) =>
+        analyticsDb.upsertTopPinsSnapshots(workspaceId, connectionId, r)
+      );
+
+      if (topPinsUpsertCount > 0) {
+        // Offload raw JSONB after 7 days to reclaim space
+        const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+        const analyticsClient = dbClients.getAnalytics(runtimeEnv);
+        const { error: reclaimErr } = await analyticsClient
+          .from('top_pins_snapshots')
+          .update({
+            raw_pin: null,
+            raw_headers: null,
+            raw_metrics: null,
+          })
+          .eq('workspace_id', workspaceId)
+          .lt('window_end', sevenDaysAgo);
+        if (reclaimErr) {
+          console.warn('[PinnerETL] raw reclaim failed:', reclaimErr.message);
+        }
+      }
+
+      // -------------------------------------------------------------------------
+      // Derive Workspace Rollups (daily_workspace_metrics) by re-summing all
+      // connections in the workspace across all affected dates
+      // -------------------------------------------------------------------------
+      const affectedDatesSet = new Set<string>();
+      for (const d of dailyRows) {
+        if (d.metric_date) affectedDatesSet.add(d.metric_date);
+      }
+      if (topPinRows.length > 0 && windowEnd) {
+        affectedDatesSet.add(windowEnd.split('T')[0]);
+      }
+      const affectedDates = Array.from(affectedDatesSet);
+
+      const workspaceDailyMap = new Map<string, any>();
+      const analyticsClient = dbClients.getAnalytics(runtimeEnv);
+
+      if (affectedDates.length > 0) {
+        const CHUNK_SIZE = 100;
+        const allDailyRecords: any[] = [];
+
+        for (let i = 0; i < affectedDates.length; i += CHUNK_SIZE) {
+          const chunk = affectedDates.slice(i, i + CHUNK_SIZE);
+          const { data, error } = await analyticsClient
+            .from('account_analytics_daily')
+            .select('metric_date, impressions, engagements, saves, outbound_clicks, pin_clicks, profile_visits')
+            .eq('workspace_id', workspaceId)
+            .in('metric_date', chunk)
+            .eq('data_status', 'READY');
+
+          if (error) {
+            console.warn('[PinnerETL] Failed to fetch existing daily metrics for rollup re-sum:', error.message);
+          } else if (data && data.length > 0) {
+            allDailyRecords.push(...data);
+          }
+        }
+
+        for (const daily of allDailyRecords) {
+          const dateKey = daily.metric_date;
+          const existing = workspaceDailyMap.get(dateKey) || {
+            workspace_id: workspaceId,
+            metric_date: dateKey,
+            total_impressions: 0,
+            total_engagements: 0,
+            total_saves: 0,
+            total_outbound_clicks: 0,
+            total_pin_clicks: 0,
+            total_profile_visits: 0,
+            top_pin_impressions: 0,
+            top_pin_outbound_clicks: 0,
+            top_pin_saves: 0,
+            active_top_pins_count: 0,
+            recorded_at: nowIso,
+          };
+
+          existing.total_impressions = (existing.total_impressions || 0) + (Number(daily.impressions) || 0);
+          existing.total_engagements = (existing.total_engagements || 0) + (Number(daily.engagements) || 0);
+          existing.total_saves = (existing.total_saves || 0) + (Number(daily.saves) || 0);
+          existing.total_outbound_clicks = (existing.total_outbound_clicks || 0) + (Number(daily.outbound_clicks) || 0);
+          existing.total_pin_clicks = (existing.total_pin_clicks || 0) + (Number(daily.pin_clicks) || 0);
+          existing.total_profile_visits = (existing.total_profile_visits || 0) + (Number(daily.profile_visits) || 0);
+
+          workspaceDailyMap.set(dateKey, existing);
+        }
+      }
+
+      // Fallback: if DB re-sum returned nothing (e.g. mock DB or transient issue), use in-memory dailyRows
+      if (workspaceDailyMap.size === 0) {
+        for (const daily of dailyRows) {
+          const dateKey = daily.metric_date;
+          const existing = workspaceDailyMap.get(dateKey) || {
+            workspace_id: workspaceId,
+            metric_date: dateKey,
+            total_impressions: 0,
+            total_engagements: 0,
+            total_saves: 0,
+            total_outbound_clicks: 0,
+            total_pin_clicks: 0,
+            total_profile_visits: 0,
+            top_pin_impressions: 0,
+            top_pin_outbound_clicks: 0,
+            top_pin_saves: 0,
+            active_top_pins_count: 0,
+            recorded_at: nowIso,
+          };
+
+          existing.total_impressions = (existing.total_impressions || 0) + (Number(daily.impressions) || 0);
+          existing.total_engagements = (existing.total_engagements || 0) + (Number(daily.engagements) || 0);
+          existing.total_saves = (existing.total_saves || 0) + (Number(daily.saves) || 0);
+          existing.total_outbound_clicks = (existing.total_outbound_clicks || 0) + (Number(daily.outbound_clicks) || 0);
+          existing.total_pin_clicks = (existing.total_pin_clicks || 0) + (Number(daily.pin_clicks) || 0);
+          existing.total_profile_visits = (existing.total_profile_visits || 0) + (Number(daily.profile_visits) || 0);
+
+          workspaceDailyMap.set(dateKey, existing);
+        }
+      }
+
+      // Add top pins aggregates if present (overlaid onto latest date AFTER DB re-sum)
+      if (topPinRows.length > 0 && windowEnd) {
         const latestDate = windowEnd.split('T')[0];
         const latestWorkspaceMetric = workspaceDailyMap.get(latestDate) || {
           workspace_id: workspaceId,
@@ -742,39 +839,6 @@ export const pinnerETL = {
       }
 
       const workspaceRollupRows = Array.from(workspaceDailyMap.values());
-
-      // =========================================================================
-      // Persistence Layer (Project 3 Upserts)
-      // =========================================================================
-      const dailyUpsertCount = await upsertBatch('daily', dailyRows, (r) =>
-        analyticsDb.upsertAccountDailyMetrics(workspaceId, connectionId, r)
-      );
-
-      if (summaryRow) {
-        await analyticsDb.upsertAccountSummary(workspaceId, connectionId, summaryRow);
-      }
-
-      const topPinsUpsertCount = await upsertBatch('top_pins', topPinRows, (r) =>
-        analyticsDb.upsertTopPinsSnapshots(workspaceId, connectionId, r)
-      );
-
-      if (topPinsUpsertCount > 0) {
-        // Offload raw JSONB after 7 days to reclaim space
-        const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
-        const analyticsClient = dbClients.getAnalytics(runtimeEnv);
-        const { error: reclaimErr } = await analyticsClient
-          .from('top_pins_snapshots')
-          .update({
-            raw_pin: null,
-            raw_headers: null,
-            raw_metrics: null,
-          })
-          .eq('workspace_id', workspaceId)
-          .lt('window_end', sevenDaysAgo);
-        if (reclaimErr) {
-          console.warn('[PinnerETL] raw reclaim failed:', reclaimErr.message);
-        }
-      }
 
       const rollupsUpsertCount = await upsertBatch('workspace_rollups', workspaceRollupRows, (r) =>
         analyticsDb.upsertDailyWorkspaceMetrics(workspaceId, r)

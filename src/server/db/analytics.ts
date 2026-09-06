@@ -80,6 +80,7 @@ export const analyticsDb = {
           error_details: { error: 'stale_processing_timeout' },
           completed_at: new Date().toISOString(),
         })
+        .eq('workspace_id', run.workspace_id)
         .eq('connection_id', run.connection_id)
         .eq('status', 'processing')
         .lt('started_at', thirtyMinutesAgo);

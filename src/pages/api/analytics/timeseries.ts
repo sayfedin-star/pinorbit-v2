@@ -23,7 +23,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const url = new URL(request.url);
   const workspaceId = url.searchParams.get('workspace_id') || locals.activeWorkspaceId;
   const connectionId = url.searchParams.get('connection_id');
-  const windowDays = parseInt(url.searchParams.get('window_days') || '30', 10);
+  const rawWindow = parseInt(url.searchParams.get('window_days') || '30', 10);
+  const windowDays = isNaN(rawWindow) ? 30 : Math.min(Math.max(rawWindow, 1), 365);
   const bypassCacheParam = url.searchParams.get('cache_bypass') === '1';
   let bypassCache = false;
 

@@ -32,6 +32,7 @@ vi.mock('../db/clients', () => ({
           update: vi.fn().mockReturnThis(),
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
+          in: vi.fn().mockReturnThis(),
           lt: vi.fn().mockReturnThis(),
           is: vi.fn().mockReturnThis(),
           then: vi.fn().mockImplementation((fn: any) => Promise.resolve(fn ? fn({ error: null }) : { error: null })),
