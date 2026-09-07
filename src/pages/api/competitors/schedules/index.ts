@@ -8,6 +8,18 @@ import { fastcronCall, isFastCronJobPaused } from '../../../../server/lib/fastcr
 import { listWorkspaceTokens, resolveToken } from '../../../../server/lib/token-resolver';
 import { isMatchingCompetitorJob, extractPostData } from '../cron';
 
+export function isValidTimeZone(tz: unknown): boolean {
+  if (typeof tz !== 'string') return false;
+  const trimmed = tz.trim();
+  if (!trimmed) return false;
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: trimmed });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const getDispatchEndpointUrl = (
   runtimeEnv?: Record<string, any>,
   workspaceId?: string,
@@ -279,7 +291,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
     );
   }
   const cronExpression = cronValidation.cron!;
-  const timezone = body.timezone || 'UTC';
+  if (body.timezone !== undefined && String(body.timezone).trim() && !isValidTimeZone(body.timezone)) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Invalid timezone. Must be a valid IANA timezone name.' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+  const timezone = (body.timezone && String(body.timezone).trim()) || 'UTC';
   const enabled = body.enabled !== false;
   const tokenId = body.token_id || body.fastcron_token_id || null;
 

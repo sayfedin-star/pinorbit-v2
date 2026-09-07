@@ -339,7 +339,7 @@ describe('Competitors Orphan Compensation & Token Redaction Suite (P1 #R4 & P2 #
 
       expect(response.status).toBe(200);
       const body = await response.json();
-      expect(body.success).toBe(true);
+      expect(body.success).toBe(false);
       expect(body.failed).toBe(1);
       expect(body.succeeded).toBe(0);
       expect(body.results[0].success).toBe(false);

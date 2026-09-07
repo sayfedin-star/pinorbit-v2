@@ -343,6 +343,18 @@ export async function handleDispatch(body: any, locals: any) {
         p_idempotency_key: idempotencyKey,
       });
       if (incErr) {
+        if (incErr.message && incErr.message.includes('insufficient_capacity')) {
+          for (const c of claimed) {
+            await admin.from('pins').update({
+              status: 'pending',
+              processing_started_at: null,
+              claimed_at: null,
+              claimed_by_schedule_id: null,
+              updated_at: new Date().toISOString(),
+            }).eq('id', c.id).eq('workspace_id', workspaceId).eq('account_id', accountId);
+          }
+          return json({ success: false, dispatched: 0, error: 'No active webhook with remaining capacity found.', reason: 'no_webhook_capacity' }, 503);
+        }
         console.warn('[Dispatch] increment_webhook_execution RPC failed, retrying once:', incErr.message);
         const { error: retryErr } = await admin.rpc('increment_webhook_execution', {
           p_webhook_id: hook.id,
@@ -351,6 +363,18 @@ export async function handleDispatch(body: any, locals: any) {
           p_idempotency_key: idempotencyKey,
         });
         if (retryErr) {
+          if (retryErr.message && retryErr.message.includes('insufficient_capacity')) {
+            for (const c of claimed) {
+              await admin.from('pins').update({
+                status: 'pending',
+                processing_started_at: null,
+                claimed_at: null,
+                claimed_by_schedule_id: null,
+                updated_at: new Date().toISOString(),
+              }).eq('id', c.id).eq('workspace_id', workspaceId).eq('account_id', accountId);
+            }
+            return json({ success: false, dispatched: 0, error: 'No active webhook with remaining capacity found.', reason: 'no_webhook_capacity' }, 503);
+          }
           console.error('[Dispatch] Fatal: increment_webhook_execution retry failed:', retryErr.message);
         }
       }

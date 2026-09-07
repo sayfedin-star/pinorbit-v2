@@ -27,8 +27,9 @@ export async function resolveTokenKek(runtimeEnv: Record<string, any>): Promise<
       const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
       await kv.put('token_kek:global', hex);
       const verified = await kv.get('token_kek:global');
-      if (verified && String(verified).trim().length >= 32) return String(verified).trim();
-    } catch { /* fall through */ }
+    } catch (e: any) {
+      console.warn('[TokenCrypto] KV KEK seed error:', e?.message);
+    }
   }
   // 4) Last resort: env value even if default (dev only; prod guard still applies at use-site)
   return env.TOKEN_KEK || null;
