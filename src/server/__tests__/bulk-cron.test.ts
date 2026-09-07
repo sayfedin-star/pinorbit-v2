@@ -263,6 +263,26 @@ describe('V35 — Bulk Cron Actions & Jobs Suite', () => {
       );
     });
 
+    it('does not clear DB columns when FastCron remote delete fails', async () => {
+      vi.mocked(fastcronService.batchDelete).mockResolvedValueOnce({ success: false, error: 'Remote deletion failed' });
+
+      const req = new Request('http://localhost/api/analytics/cron/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete',
+          job_ids: [1001, 1002],
+        }),
+      });
+
+      const res = await postCronBulk({ request: req, locals: defaultLocals } as any);
+      expect(res.status).toBe(200);
+      expect(fastcronService.batchDelete).toHaveBeenCalledWith([1001, 1002], 'mock_token_123');
+
+      // Verify DB update was NOT called because remote delete failed
+      expect(analyticsDb.updateWorkspaceConnection).not.toHaveBeenCalled();
+    });
+
     it('executes edit action with validated options', async () => {
       const req = new Request('http://localhost/api/analytics/cron/bulk', {
         method: 'POST',

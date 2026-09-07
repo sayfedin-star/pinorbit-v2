@@ -129,7 +129,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
                 wsName = ws.name.replace(/[—\r\n\t]+/g, ' ').trim().slice(0, 40) || 'workspace';
               }
             }
-          } catch {}
+          } catch (e: any) {
+            console.warn('[CompetitorTokens] Workspace name lookup failed:', e?.message);
+          }
 
           const dispatchUrl = getDispatchEndpointUrl(runtimeEnv, workspaceId, effSecret.value.trim());
           const postDataStr = JSON.stringify({ workspace_id: workspaceId, pipeline: 'competitors', label: 'Default Daily', trigger: 'cron' });

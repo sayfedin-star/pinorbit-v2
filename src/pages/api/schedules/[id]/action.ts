@@ -75,7 +75,9 @@ export const POST: APIRoute = async ({ request, params, locals }) => {
               return new Response(JSON.stringify({ success: true, via: 'fastcron', detail: res.data }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
           }
-        } catch {}
+        } catch (e: any) {
+          console.warn('[ScheduleAction] FastCron cron_run failed, falling back to direct dispatch:', e?.message);
+        }
       }
       const base = (typeof process !== 'undefined' && process.env.DISPATCH_BASE_URL)
         ? process.env.DISPATCH_BASE_URL.replace(/\/$/, '')

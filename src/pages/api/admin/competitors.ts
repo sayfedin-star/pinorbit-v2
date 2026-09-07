@@ -39,8 +39,11 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const boardsOnly = rawBoardsOnly === '1';
 
   if (!id) {
-    const { data, error } = await g.ok!.db.from('competitors').select('*')
+    const compQuery = g.ok!.db.from('competitors').select('*')
       .eq('workspace_id', g.ok!.ws).order('created_at', { ascending: false });
+    const { data, error } = await (typeof (compQuery as any)?.range === 'function'
+      ? (compQuery as any).range(0, 999)
+      : compQuery);
     if (error) return json({ error: error.message }, 500);
     const comps = data || [];
     const ids = comps.map((c: any) => c.id);
@@ -112,10 +115,14 @@ export const GET: APIRoute = async ({ request, locals }) => {
       }
 
       try {
-        const bRes = await g.ok!.db.from('competitor_boards').select('competitor_id').in('competitor_id', ids);
+        let bQuery = g.ok!.db.from('competitor_boards').select('competitor_id');
+        if (typeof (bQuery as any)?.eq === 'function') bQuery = (bQuery as any).eq('workspace_id', g.ok!.ws);
+        if (typeof (bQuery as any)?.in === 'function') bQuery = (bQuery as any).in('competitor_id', ids);
+        if (typeof (bQuery as any)?.range === 'function') bQuery = (bQuery as any).range(0, 999);
+        const bRes = await bQuery;
         for (const b of (bRes?.data || []) as any[]) countMap[b.competitor_id] = (countMap[b.competitor_id] || 0) + 1;
-      } catch {
-        // Non-blocking fallback
+      } catch (e: any) {
+        console.warn('[AdminCompetitors] Boards count query failed:', e?.message);
       }
     }
 
