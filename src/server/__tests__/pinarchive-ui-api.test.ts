@@ -170,16 +170,10 @@ describe('PinArchive Dashboard UI Read Layer API Suite', () => {
       expect(json.accounts[0].oldest_pin_at).toBeNull();
     });
 
-    it('uses DB oldest_pin_at from pa_account_pin_counts when gasCall fails or has no sheet data', async () => {
-      vi.mocked(gasCall).mockResolvedValueOnce({ ok: false, error: 'Network timeout' });
-      mockPinArchiveClient.rpc.mockImplementation((fn: string) => {
-        if (fn === 'pa_account_pin_counts') {
-          return Promise.resolve({
-            data: [{ account_id: 'acc-1', pins: 5, archived: 5, oldest_pin_at: '2026-05-01T10:00:00.000Z' }],
-            error: null,
-          });
-        }
-        return Promise.resolve({ data: [], error: null });
+    it('relies exclusively on Google Sheet for oldest_pin_at and returns null when sheet has no pins', async () => {
+      vi.mocked(gasCall).mockResolvedValueOnce({
+        ok: true,
+        ages: { roseisabelle555: null },
       });
 
       const req = new Request('http://localhost:4321/api/pinarchive/overview');
@@ -191,7 +185,7 @@ describe('PinArchive Dashboard UI Read Layer API Suite', () => {
       expect(res.status).toBe(200);
       const json = await res.json();
       expect(json.success).toBe(true);
-      expect(json.accounts[0].oldest_pin_at).toBe('2026-05-01T10:00:00.000Z');
+      expect(json.accounts[0].oldest_pin_at).toBeNull();
     });
 
     it('serves oldest_pin_at from edge cache on repeated requests without invoking gasCall again', async () => {
