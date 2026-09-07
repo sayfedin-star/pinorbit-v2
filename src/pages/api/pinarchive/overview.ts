@@ -97,12 +97,16 @@ export const GET: APIRoute = async ({ request, locals }) => {
     // 2. Fetch live DB pin count per account (pins total + archived qualifying)
     const countMap = new Map<string, number>();
     const archivedMap = new Map<string, number>();
+    const dbOldestPinMap = new Map<string, string>();
     const countRpc = countRpcSettled.status === 'fulfilled' ? countRpcSettled.value : null;
     if (countRpc && !countRpc.error && Array.isArray(countRpc.data)) {
       for (const row of countRpc.data) {
         if (row.account_id) {
           countMap.set(row.account_id, Number(row.pins || 0));
           archivedMap.set(row.account_id, Number(row.archived ?? row.pins ?? 0));
+          if (row.oldest_pin_at) {
+            dbOldestPinMap.set(row.account_id, String(row.oldest_pin_at));
+          }
         }
       }
     }
@@ -219,6 +223,15 @@ export const GET: APIRoute = async ({ request, locals }) => {
     // Attach computed metrics to each account:
     accounts = accounts.map((a: any) => {
       const dbPins = countMap.has(a.id) ? countMap.get(a.id) : a.pins_count;
+      const sheetAge = combinedAges[a.username];
+      const dbAge = dbOldestPinMap.get(a.id);
+      let effectiveOldestPin: string | null = null;
+      if (sheetAge && dbAge) {
+        effectiveOldestPin = new Date(sheetAge).getTime() <= new Date(dbAge).getTime() ? sheetAge : dbAge;
+      } else {
+        effectiveOldestPin = sheetAge || dbAge || null;
+      }
+
       return {
         ...a,
         db_pins_count: dbPins,
@@ -226,7 +239,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         next_run_at: activeNextRunIso || a.next_run_at || null,
         changed_last_refresh: changedMap.get(a.id) ?? 0,
         checked_last_refresh: Number(dbPins ?? 0),
-        oldest_pin_at: combinedAges[a.username] ?? null,
+        oldest_pin_at: effectiveOldestPin,
       };
     });
 
