@@ -1406,11 +1406,15 @@ export async function triggerBoardAction(
     });
 
     if (res.ok && resolvedWebhookId) {
-      await schedulingClient.rpc('increment_webhook_execution', {
-        p_webhook_id: resolvedWebhookId,
-        p_count: 1,
-        p_workspace_id: account.workspace_id,
-      });
+      try {
+        await schedulingClient.rpc('increment_webhook_execution', {
+          p_webhook_id: resolvedWebhookId,
+          p_count: 1,
+          p_workspace_id: account.workspace_id,
+        });
+      } catch (incErr: any) {
+        console.warn('[FastCronService] Webhook execution accounting failed:', incErr?.message);
+      }
     }
 
     return {

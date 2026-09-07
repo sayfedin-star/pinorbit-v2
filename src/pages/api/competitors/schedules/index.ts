@@ -6,19 +6,11 @@ import { dbClients } from '../../../../server/db/clients';
 import { getEffectiveSecret } from '../../../../server/services/webhook-secrets';
 import { fastcronCall, isFastCronJobPaused } from '../../../../server/lib/fastcron-client';
 import { listWorkspaceTokens, resolveToken } from '../../../../server/lib/token-resolver';
+import { errorStatus } from '../../../../server/lib/http-error';
 import { isMatchingCompetitorJob, extractPostData } from '../cron';
 
-export function isValidTimeZone(tz: unknown): boolean {
-  if (typeof tz !== 'string') return false;
-  const trimmed = tz.trim();
-  if (!trimmed) return false;
-  try {
-    Intl.DateTimeFormat(undefined, { timeZone: trimmed });
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { isValidTimeZone } from '../../../../server/lib/timezone';
+export { isValidTimeZone };
 
 export const getDispatchEndpointUrl = (
   runtimeEnv?: Record<string, any>,
@@ -394,9 +386,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
       throw insertErr;
     }
   } catch (err: any) {
+    const status = errorStatus(err);
     return new Response(
       JSON.stringify({ success: false, error: err.message || 'Failed to create competitor schedule' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      { status: status !== 500 ? status : (err.status || 500), headers: { 'Content-Type': 'application/json' } }
     );
   }
 };

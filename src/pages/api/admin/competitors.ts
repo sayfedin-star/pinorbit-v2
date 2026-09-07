@@ -68,7 +68,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
           }));
           snapsList = perComp.flat();
         }
-      } catch {
+      } catch (e: any) {
+        console.warn('[AdminCompetitors] Snapshots query failed:', e?.message);
         snapsList = [];
       }
 
@@ -126,8 +127,10 @@ export const GET: APIRoute = async ({ request, locals }) => {
       }
     }
 
+    const truncated = comps.length >= 1000;
     return json({
       success: true,
+      truncated,
       competitors: comps.map((c: any) => ({
         ...c,
         boards_count: countMap[c.id] || 0,
@@ -143,11 +146,13 @@ export const GET: APIRoute = async ({ request, locals }) => {
 
   const db = g.ok!.db;
   if (boardsOnly) {
-    const comp = await db.from('competitors').select('id').eq('id', id).eq('workspace_id', g.ok!.ws).maybeSingle();
-    if (!comp.data) return json({ error: 'Not found in workspace' }, 404);
-    const { data: boards, error: bErr } = await db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false });
+    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false });
+    const { data: boards, error: bErr } = await (typeof (boardsQuery as any)?.range === 'function'
+      ? (boardsQuery as any).range(0, 999)
+      : boardsQuery);
     if (bErr) return json({ error: bErr.message }, 500);
-    return json({ success: true, boards: boards || [] });
+    const boardsArr = boards || [];
+    return json({ success: true, truncated: boardsArr.length >= 1000, boards: boardsArr });
   }
 
   const comp = await db.from('competitors').select('*').eq('id', id).eq('workspace_id', g.ok!.ws).maybeSingle();
@@ -181,9 +186,10 @@ export const GET: APIRoute = async ({ request, locals }) => {
       strategy_age_days = Math.max(0, Math.floor(diffMs / 86400000));
     }
   } else {
+    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false });
     const [snaps, boards, topPins] = await Promise.all([
       db.from('competitor_snapshots').select('*').eq('competitor_id', id).order('recorded_at', { ascending: false }).limit(100),
-      db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false }),
+      (typeof (boardsQuery as any)?.range === 'function' ? (boardsQuery as any).range(0, 999) : boardsQuery),
       db.from('competitor_top_pins').select('*').eq('competitor_id', id).order('save_count', { ascending: false }).limit(10),
     ]);
     snapsList = (snaps.data || []).slice().reverse();

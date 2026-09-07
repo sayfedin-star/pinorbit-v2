@@ -6,7 +6,9 @@ import { dbClients } from '../../../../server/db/clients';
 import { getEffectiveSecret } from '../../../../server/services/webhook-secrets';
 import { fastcronCall } from '../../../../server/lib/fastcron-client';
 import { resolveToken } from '../../../../server/lib/token-resolver';
-import { validateCronExpression, getDispatchEndpointUrl, isValidTimeZone } from './index';
+import { errorStatus } from '../../../../server/lib/http-error';
+import { isValidTimeZone } from '../../../../server/lib/timezone';
+import { validateCronExpression, getDispatchEndpointUrl } from './index';
 
 // ── PATCH: Update Schedule ────────────────────────────────────────────────────
 export const PATCH: APIRoute = async ({ params, request, locals }) => {
@@ -171,9 +173,10 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
+    const status = errorStatus(err);
     return new Response(
       JSON.stringify({ success: false, error: err.message || 'Failed to update schedule' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      { status: status !== 500 ? status : (err.status || 500), headers: { 'Content-Type': 'application/json' } }
     );
   }
 };
