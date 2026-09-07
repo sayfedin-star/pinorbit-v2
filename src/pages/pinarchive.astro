@@ -414,6 +414,14 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
                     </div>
                   </div>
                   <div class="flex items-center gap-2.5 shrink-0">
+                    <button
+                      id="run-audit-sweep-now-btn"
+                      type="button"
+                      class="h-7 inline-flex items-center gap-1 rounded-lg border border-border bg-background hover:bg-muted px-2 text-[11px] font-semibold text-foreground shadow-2xs transition-colors cursor-pointer"
+                      title="Run the full workspace Audit Sweep now"
+                    >
+                      ▶ Run Now
+                    </button>
                     <span id="setting-audit-sweep-label" class="text-xs font-bold text-emerald-500">Active</span>
                     <label class="relative inline-flex items-center cursor-pointer shrink-0">
                       <input id="setting-audit-sweep-enabled" type="checkbox" checked class="sr-only peer" />
@@ -662,6 +670,15 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
             title="🧠 Full Discovery Pipeline: Searches Pinterest for newly published pins and archives them"
           >
             <span>🧠 Discover Pins</span>
+          </button>
+
+          <button
+            id="audit-sweep-selected-btn"
+            type="button"
+            class="h-8 inline-flex items-center gap-1.5 rounded-xl border border-border bg-background hover:bg-muted px-2.5 text-xs font-semibold text-foreground shadow-2xs transition-colors cursor-pointer"
+            title="🗓️ Run the deep Monthly Audit Sweep now for the selected accounts only (bypasses schedule check)"
+          >
+            <span>🗓️ Audit Sweep Now</span>
           </button>
 
           <!-- Bulk Interval Dropdown -->
@@ -2079,11 +2096,13 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
   function disableSettingsForm() {
     const saveBtn = document.getElementById('save-ingest-settings-btn') as HTMLButtonElement | null;
     const reevaluateBtn = document.getElementById('reevaluate-candidates-btn') as HTMLButtonElement | null;
+    const runAuditSweepBtn = document.getElementById('run-audit-sweep-now-btn') as HTMLButtonElement | null;
     const roleBadge = document.getElementById('settings-role-badge');
-    const inputs = document.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
-      '#setting-ingest-enabled, #setting-paused-policy, #setting-max-batch, #setting-refresh-max-pins, #setting-refresh-min-saves, #setting-min-saves, #setting-min-repins, #setting-rising-age, #setting-rising-saves, #setting-discovery-max-pages, #setting-discovery-stop-pages, #setting-audit-sweep-enabled, #setting-daily-sheet-sync, #setting-github-schedule'
+    const inputs = document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>(
+      '#setting-ingest-enabled, #setting-paused-policy, #setting-max-batch, #setting-refresh-max-pins, #setting-refresh-min-saves, #setting-min-saves, #setting-min-repins, #setting-rising-age, #setting-rising-saves, #setting-discovery-max-pages, #setting-discovery-stop-pages, #setting-audit-sweep-enabled, #setting-daily-sheet-sync, #setting-github-schedule, #run-audit-sweep-now-btn'
     );
     inputs.forEach((el) => { el.disabled = true; });
+    if (runAuditSweepBtn) { runAuditSweepBtn.disabled = true; runAuditSweepBtn.classList.add('hidden'); }
     if (saveBtn) { saveBtn.disabled = true; saveBtn.classList.add('hidden'); }
     if (reevaluateBtn) { reevaluateBtn.disabled = true; reevaluateBtn.classList.add('hidden'); }
     if (roleBadge) roleBadge.classList.remove('hidden');
@@ -2613,6 +2632,116 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
           setTimeout(() => loadOverview(false as any), 2000);
         } else {
           toast(json.error || 'Failed to dispatch discovery pipeline', 'error');
+        }
+      } catch (err: any) {
+        toast(err.message || 'Network error', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+        }
+      }
+    });
+
+    document.getElementById('audit-sweep-selected-btn')?.addEventListener('click', async () => {
+      if (selectedAccounts.size === 0) return;
+      const root = document.getElementById('pinarchive-page-root');
+      const wsId = root?.getAttribute('data-workspace-id');
+      if (!wsId) {
+        toast('Workspace identifier not found', 'error');
+        return;
+      }
+
+      const selectedUsernames = rawAccounts
+        .filter(a => selectedAccounts.has(a.id))
+        .map(a => a.username)
+        .filter(Boolean);
+
+      if (selectedUsernames.length === 0) {
+        toast('No valid accounts selected', 'error');
+        return;
+      }
+
+      const confirmed = confirm(`Run deep Monthly Audit Sweep for ${selectedUsernames.length} selected account(s)?`);
+      if (!confirmed) return;
+
+      const btn = document.getElementById('audit-sweep-selected-btn') as HTMLButtonElement | null;
+      const originalText = btn?.innerHTML || '<span>🗓️ Audit Sweep Now</span>';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span>⏳ Dispatching…</span>`;
+      }
+
+      try {
+        const res = await fetch('/api/pinarchive/accounts-gas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'run_now',
+            workspace_id: wsId,
+            usernames: selectedUsernames,
+          }),
+        });
+        const json = await res.json();
+        if (res.ok && json.success) {
+          const failed = (json.results || []).filter((r: any) => !r.ok);
+          if (failed.length > 0) {
+            toast(`Audit sweep queued with warnings: ${failed[0]?.error || 'partial error'}`, 'error');
+          } else {
+            toast(`🗓️ Monthly Audit Sweep dispatched for @${selectedUsernames.join(', @')}!`);
+          }
+          setTimeout(() => loadOverview(false as any), 2000);
+        } else {
+          toast(json.error || 'Failed to dispatch audit sweep', 'error');
+        }
+      } catch (err: any) {
+        toast(err.message || 'Network error', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+        }
+      }
+    });
+
+    document.getElementById('run-audit-sweep-now-btn')?.addEventListener('click', async () => {
+      const root = document.getElementById('pinarchive-page-root');
+      const wsId = root?.getAttribute('data-workspace-id');
+      if (!wsId) {
+        toast('Workspace identifier not found', 'error');
+        return;
+      }
+
+      const confirmed = confirm('Run full workspace Monthly Audit Sweep now for all accounts?');
+      if (!confirmed) return;
+
+      const btn = document.getElementById('run-audit-sweep-now-btn') as HTMLButtonElement | null;
+      const originalText = btn?.innerHTML || '▶ Run Now';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Dispatching…';
+      }
+
+      try {
+        const res = await fetch('/api/pinarchive/accounts-gas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'run_now',
+            workspace_id: wsId,
+          }),
+        });
+        const json = await res.json();
+        if (res.ok && json.success) {
+          const failed = (json.results || []).filter((r: any) => !r.ok);
+          if (failed.length > 0) {
+            toast(`Audit sweep queued with warnings: ${failed[0]?.error || 'partial error'}`, 'error');
+          } else {
+            toast('🗓️ Full workspace Monthly Audit Sweep dispatched!');
+          }
+          setTimeout(() => loadOverview(false as any), 2000);
+        } else {
+          toast(json.error || 'Failed to dispatch workspace audit sweep', 'error');
         }
       } catch (err: any) {
         toast(err.message || 'Network error', 'error');

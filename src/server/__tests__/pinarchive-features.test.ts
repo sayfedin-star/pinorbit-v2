@@ -191,5 +191,60 @@ describe('PinArchive Features & RPCs Suite', () => {
       const json = await res.json();
       expect(json.success).toBe(false);
     });
+
+    it('handles run_now action with empty usernames by dispatching workspace-wide', async () => {
+      mockPinArchiveClient.from.mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: { discovery_max_pages: 50 },
+              error: null,
+            }),
+          }),
+        }),
+      });
+
+      const originalFetch = global.fetch;
+      global.fetch = vi.fn().mockResolvedValue({
+        status: 204,
+        ok: true,
+      } as any);
+
+      try {
+        const req = new Request('http://localhost:4321/api/pinarchive/accounts-gas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: mockWsId,
+            action: 'run_now',
+          }),
+        });
+
+        const res = await accountsGasHandler({
+          request: req,
+          locals: {
+            user: mockUser,
+            supabase: {},
+            activeWorkspaceId: mockWsId,
+            runtimeEnv: { GITHUB_DISPATCH_TOKEN: 'gh_test_token' },
+          },
+        } as any);
+
+        expect(res.status).toBe(200);
+        const json = await res.json();
+        expect(json.success).toBe(true);
+        expect(json.action).toBe('run_now');
+        expect(json.results).toEqual([{ username: 'all', ok: true, summary: { queued: true } }]);
+        expect(global.fetch).toHaveBeenCalledWith(
+          expect.stringContaining('/actions/workflows/pinarchive-pipeline.yml/dispatches'),
+          expect.objectContaining({
+            method: 'POST',
+            body: expect.stringContaining('"usernames":""'),
+          })
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
   });
 });

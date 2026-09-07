@@ -81,28 +81,30 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .filter((u) => USERNAME_REGEX.test(u))
       .slice(0, 50);
 
-    if (usernames.length === 0) {
+    if (usernames.length === 0 && action !== 'run_now') {
       return json({ success: false, error: 'At least one valid username is required.' }, 422);
     }
 
-    // Verify all requested usernames exist in this workspace's pa_accounts
-    const { data: dbAccounts, error: accErr } = await db
-      .from('pa_accounts')
-      .select('id, username, status, interval_days')
-      .eq('workspace_id', wsCtx.workspaceId)
-      .in('username', usernames);
+    if (usernames.length > 0) {
+      // Verify all requested usernames exist in this workspace's pa_accounts
+      const { data: dbAccounts, error: accErr } = await db
+        .from('pa_accounts')
+        .select('id, username, status, interval_days')
+        .eq('workspace_id', wsCtx.workspaceId)
+        .in('username', usernames);
 
-    if (accErr) {
-      return json({ success: false, error: `Database error verifying accounts: ${accErr.message}` }, 500);
-    }
+      if (accErr) {
+        return json({ success: false, error: `Database error verifying accounts: ${accErr.message}` }, 500);
+      }
 
-    const verifiedUsernames = new Set((dbAccounts || []).map((a: any) => a.username.toLowerCase()));
-    const unverified = usernames.filter((u) => !verifiedUsernames.has(u));
-    if (unverified.length > 0) {
-      return json({
-        success: false,
-        error: `Accounts not found in workspace: ${unverified.join(', ')}`,
-      }, 404);
+      const verifiedUsernames = new Set((dbAccounts || []).map((a: any) => a.username.toLowerCase()));
+      const unverified = usernames.filter((u) => !verifiedUsernames.has(u));
+      if (unverified.length > 0) {
+        return json({
+          success: false,
+          error: `Accounts not found in workspace: ${unverified.join(', ')}`,
+        }, 404);
+      }
     }
 
     const results: Array<{ username: string; ok: boolean; error?: string; summary?: any }> = [];
@@ -159,13 +161,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
 
       if (ghRes.status === 204 || (ghRes.status >= 200 && ghRes.status < 300)) {
-        for (const u of usernames) {
-          results.push({ username: u, ok: true, summary: { queued: true } });
+        if (usernames.length === 0) {
+          results.push({ username: 'all', ok: true, summary: { queued: true } });
+        } else {
+          for (const u of usernames) {
+            results.push({ username: u, ok: true, summary: { queued: true } });
+          }
         }
       } else {
         const ghErrText = await ghRes.text().catch(() => '');
-        for (const u of usernames) {
-          results.push({ username: u, ok: false, error: `GitHub dispatch failed (HTTP ${ghRes.status}): ${ghErrText}` });
+        if (usernames.length === 0) {
+          results.push({ username: 'all', ok: false, error: `GitHub dispatch failed (HTTP ${ghRes.status}): ${ghErrText}` });
+        } else {
+          for (const u of usernames) {
+            results.push({ username: u, ok: false, error: `GitHub dispatch failed (HTTP ${ghRes.status}): ${ghErrText}` });
+          }
         }
       }
     } else if (action === 'sync_now') {
