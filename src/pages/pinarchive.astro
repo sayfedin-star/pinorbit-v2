@@ -2677,7 +2677,7 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            action: 'run_now',
+            action: 'audit_sweep',
             workspace_id: wsId,
             usernames: selectedUsernames,
           }),
@@ -2727,7 +2727,7 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            action: 'run_now',
+            action: 'audit_sweep',
             workspace_id: wsId,
           }),
         });

@@ -37,7 +37,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   const action = String(body.action || '').trim().toLowerCase();
-  const ALLOWED_ACTIONS = ['run_now', 'sync_now', 'pause', 'resume', 'set_interval', 'status'];
+  const ALLOWED_ACTIONS = ['run_now', 'audit_sweep', 'sync_now', 'pause', 'resume', 'set_interval', 'status'];
   if (!ALLOWED_ACTIONS.includes(action)) {
     return json({ success: false, error: `Invalid action: must be one of ${ALLOWED_ACTIONS.join(', ')}` }, 422);
   }
@@ -81,7 +81,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .filter((u) => USERNAME_REGEX.test(u))
       .slice(0, 50);
 
-    if (usernames.length === 0 && action !== 'run_now') {
+    if (usernames.length === 0 && action !== 'run_now' && action !== 'audit_sweep') {
       return json({ success: false, error: 'At least one valid username is required.' }, 422);
     }
 
@@ -110,7 +110,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const results: Array<{ username: string; ok: boolean; error?: string; summary?: any }> = [];
     const days = Number(body.days) || 3;
 
-    if (action === 'run_now') {
+    if (action === 'run_now' || action === 'audit_sweep') {
       const githubRepo =
         (runtimeEnv.GITHUB_REPO as string) ||
         (typeof process !== 'undefined' ? process.env.GITHUB_REPO : '') ||
@@ -126,8 +126,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
         return json({ success: false, error: 'GitHub dispatch token not configured on server.' }, 503);
       }
 
+      const isAuditSweep = action === 'audit_sweep' || Boolean(body.audit_sweep || body.sweep);
+
       let maxPagesInput = body.max_pages ? String(body.max_pages) : '';
-      if (!maxPagesInput) {
+      if (!maxPagesInput && !isAuditSweep) {
         const { data: wsSetting } = await db
           .from('pa_workspace_settings')
           .select('discovery_max_pages')
@@ -138,7 +140,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
         }
       }
 
-      const dispatchUrl = `https://api.github.com/repos/${githubRepo}/actions/workflows/pinarchive-pipeline.yml/dispatches`;
+      const targetWorkflow = isAuditSweep ? 'pinarchive-audit-sweep.yml' : 'pinarchive-pipeline.yml';
+      const dispatchUrl = `https://api.github.com/repos/${githubRepo}/actions/workflows/${targetWorkflow}/dispatches`;
+
+      const dispatchInputs = isAuditSweep
+        ? {
+            workspace_id: wsCtx.workspaceId,
+            usernames: usernames.join(','),
+          }
+        : {
+            workspace_id: wsCtx.workspaceId,
+            usernames: usernames.join(','),
+            mode: 'all',
+            force: 'true',
+            max_pages: maxPagesInput,
+          };
+
       const ghRes = await fetch(dispatchUrl, {
         method: 'POST',
         headers: {
@@ -149,13 +166,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         },
         body: JSON.stringify({
           ref: 'main',
-          inputs: {
-            workspace_id: wsCtx.workspaceId,
-            usernames: usernames.join(','),
-            mode: 'all',
-            force: 'true',
-            max_pages: maxPagesInput,
-          },
+          inputs: dispatchInputs,
         }),
         signal: AbortSignal.timeout(8000),
       });
