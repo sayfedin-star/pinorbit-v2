@@ -191,5 +191,133 @@ describe('PinArchive Features & RPCs Suite', () => {
       const json = await res.json();
       expect(json.success).toBe(false);
     });
+
+    it('handles run_now action with empty usernames by dispatching workspace-wide', async () => {
+      mockPinArchiveClient.from.mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: { discovery_max_pages: 500 },
+              error: null,
+            }),
+          }),
+        }),
+      });
+
+      const originalFetch = global.fetch;
+      global.fetch = vi.fn().mockResolvedValue({
+        status: 204,
+        ok: true,
+      } as any);
+
+      try {
+        const req = new Request('http://localhost:4321/api/pinarchive/accounts-gas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: mockWsId,
+            action: 'run_now',
+          }),
+        });
+
+        const res = await accountsGasHandler({
+          request: req,
+          locals: {
+            user: mockUser,
+            supabase: {},
+            activeWorkspaceId: mockWsId,
+            runtimeEnv: { GITHUB_DISPATCH_TOKEN: 'gh_test_token' },
+          },
+        } as any);
+
+        expect(res.status).toBe(200);
+        const json = await res.json();
+        expect(json.success).toBe(true);
+        expect(json.action).toBe('run_now');
+        expect(json.results).toEqual([{ username: 'all', ok: true, summary: { queued: true } }]);
+        expect(global.fetch).toHaveBeenCalledWith(
+          expect.stringContaining('/actions/workflows/pinarchive-pipeline.yml/dispatches'),
+          expect.objectContaining({
+            method: 'POST',
+            body: expect.stringContaining('"max_pages":"500"'),
+          })
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it('handles audit_sweep action by dispatching pinarchive-audit-sweep.yml without early-stop', async () => {
+      mockPinArchiveClient.from.mockImplementation((table: string) => {
+        if (table === 'pa_accounts') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                in: vi.fn().mockResolvedValue({
+                  data: [{ id: mockAccId, username: 'ragonuregaso', status: 'active', interval_days: 1 }],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'pa_workspace_settings') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: { discovery_max_pages: 500 },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        return { select: vi.fn() };
+      });
+
+      const originalFetch = global.fetch;
+      global.fetch = vi.fn().mockResolvedValue({
+        status: 204,
+        ok: true,
+      } as any);
+
+      try {
+        const req = new Request('http://localhost:4321/api/pinarchive/accounts-gas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: mockWsId,
+            action: 'audit_sweep',
+            usernames: ['ragonuregaso'],
+          }),
+        });
+
+        const res = await accountsGasHandler({
+          request: req,
+          locals: {
+            user: mockUser,
+            supabase: {},
+            activeWorkspaceId: mockWsId,
+            runtimeEnv: { GITHUB_DISPATCH_TOKEN: 'gh_test_token' },
+          },
+        } as any);
+
+        expect(res.status).toBe(200);
+        const json = await res.json();
+        expect(json.success).toBe(true);
+        expect(json.action).toBe('audit_sweep');
+        expect(json.results).toEqual([{ username: 'ragonuregaso', ok: true, summary: { queued: true } }]);
+        expect(global.fetch).toHaveBeenCalledWith(
+          expect.stringContaining('/actions/workflows/pinarchive-audit-sweep.yml/dispatches'),
+          expect.objectContaining({
+            method: 'POST',
+            body: expect.stringContaining('"max_pages":"500"'),
+          })
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
   });
 });

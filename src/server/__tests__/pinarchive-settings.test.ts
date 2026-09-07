@@ -85,7 +85,7 @@ describe('PinArchive Ingest Settings & Account Toggle API Suite', () => {
       expect(json.pin_filter_rising_saves).toBe(34);
       expect(json.refresh_min_saves).toBe(0);
       expect(json.discovery_stop_pages).toBe(3);
-      expect(json.discovery_max_pages).toBe(50);
+      expect(json.discovery_max_pages).toBe(500);
       expect(json.audit_sweep_enabled).toBe(true);
       expect(json.daily_sheet_sync_enabled).toBe(false);
       expect(json.github_schedule_enabled).toBe(true);

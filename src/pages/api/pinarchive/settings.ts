@@ -24,7 +24,7 @@ const DEFAULT_SETTINGS = {
   refresh_max_pins: 0,
   refresh_min_saves: 0,
   discovery_stop_pages: 3,
-  discovery_max_pages: 50,
+  discovery_max_pages: 500,
   audit_sweep_enabled: true,
   daily_sheet_sync_enabled: false,
   github_schedule_enabled: true,
