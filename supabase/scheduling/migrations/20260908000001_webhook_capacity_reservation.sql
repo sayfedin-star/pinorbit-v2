@@ -73,5 +73,5 @@ END;
 $function$;
 
 -- Preserve permissions
-REVOKE ALL ON FUNCTION public.increment_webhook_execution(uuid, integer, uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.increment_webhook_execution(uuid, integer, uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.increment_webhook_execution(uuid, integer, uuid, text) TO service_role;

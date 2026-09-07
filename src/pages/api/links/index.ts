@@ -121,6 +121,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
         limit,
         total_pages: Math.ceil(total / limit),
         domains,
+        domains_truncated: (allRows || []).length >= 1000,
         user_count: userCount || 0,
         workspace_count: wsCount || 0,
         scope,

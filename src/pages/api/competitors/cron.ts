@@ -6,6 +6,7 @@ import { dbClients } from '../../../server/db/clients';
 import { getEffectiveSecret } from '../../../server/services/webhook-secrets';
 import { fastcronCall, isFastCronJobPaused } from '../../../server/lib/fastcron-client';
 import { listWorkspaceTokens, resolveToken } from '../../../server/lib/token-resolver';
+import { isValidTimeZone } from '../../../server/lib/timezone';
 
 /**
  * ARCHITECTURAL DECISION & AUDIT DEFENSE:
@@ -609,7 +610,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
     const cronExpression = cronValidation.cron!;
-    const timezone = body?.timezone || 'UTC';
+    if (body?.timezone && !isValidTimeZone(body.timezone)) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Invalid timezone. Must be a valid IANA timezone name.' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    const timezone = (body?.timezone && typeof body.timezone === 'string' && body.timezone.trim().length > 0) ? body.timezone.trim() : 'UTC';
     const enabled = body?.enabled !== false;
     const postDataStr = JSON.stringify({
       workspace_id: workspaceId,

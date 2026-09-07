@@ -57,6 +57,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const { data: pin } = await admin.from('pins').select('*').eq('id', internalId).eq('workspace_id', wsId).maybeSingle();
       if (!pin) return new Response(JSON.stringify({ success: false, error: 'Pin not found.' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
       if (ev === 'pin.failed' || payload.success === false) {
+        // Idempotency & Terminal Safety Guard: An out-of-order pin.failed must NEVER regress a pin that is already posted
+        if (pin.status === 'posted') {
+          return new Response(JSON.stringify({ success: true, handled: 'pin_failed_ignored_already_posted', pin_id: internalId }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
         const rc = (pin.attempts ?? pin.retry_count ?? 0) + 1;
         const exhausted = rc >= (pin.max_retries ?? 2);
         await admin.from('pins').update({
@@ -124,7 +128,31 @@ export const POST: APIRoute = async ({ request, locals }) => {
         updateFields.image_url = rawImg;
       }
 
-      await admin.from('pins').update(updateFields).eq('id', internalId).eq('workspace_id', wsId);
+      // Atomic CAS Guard: Only update if the pin is NOT already posted.
+      // If another concurrent callback already transitioned the pin to 'posted', 0 rows are updated.
+      let updateQuery: any = admin
+        .from('pins')
+        .update(updateFields)
+        .eq('id', internalId)
+        .eq('workspace_id', wsId);
+
+      if (typeof updateQuery?.neq === 'function') {
+        updateQuery = updateQuery.neq('status', 'posted');
+      }
+      if (typeof updateQuery?.select === 'function') {
+        updateQuery = updateQuery.select('id');
+      }
+
+      const { data: updatedRows, error: updateErr } = await updateQuery;
+
+      if (updateErr) {
+        console.warn('[IngestAPI] Failed to update pin status to posted:', updateErr.message);
+        return new Response(JSON.stringify({ success: false, error: 'Failed to update pin status.' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      if (Array.isArray(updatedRows) && updatedRows.length === 0) {
+        return new Response(JSON.stringify({ success: true, handled: 'pin_posted_duplicate', pin_id: internalId }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
       const { error: logErr } = await admin.from('pin_delivery_logs').insert({
         pin_id: internalId,
         attempt_no: pin.attempts,

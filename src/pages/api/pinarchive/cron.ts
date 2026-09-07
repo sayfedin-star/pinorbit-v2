@@ -7,6 +7,7 @@ import { getEffectiveSecret, maskSecret } from '../../../server/services/webhook
 import { resolveScheduleToken } from '../../../server/services/fastcron-service';
 import { resolveTokenKek, decryptToken } from '../../../server/lib/token-crypto';
 import { getNextCronDate } from '../../../lib/cron-helper';
+import { isValidTimeZone } from '../../../server/lib/timezone';
 
 export const FASTCRON_BASE = 'https://www.fastcron.com/api/v1';
 
@@ -961,6 +962,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
 
       const label = body.label && typeof body.label === 'string' && body.label.trim().length > 0 ? body.label.trim() : 'Schedule';
+      if (body?.timezone && !isValidTimeZone(body.timezone)) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Invalid timezone. Must be a valid IANA timezone name.' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
       const timezone = body.timezone && typeof body.timezone === 'string' && body.timezone.trim().length > 0 ? body.timezone.trim() : 'UTC';
       const isEnabled = body.enabled !== false;
       const editPostDataStr = JSON.stringify({ workspace_id: workspaceId, pipeline: 'pinarchive', label });
@@ -1026,6 +1033,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     const label = body.label && typeof body.label === 'string' && body.label.trim().length > 0 ? body.label.trim() : 'Daily Refresh';
+    if (body?.timezone && !isValidTimeZone(body.timezone)) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Invalid timezone. Must be a valid IANA timezone name.' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
     const timezone = body.timezone && typeof body.timezone === 'string' && body.timezone.trim().length > 0 ? body.timezone.trim() : 'UTC';
     const isEnabled = body.enabled !== false;
     const createPostDataStr = JSON.stringify({ workspace_id: workspaceId, pipeline: 'pinarchive', label });
