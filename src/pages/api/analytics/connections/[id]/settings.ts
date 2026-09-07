@@ -32,7 +32,9 @@ function isValidTimeZone(tz: string): boolean {
       const supported = Intl.supportedValuesOf('timeZone');
       return supported.includes(tz);
     }
-  } catch {}
+  } catch (e: any) {
+    console.warn('[AnalyticsSettings] Intl.supportedValuesOf failed:', e?.message);
+  }
   return FALLBACK_TIMEZONES.includes(tz);
 }
 

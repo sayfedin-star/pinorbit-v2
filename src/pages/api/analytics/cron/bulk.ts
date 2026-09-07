@@ -29,7 +29,9 @@ function isValidTimeZone(tz: string): boolean {
       const supported = Intl.supportedValuesOf('timeZone');
       return supported.includes(tz);
     }
-  } catch {}
+  } catch (e: any) {
+    console.warn('[AnalyticsBulk] Intl.supportedValuesOf failed:', e?.message);
+  }
   return FALLBACK_TIMEZONES.includes(tz);
 }
 
@@ -515,7 +517,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
 
       // DB Cleanup: Set deleted job ID columns to null and schedule_status to pending
-      const deletedSet = new Set(numericJobIds);
+      const deletedSet = new Set(
+        results
+          .filter((r) => r.success === true)
+          .map((r) => Number(r.job_id))
+          .filter((n) => !Number.isNaN(n))
+      );
       for (const conn of connections) {
         const updates: Record<string, any> = {};
         if (conn.analytics_fastcron_job_id && deletedSet.has(Number(conn.analytics_fastcron_job_id))) {

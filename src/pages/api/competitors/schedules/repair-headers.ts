@@ -1,4 +1,4 @@
-// TODO(remove-after-verification): Temporary repair endpoint for legacy FastCron job headers
+// Temporary repair endpoint for legacy FastCron job headers
 export const prerender = false;
 
 import type { APIRoute } from 'astro';

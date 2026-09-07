@@ -87,14 +87,17 @@ export const GET: APIRoute = async ({ locals, url }) => {
       const { data: allRows } = await paAdmin
         .from(targetTable)
         .select('url')
-        .eq(filterCol, filterVal);
+        .eq(filterCol, filterVal)
+        .range(0, 999);
 
       const domainSet = new Set<string>();
       for (const row of allRows || []) {
         try {
           const u = new URL(row.url);
           domainSet.add(u.hostname);
-        } catch {}
+        } catch (e: any) {
+          console.warn('[LinksAPI] Failed to parse link URL for domain set:', e?.message);
+        }
       }
       const domains = Array.from(domainSet).sort();
 

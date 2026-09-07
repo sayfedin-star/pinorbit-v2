@@ -300,7 +300,9 @@ export const GET: APIRoute = async ({ locals }) => {
               : Array.isArray(logsRes.data?.logs)
                 ? logsRes.data.logs
                 : [];
-        } catch {}
+        } catch (e: any) {
+          console.warn('[CompetitorsCron] Failed to fetch next runs or logs for job:', e?.message);
+        }
 
         const postData = extractPostData(job) || {};
         const isPaused = isFastCronJobPaused(job);
@@ -725,7 +727,9 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       if (body?.job_id) jobId = Number(body.job_id);
       if (body?.id) jobId = Number(body.id);
       if (body?.token_id) tokenId = body.token_id;
-    } catch {}
+    } catch (e: any) {
+      console.warn('[CompetitorsCron] DELETE body parse error:', e?.message);
+    }
   }
 
   try {

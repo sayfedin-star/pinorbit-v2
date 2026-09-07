@@ -263,7 +263,9 @@ export function isMatchingPinArchiveJob(job: any, workspaceId: string, dispatchE
         return urlWs.toLowerCase() === workspaceId.toLowerCase() || urlWs.toLowerCase() === wsPrefix;
       }
     }
-  } catch {}
+  } catch (e: any) {
+    console.warn('[PinArchiveCron] Job URL workspace match parse failed:', e?.message);
+  }
 
   // Priority 2c: Name-based workspace identifier (8-character hex prefix)
   // PinOrbit job naming formats:
@@ -578,7 +580,9 @@ export const GET: APIRoute = async ({ locals }) => {
             updated_at: new Date().toISOString(),
           })
           .eq('workspace_id', workspaceId);
-      } catch {}
+      } catch (e: any) {
+        console.warn('[PinArchiveCron] Failed to clear orphaned workspace schedule settings:', e?.message);
+      }
     }
 
     return new Response(
@@ -1099,7 +1103,9 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
     const qId = urlObj.searchParams.get('job_id') || urlObj.searchParams.get('id');
     tokenId = urlObj.searchParams.get('token_id');
     if (qId) jobId = Number(qId);
-  } catch {}
+  } catch (e: any) {
+    console.warn('[PinArchiveCron] DELETE query parse error:', e?.message);
+  }
 
   if (!jobId) {
     try {
@@ -1107,7 +1113,9 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       if (body?.job_id) jobId = Number(body.job_id);
       if (body?.id) jobId = Number(body.id);
       if (body?.token_id) tokenId = body.token_id;
-    } catch {}
+    } catch (e: any) {
+      console.warn('[PinArchiveCron] DELETE body parse error:', e?.message);
+    }
   }
 
   try {
