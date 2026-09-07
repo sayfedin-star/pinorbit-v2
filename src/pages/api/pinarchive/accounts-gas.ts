@@ -160,6 +160,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
             max_pages: maxPagesInput,
           };
 
+      const githubRef =
+        (runtimeEnv.GITHUB_REF as string) ||
+        (runtimeEnv.GITHUB_BRANCH as string) ||
+        (typeof process !== 'undefined' ? process.env.GITHUB_REF || process.env.GITHUB_BRANCH : '') ||
+        'main';
+
       const ghRes = await fetch(dispatchUrl, {
         method: 'POST',
         headers: {
@@ -169,7 +175,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          ref: 'main',
+          ref: githubRef,
           inputs: dispatchInputs,
         }),
         signal: AbortSignal.timeout(8000),
