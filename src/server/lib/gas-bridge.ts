@@ -19,7 +19,8 @@ export async function gasCall(
   runtimeEnv: Record<string, any> | undefined,
   workspaceId: string,
   action: string,
-  payload: Record<string, any> = {}
+  payload: Record<string, any> = {},
+  timeoutMs = 15000
 ): Promise<GasCallResult> {
   try {
     if (!workspaceId) {
@@ -54,7 +55,7 @@ export async function gasCall(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(bodyPayload),
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(timeoutMs),
       redirect: 'follow',
     });
 
