@@ -1572,7 +1572,7 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
         if (colVisible.account_age) {
           const humanAge = humanAgeFromOldestPin(acc.oldest_pin_at);
           const exactDateUtc = acc.oldest_pin_at ? new Date(acc.oldest_pin_at).toUTCString() : '';
-          const tooltip = exactDateUtc ? `Oldest known pin (sheet): ${exactDateUtc}` : 'No known pins';
+          const tooltip = exactDateUtc ? `Oldest known pin: ${exactDateUtc}` : 'No known pins';
           const ageBadge = acc.oldest_pin_at
             ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md bg-muted font-mono text-[11px] font-medium text-foreground border border-border/60" title="${escapeHtml(tooltip)}">${escapeHtml(humanAge)}</span>`
             : `<span class="text-muted-foreground text-xs" title="${escapeHtml(tooltip)}">—</span>`;
