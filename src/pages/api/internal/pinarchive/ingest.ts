@@ -558,10 +558,10 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
     // D) Insert pa_runs row
     const triggerVal = (
-      ['cron', 'manual', 'backfill', 'refresh'].includes(payload.trigger)
+      ['cron', 'manual', 'backfill', 'refresh', 'audit_sweep'].includes(payload.trigger)
         ? payload.trigger
         : 'cron'
-    ) as 'cron' | 'manual' | 'backfill' | 'refresh';
+    ) as 'cron' | 'manual' | 'backfill' | 'refresh' | 'audit_sweep';
     const runRow = {
       workspace_id: workspaceId,
       account_id: accountId,
