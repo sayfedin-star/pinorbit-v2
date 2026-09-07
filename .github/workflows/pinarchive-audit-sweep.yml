@@ -13,6 +13,11 @@ on:
         description: 'Comma-separated usernames (optional)'
         required: false
         type: string
+      max_pages:
+        description: 'Max pages to scrape per account (default: from settings or 500)'
+        required: false
+        type: string
+        default: '500'
 
 concurrency:
   group: pinarchive-audit-sweep
@@ -51,6 +56,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           DISCOVERY_WORKSPACE_ID: ${{ github.event.inputs.workspace_id || '' }}
           DISCOVERY_USERNAMES: ${{ github.event.inputs.usernames || '' }}
+          DISCOVERY_MAX_PAGES: ${{ github.event.inputs.max_pages || '' }}
           AUDIT_SWEEP: 'true'
           FORCE_RUN: 'true'
           SHARD_COUNT: 1

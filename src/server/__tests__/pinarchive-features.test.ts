@@ -197,7 +197,7 @@ describe('PinArchive Features & RPCs Suite', () => {
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
             maybeSingle: vi.fn().mockResolvedValue({
-              data: { discovery_max_pages: 50 },
+              data: { discovery_max_pages: 500 },
               error: null,
             }),
           }),
@@ -239,7 +239,7 @@ describe('PinArchive Features & RPCs Suite', () => {
           expect.stringContaining('/actions/workflows/pinarchive-pipeline.yml/dispatches'),
           expect.objectContaining({
             method: 'POST',
-            body: expect.stringContaining('"usernames":""'),
+            body: expect.stringContaining('"max_pages":"500"'),
           })
         );
       } finally {
@@ -248,15 +248,32 @@ describe('PinArchive Features & RPCs Suite', () => {
     });
 
     it('handles audit_sweep action by dispatching pinarchive-audit-sweep.yml without early-stop', async () => {
-      mockPinArchiveClient.from.mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            in: vi.fn().mockResolvedValue({
-              data: [{ id: mockAccId, username: 'ragonuregaso', status: 'active', interval_days: 1 }],
-              error: null,
+      mockPinArchiveClient.from.mockImplementation((table: string) => {
+        if (table === 'pa_accounts') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                in: vi.fn().mockResolvedValue({
+                  data: [{ id: mockAccId, username: 'ragonuregaso', status: 'active', interval_days: 1 }],
+                  error: null,
+                }),
+              }),
             }),
-          }),
-        }),
+          };
+        }
+        if (table === 'pa_workspace_settings') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: { discovery_max_pages: 500 },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        return { select: vi.fn() };
       });
 
       const originalFetch = global.fetch;
@@ -295,7 +312,7 @@ describe('PinArchive Features & RPCs Suite', () => {
           expect.stringContaining('/actions/workflows/pinarchive-audit-sweep.yml/dispatches'),
           expect.objectContaining({
             method: 'POST',
-            body: expect.stringContaining('"usernames":"ragonuregaso"'),
+            body: expect.stringContaining('"max_pages":"500"'),
           })
         );
       } finally {

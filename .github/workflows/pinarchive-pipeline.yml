@@ -44,7 +44,7 @@ on:
         type: string
         default: ''
       max_pages:
-        description: 'Max pages to scrape per account (default: from settings or 50)'
+        description: 'Max pages to scrape per account (default: from settings or 500)'
         required: false
         type: string
         default: ''

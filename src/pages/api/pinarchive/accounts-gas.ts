@@ -129,7 +129,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const isAuditSweep = action === 'audit_sweep' || Boolean(body.audit_sweep || body.sweep);
 
       let maxPagesInput = body.max_pages ? String(body.max_pages) : '';
-      if (!maxPagesInput && !isAuditSweep) {
+      if (!maxPagesInput) {
         const { data: wsSetting } = await db
           .from('pa_workspace_settings')
           .select('discovery_max_pages')
@@ -139,6 +139,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
           maxPagesInput = String(wsSetting.discovery_max_pages);
         }
       }
+      if (!maxPagesInput) {
+        maxPagesInput = '500';
+      }
 
       const targetWorkflow = isAuditSweep ? 'pinarchive-audit-sweep.yml' : 'pinarchive-pipeline.yml';
       const dispatchUrl = `https://api.github.com/repos/${githubRepo}/actions/workflows/${targetWorkflow}/dispatches`;
@@ -147,6 +150,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         ? {
             workspace_id: wsCtx.workspaceId,
             usernames: usernames.join(','),
+            max_pages: maxPagesInput,
           }
         : {
             workspace_id: wsCtx.workspaceId,

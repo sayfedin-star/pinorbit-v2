@@ -27,7 +27,7 @@ const CFG = {
   SLEEP_MS_MAX: 4000,
   MAX_BATCH_PINS: 250,
   CIRCUIT_BREAKER: 3,
-  MAX_PAGES_DEFAULT: 50,
+  MAX_PAGES_DEFAULT: 500,
 };
 
 const SHARD_COUNT = Math.max(1, parseInt(process.env.SHARD_COUNT || '1', 10) || 1);
@@ -457,7 +457,7 @@ async function main() {
   try {
     const wsSettings = await supaQuery(
       'pa_workspace_settings',
-      'select=workspace_id,ingest_enabled,paused_account_policy,pin_filter_min_saves,pin_filter_min_repins,pin_filter_rising_age_days,pin_filter_rising_saves,max_batch_pins,discovery_stop_pages,audit_sweep_enabled,daily_sheet_sync_enabled,github_schedule_enabled'
+      'select=workspace_id,ingest_enabled,paused_account_policy,pin_filter_min_saves,pin_filter_min_repins,pin_filter_rising_age_days,pin_filter_rising_saves,max_batch_pins,discovery_stop_pages,discovery_max_pages,audit_sweep_enabled,daily_sheet_sync_enabled,github_schedule_enabled'
     );
     if (Array.isArray(wsSettings)) {
       for (const s of wsSettings) {

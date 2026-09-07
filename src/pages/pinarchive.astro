@@ -534,7 +534,7 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
               <div class="rounded-xl border border-border/80 bg-card p-3 flex flex-col justify-between shadow-2xs">
                 <label for="setting-discovery-max-pages" class="text-xs font-bold text-foreground">Discovery Max Pages</label>
                 <div class="mt-2 flex items-center gap-1.5">
-                  <input id="setting-discovery-max-pages" type="number" min="1" max="500" value="50" class="w-full rounded-lg border border-border bg-background px-2 py-1 text-xs font-bold text-foreground font-mono" />
+                  <input id="setting-discovery-max-pages" type="number" min="1" max="500" value="500" class="w-full rounded-lg border border-border bg-background px-2 py-1 text-xs font-bold text-foreground font-mono" />
                   <span class="text-[10px] text-muted-foreground">pages</span>
                 </div>
               </div>
@@ -1937,7 +1937,7 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
       if (refreshMaxPinsInp) refreshMaxPinsInp.value = String(json.refresh_max_pins ?? 0);
       const refreshMinSavesInp = document.getElementById('setting-refresh-min-saves') as HTMLInputElement | null;
       if (refreshMinSavesInp) refreshMinSavesInp.value = String(json.refresh_min_saves ?? 0);
-      if (discoveryMaxInp) discoveryMaxInp.value = String(json.discovery_max_pages ?? 50);
+      if (discoveryMaxInp) discoveryMaxInp.value = String(json.discovery_max_pages ?? 500);
       if (discoveryStopInp) discoveryStopInp.value = String(json.discovery_stop_pages ?? 3);
       if (auditSweepCb) {
         auditSweepCb.checked = json.audit_sweep_enabled !== false;
@@ -2149,7 +2149,7 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
           pin_filter_min_repins: parseInt(minRepinsInp.value, 10) || 0,
           pin_filter_rising_age_days: Number.isInteger(parseInt(risingAgeInp.value, 10)) ? parseInt(risingAgeInp.value, 10) : 14,
           pin_filter_rising_saves: Number.isInteger(parseInt(risingSavesInp.value, 10)) ? parseInt(risingSavesInp.value, 10) : 34,
-          discovery_max_pages: parseInt(discoveryMaxInp?.value || '50', 10) || 50,
+          discovery_max_pages: parseInt(discoveryMaxInp?.value || '500', 10) || 500,
           discovery_stop_pages: parseInt(discoveryStopInp?.value || '3', 10) || 3,
           audit_sweep_enabled: auditSweepCb ? auditSweepCb.checked : true,
           daily_sheet_sync_enabled: dailySheetSyncCb ? dailySheetSyncCb.checked : false,
