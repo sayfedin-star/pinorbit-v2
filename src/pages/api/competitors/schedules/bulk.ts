@@ -207,7 +207,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     return new Response(
       JSON.stringify({
-        success: true,
+        success: successCount > 0,
+        all_succeeded: ids.length > 0 && successCount === ids.length,
+        any_succeeded: successCount > 0,
         action,
         total: ids.length,
         succeeded: successCount,

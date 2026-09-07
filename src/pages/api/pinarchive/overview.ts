@@ -175,7 +175,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
         if (cached.status === 'HIT' && cached.data) {
           cachedAges = cached.data;
         }
-      } catch {}
+      } catch (e: any) {
+        console.warn('[PinArchiveOverview] Edge cache get error:', e?.message);
+      }
     }
 
     let agesRes1: any = null;
@@ -209,7 +211,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
     if (!cachedAges && agesCacheKey && Object.keys(combinedAges).length > 0) {
       try {
         await edgeCache.set(agesCacheKey, combinedAges, kv, 6 * 3600);
-      } catch {}
+      } catch (e: any) {
+        console.warn('[PinArchiveOverview] Edge cache set error:', e?.message);
+      }
     }
 
     // Attach computed metrics to each account:

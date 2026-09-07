@@ -103,7 +103,7 @@ describe('Regression: Bulk schedule delete does not delete DB row on remote Fast
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.success).toBe(true);
+    expect(json.success).toBe(false);
     expect(json.failed).toBe(1);
     expect(json.succeeded).toBe(0);
     expect(json.results[0].success).toBe(false);

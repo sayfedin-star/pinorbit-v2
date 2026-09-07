@@ -6,7 +6,7 @@ import { dbClients } from '../../../../server/db/clients';
 import { getEffectiveSecret } from '../../../../server/services/webhook-secrets';
 import { fastcronCall } from '../../../../server/lib/fastcron-client';
 import { resolveToken } from '../../../../server/lib/token-resolver';
-import { validateCronExpression, getDispatchEndpointUrl } from './index';
+import { validateCronExpression, getDispatchEndpointUrl, isValidTimeZone } from './index';
 
 // ── PATCH: Update Schedule ────────────────────────────────────────────────────
 export const PATCH: APIRoute = async ({ params, request, locals }) => {
@@ -67,7 +67,16 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
     };
 
     if (body.label !== undefined) updatePayload.label = String(body.label).trim();
-    if (body.timezone !== undefined) updatePayload.timezone = String(body.timezone).trim();
+    if (body.timezone !== undefined) {
+      const rawTz = String(body.timezone).trim();
+      if (rawTz && !isValidTimeZone(rawTz)) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Invalid timezone. Must be a valid IANA timezone name.' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      updatePayload.timezone = rawTz || 'UTC';
+    }
     if (body.fastcron_token_id !== undefined) updatePayload.fastcron_token_id = body.fastcron_token_id || null;
     if (body.token_id !== undefined) updatePayload.fastcron_token_id = body.token_id || null;
 

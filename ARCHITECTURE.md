@@ -153,6 +153,20 @@ All migrations must be applied sequentially in chronological order matching the 
    - *Safe Default:* Staged pin dispatches enforce `allowDuplicates = false` across both service and HTTP layer (requiring explicit opt-in for duplicate dispatches).
    - *Pre-CAS Verification:* Destination validation checks target board publishability on P1 prior to CAS acquisition, rolling back or rejecting early while preserving 409 conflict semantics when staged pins are missing or already consumed.
 10. **Secret Resolution Parity & Fail-Closed Scoping:**
-   - *Parity:* `getEffectiveSecret` strictly throws `HttpError(400, 'Invalid workspace UUID')` when a truthy non-UUID workspace ID is provided, aligning behavior with `getSecretCandidates` and preventing malformed sessions from collapsing into shared global secrets.
-
-
+    - *Parity:* `getEffectiveSecret` strictly throws `HttpError(400, 'Invalid workspace UUID')` when a truthy non-UUID workspace ID is provided, aligning behavior with `getSecretCandidates` and preventing malformed sessions from collapsing into shared global secrets.
+11. **Webhook Execution Atomic Reservation Predicate:**
+    - *Design:* `increment_webhook_execution` enforces `AND (w.monthly_capacity IS NULL OR w.remaining_capacity >= p_count)` within the atomic update statement on `account_webhooks`.
+    - *Missing vs Exhausted Contract:* When 0 rows are updated, an existence check distinguishes non-existent/unauthorized webhooks (silent `RETURN` preserving existing caller contracts) from capacity exhaustion (`RAISE EXCEPTION 'insufficient_capacity' USING ERRCODE = 'P0001'`). In `dispatch-due-pin.ts`, `insufficient_capacity` is handled prior to retrying, safely resetting claimed pins back to `pending` and returning HTTP 503 `no_webhook_capacity`.
+12. **Bulk Operation Signaling Envelope Semantics & Staged Asymmetry:**
+    - *Competitors Bulk:* `/api/competitors/schedules/bulk.ts` sets `success: successCount > 0` alongside additive helpers `all_succeeded` and `any_succeeded`, ensuring that 0/N failed executions do not report a misleading top-level `success: true` while preserving HTTP 200 and the detailed `results[]` array.
+    - *Deliberate Asymmetry:* Staged bulk operations (`/api/pinarchive/staged/dispatch-bulk.ts`) deliberately retain legacy envelope semantics (`success: true` on partial/fail envelope with counts in `dispatched`/`skipped`) to maintain client backward compatibility for batch dispatch consumers.
+13. **Competitor Table Cascade Deletion & Tenant Verification:**
+    - *Live Constraint Verification:* Verified via Supabase MCP on 2026-09-07 querying `information_schema.referential_constraints` on P2 (`guycnhvwfzdzbpgsnavg`): all child tables (`competitor_settings`, `competitor_boards`, `competitor_snapshots`, `competitor_daily_snapshots`, `competitor_ingestion_jobs`, `competitor_top_pins`) enforce `delete_rule = 'CASCADE'` to `competitors.id`.
+    - *Tenant Scoping:* For child tables lacking a dedicated `workspace_id` column (`competitor_snapshots`, `competitor_top_pins`), tenant isolation is strictly anchored by verifying that the parent `competitors` record exists with `workspace_id = activeWorkspaceId` before issuing queries.
+14. **Staged Pin CAS Ordering Window Trade-off:**
+    - *Ordering Window:* Pre-CAS destination validation checks target board publishability on P1 prior to CAS acquisition. The TOCTOU window between pre-check and CAS status update is closed by post-CAS re-verification with automatic rollback compensation on failure. Holding `dispatched` during destination validation is an accepted trade-off that prioritizes system consistency and prevents double-dispatch.
+15. **PinArchive Metrics & Ingest Accounting:**
+    - *Accurate Added Count:* `pa_ingest_pin_batch` computes `v_added_count` using the post-deduplicated incoming count from `temp_incoming_pins` (`v_unique_incoming_count - v_updated_count`), preventing duplicate or blank input pins from artificially inflating the `added` counter.
+    - *Comments Metric Tracking:* The `inserted_metrics` `WHERE NOT EXISTS` predicate includes `AND pm.comments >= u.comments`, ensuring comment-only metric advances generate telemetry snapshot rows.
+16. **Schedule IANA Timezone Validation:**
+    - *Validation Boundary:* Competitor schedule creation and update endpoints validate timezones against IANA standards using `Intl.DateTimeFormat`, rejecting non-empty invalid timezones with HTTP 400 at input while preserving resilient `'UTC'` fallbacks when omitted or blank and at execution time.

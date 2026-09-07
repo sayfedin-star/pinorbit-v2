@@ -128,7 +128,9 @@ export function isMatchingCompetitorJob(job: any, workspaceId: string, dispatchE
         return urlWs.toLowerCase() === workspaceId.toLowerCase() || urlWs.toLowerCase() === wsPrefix;
       }
     }
-  } catch {}
+  } catch {
+    console.warn('[CompetitorsCron] Job URL workspace match parse failed');
+  }
 
   // Priority 2c: Name-based workspace identifier (8-character hex prefix)
   // PinOrbit job naming formats:

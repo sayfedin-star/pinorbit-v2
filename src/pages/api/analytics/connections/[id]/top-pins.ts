@@ -52,7 +52,8 @@ export const GET: APIRoute = async ({ params, request, locals }) => {
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
-  const limit = 50; 
+  const rawLimit = parseInt(url.searchParams.get('limit') || '50', 10);
+  const limit = isNaN(rawLimit) ? 50 : Math.min(Math.max(rawLimit, 1), 100);
   const bypassCacheParam = url.searchParams.get('cache_bypass') === '1';
   let bypassCache = false;
   if (bypassCacheParam && workspaceId) {
@@ -66,8 +67,10 @@ export const GET: APIRoute = async ({ params, request, locals }) => {
   const fromDate = url.searchParams.get('from_date') || undefined;
   const toDate = url.searchParams.get('to_date') || undefined;
 
-  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const pageSize = Math.max(1, parseInt(url.searchParams.get('page_size') || '25', 10));
+  const rawPage = parseInt(url.searchParams.get('page') || '1', 10);
+  const page = isNaN(rawPage) ? 1 : Math.max(1, rawPage);
+  const rawPageSize = parseInt(url.searchParams.get('page_size') || '25', 10);
+  const pageSize = isNaN(rawPageSize) ? 25 : Math.min(100, Math.max(1, rawPageSize));
   const query = (url.searchParams.get('q') || '').toLowerCase().trim();
 
   try {

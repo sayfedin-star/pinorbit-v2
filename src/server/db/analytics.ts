@@ -571,7 +571,7 @@ export const analyticsDb = {
         .eq('connection_id', connectionId)
         .eq('sort_by', sortBy)
         .gte('window_end', cutoff)
-        .limit(500)
+        .limit(1000)
         .order('window_end', { ascending: false });
 
       if (cleanSearch) {

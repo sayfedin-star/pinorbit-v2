@@ -29,7 +29,8 @@ export async function resolveCompetitorKek(db: SupabaseClient): Promise<string |
       .single();
 
     return authoritative?.kek || null;
-  } catch {
+  } catch (e: any) {
+    console.warn('[CompetitorKek] getOrCreateCompetitorKek error:', e?.message);
     return null;
   }
 }
@@ -38,7 +39,8 @@ export async function isCompetitorKekActive(db: SupabaseClient): Promise<boolean
   try {
     const { data } = await db.from('competitor_kek').select('id').limit(1);
     return Boolean(data && data.length > 0);
-  } catch {
+  } catch (e: any) {
+    console.warn('[CompetitorKek] isCompetitorKekActive error:', e?.message);
     return false;
   }
 }
