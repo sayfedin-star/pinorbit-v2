@@ -1,7 +1,7 @@
 ---
 import { getWorkspaces, getActiveWorkspaceId } from '../lib/workspaces';
 
-const workspaces = await getWorkspaces(Astro.cookies, Astro.request, Astro.response?.headers);
+const workspaces = await getWorkspaces(Astro.locals.supabase);
 const activeWorkspaceId = getActiveWorkspaceId(Astro.cookies);
 const currentWorkspace = workspaces.find((w) => w.id === activeWorkspaceId) || workspaces[0];
 ---

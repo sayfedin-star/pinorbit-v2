@@ -18,7 +18,7 @@ if (!user) {
 
 const supabase = Astro.locals.supabase;
 const activeWorkspaceId = getActiveWorkspaceId(Astro.cookies);
-const allWorkspaces = await getWorkspaces(Astro.cookies, Astro.request, Astro.response?.headers);
+const allWorkspaces = await getWorkspaces(supabase);
 const currentWorkspace = allWorkspaces.find(w => w.id === activeWorkspaceId) || allWorkspaces[0];
 
 // Fetch memberships for this workspace

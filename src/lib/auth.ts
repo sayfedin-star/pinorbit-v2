@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, isSupabaseConfigured } from './supabase-client';
 import type { User, Session } from '@supabase/supabase-js';
 
 export async function getCurrentSession(): Promise<Session | null> {

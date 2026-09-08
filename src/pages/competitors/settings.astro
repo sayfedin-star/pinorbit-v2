@@ -9,7 +9,7 @@ import { getWorkspaces } from '../../lib/workspaces';
 
 const workspaceId = Astro.locals.activeWorkspaceId || '';
 const runtimeEnv = (Astro.locals as any)?.runtime?.env || (Astro.locals as any)?.runtimeEnv;
-const workspaces = await getWorkspaces(Astro.cookies, Astro.request, Astro.response?.headers);
+const workspaces = await getWorkspaces(Astro.locals.supabase);
 const currentWorkspace = workspaces.find((w) => w.id === workspaceId) || workspaces[0];
 const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
 

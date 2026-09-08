@@ -6,7 +6,7 @@ import PinArchiveCronCard from '../components/pinarchive/PinArchiveCronCard.astr
 import { getWorkspaces } from '../lib/workspaces';
 
 const activeWorkspaceId = Astro.locals.activeWorkspaceId || '';
-const workspaces = await getWorkspaces(Astro.cookies, Astro.request, Astro.response?.headers);
+const workspaces = await getWorkspaces(Astro.locals.supabase);
 const currentWorkspace = workspaces.find((w) => w.id === activeWorkspaceId) || workspaces[0];
 const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
 ---
