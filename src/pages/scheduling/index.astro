@@ -165,7 +165,9 @@ const schedulingTabs = [
 
 <script>
   import { requireAuth } from '../../lib/auth';
-  import { getDashboardKPIs, getPins, getLogs, getImportSessions } from '../../lib/supabase';
+  import { getDashboardKPIs } from '../../lib/dashboard';
+  import { getPins } from '../../lib/pins';
+  import { getLogs, getImportSessions } from '../../lib/logs';
   import { renderStatusBadge, formatDate, formatTime, renderEmptyStateHTML, escapeHtml } from '../../lib/ui-helpers';
   import { getActiveWorkspaceId } from '../../lib/workspaces';
 

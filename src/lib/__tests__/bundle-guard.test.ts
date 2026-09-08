@@ -17,25 +17,15 @@ describe('Bundle Guard Regression Suite (Task 5)', () => {
     expect(output).toContain('0 errors');
   });
 
-  it('flags legacy lib/supabase imports as warnings in Phase 1', () => {
-    const output = execSync(`node "${guardScriptPath}"`, {
-      cwd: rootDir,
-      encoding: 'utf8',
-    });
-
-    expect(output).toContain('[WARN]');
-    expect(output).toContain('Legacy import of \'lib/supabase\' in client script');
-  });
-
-  it('detects and blocks forbidden domain module imports in <script> tags', () => {
-    const testAstroFile = path.join(rootDir, 'src/pages/__test_bundle_guard_fail.astro');
+  it('detects and blocks legacy lib/supabase imports in client script as fatal error', () => {
+    const testAstroFile = path.join(rootDir, 'src/pages/__test_bundle_guard_legacy.astro');
     fs.writeFileSync(
       testAstroFile,
       `---
 export const prerender = false;
 ---
 <script>
-  import { getPins } from '../lib/pins';
+  import { getPins } from '../lib/supabase';
   console.log(getPins);
 </script>
 `,
@@ -53,6 +43,29 @@ export const prerender = false;
     } finally {
       if (fs.existsSync(testAstroFile)) {
         fs.unlinkSync(testAstroFile);
+      }
+    }
+  });
+
+  it('detects and blocks forbidden domain module imports in src/scripts/', () => {
+    const testScriptFile = path.join(rootDir, 'src/scripts/__test_bundle_guard_fail.ts');
+    fs.writeFileSync(
+      testScriptFile,
+      `import { getPins } from '../lib/pins';\nconsole.log(getPins);\n`,
+      'utf8'
+    );
+
+    try {
+      expect(() => {
+        execSync(`node "${guardScriptPath}"`, {
+          cwd: rootDir,
+          encoding: 'utf8',
+          stdio: 'pipe',
+        });
+      }).toThrow();
+    } finally {
+      if (fs.existsSync(testScriptFile)) {
+        fs.unlinkSync(testScriptFile);
       }
     }
   });

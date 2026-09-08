@@ -1014,9 +1014,15 @@ import ProviderBadge from '../../components/cron/ProviderBadge.astro';
   import {
     getAccountDetails,
     getAccountPinStats,
-    getAccountPins,
-    getAccountBoards,
-    getAccountRecentLogs,
+    updateAccountSchedule,
+    updateAccountScheduling,
+    updateAccountDailyLimit,
+    toggleAccountActive,
+  } from '../../lib/accounts';
+  import { getAccountPins } from '../../lib/pins';
+  import { getAccountBoards } from '../../lib/boards';
+  import { getAccountRecentLogs } from '../../lib/logs';
+  import {
     getAccountWebhookSummary,
     getAccountWebhooks,
     createAccountWebhook,
@@ -1024,12 +1030,8 @@ import ProviderBadge from '../../components/cron/ProviderBadge.astro';
     toggleAccountWebhookActive,
     deleteAccountWebhook,
     setPrimaryWebhook,
-    updateAccountSchedule,
-    updateAccountScheduling,
-    updateAccountDailyLimit,
-    toggleAccountActive,
-    rescheduleAccountPendingPins,
-  } from '../../lib/supabase';
+  } from '../../lib/webhooks';
+  import { rescheduleAccountPendingPins } from '../../lib/schedules';
   import { renderStatusBadge, formatDate, formatTime, renderEmptyStateHTML, escapeHtml, maskWebhookUrl } from '../../lib/ui-helpers';
   import { humanCron, humanCronTitle } from '../../lib/cron-helper';
   import { fmtAuditTimestamp } from '../../lib/format-audit';

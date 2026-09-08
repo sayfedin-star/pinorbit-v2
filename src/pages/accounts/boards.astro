@@ -264,14 +264,10 @@ export const prerender = false;
 
 <script>
   import { requireAuth } from '../../lib/auth';
-  import {
-    getAccountDetails,
-    getAccountBoards,
-    getAccountWebhooks,
-    getAccountPins,
-    createBoard,
-    updateBoard,
-  } from '../../lib/supabase';
+  import { getAccountDetails } from '../../lib/accounts';
+  import { getAccountBoards, createBoard, updateBoard } from '../../lib/boards';
+  import { getAccountPins } from '../../lib/pins';
+  import { getAccountWebhooks } from '../../lib/webhooks';
   import { formatDate, escapeHtml } from '../../lib/ui-helpers';
   import { fmtAuditTimestamp } from '../../lib/format-audit';
   import type { Account, Board, AccountWebhook } from '../../lib/types';

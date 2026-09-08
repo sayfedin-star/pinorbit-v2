@@ -63,17 +63,6 @@ walkDir(srcDir, (filePath) => {
     scriptLines.forEach((line, idx) => {
       const lineNum = linesBeforeScript + idx;
 
-      // Check forbidden domain modules in client script
-      const domainMatch = DOMAIN_IMPORT_REGEX.exec(line);
-      if (domainMatch) {
-        errors.push({
-          file: relPath,
-          line: lineNum,
-          rule: `Banned client import of domain module 'lib/${domainMatch[1]}'`,
-          snippet: line.trim(),
-        });
-      }
-
       // Check createAstroServerClient in client script
       if (ASTRO_SERVER_CLIENT_REGEX.test(line)) {
         errors.push({
@@ -84,12 +73,12 @@ walkDir(srcDir, (filePath) => {
         });
       }
 
-      // Check legacy supabase import in client script (Warning for Phase 1)
+      // Check legacy supabase import in client script (Promoted to fatal error in Tier 3)
       if (LEGACY_SUPABASE_REGEX.test(line)) {
-        warnings.push({
+        errors.push({
           file: relPath,
           line: lineNum,
-          rule: "Legacy import of 'lib/supabase' in client script (migrate in Phase 2)",
+          rule: "Forbidden client import of monolithic 'lib/supabase' shim (must import specific domain module)",
           snippet: line.trim(),
         });
       }

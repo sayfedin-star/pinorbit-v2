@@ -1,6 +1,6 @@
 ---
 import Layout from '../../../layouts/Layout.astro';
-import { getAccounts } from '../../../lib/supabase';
+import { getAccounts } from '../../../lib/accounts';
 
 export async function getStaticPaths() {
   const accounts = await getAccounts();
@@ -254,15 +254,15 @@ const { id } = Astro.params;
 
 <script>
   import { requireAuth } from '../../../lib/auth';
+  import { getAccountDetails } from '../../../lib/accounts';
+  import { getAccountBoards } from '../../../lib/boards';
   import {
-    getAccountDetails,
     getAccountPins,
-    getAccountBoards,
     bulkDeletePins,
     bulkEditPins,
     bulkRetryPinsNow,
     bulkCancelPins,
-  } from '../../../lib/supabase';
+  } from '../../../lib/pins';
   import { renderStatusBadge, formatDate, formatTime, renderEmptyStateHTML, escapeHtml } from '../../../lib/ui-helpers';
   import type { Account, Pin, Board } from '../../../lib/types';
 

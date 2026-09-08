@@ -279,14 +279,10 @@ import SectionHeader from '../components/ui/SectionHeader.astro';
 
 <script>
   import { requireAuth } from '../lib/auth';
-  import {
-    getAccounts,
-    getBoardsForAccount,
-    getPins,
-    bulkInsertPins,
-    getAccountWebhooks,
-    updateAccountAutoBoardSettings,
-  } from '../lib/supabase';
+  import { getAccounts, updateAccountAutoBoardSettings } from '../lib/accounts';
+  import { getBoardsForAccount } from '../lib/boards';
+  import { getPins, bulkInsertPins } from '../lib/pins';
+  import { getAccountWebhooks } from '../lib/webhooks';
   import { formatDate, escapeHtml } from '../lib/ui-helpers';
   import type { Account, Board, Pin, AccountWebhook } from '../lib/types';
 

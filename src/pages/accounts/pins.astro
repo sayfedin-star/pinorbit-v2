@@ -275,15 +275,15 @@ import Layout from '../../layouts/Layout.astro';
 
 <script>
   import { requireAuth } from '../../lib/auth';
+  import { getAccountDetails } from '../../lib/accounts';
+  import { getAccountBoards } from '../../lib/boards';
   import {
-    getAccountDetails,
     getAccountPins,
-    getAccountBoards,
     bulkDeletePins,
     bulkEditPins,
     bulkRetryPinsNow,
     bulkCancelPins,
-  } from '../../lib/supabase';
+  } from '../../lib/pins';
   import { renderStatusBadge, formatDate, formatTime, renderEmptyStateHTML, escapeHtml } from '../../lib/ui-helpers';
   import type { Account, Pin, Board } from '../../lib/types';
 

@@ -363,12 +363,14 @@ const schedulingTabs = [
     createAccount,
     updateAccountDailyLimit,
     toggleAccountActive,
+  } from '../lib/accounts';
+  import {
     getAccountWebhooks,
     createAccountWebhook,
     updateAccountWebhook,
     setPrimaryWebhook,
     toggleAccountWebhookActive,
-  } from '../lib/supabase';
+  } from '../lib/webhooks';
   import { renderStatusBadge, formatDate, renderEmptyStateHTML, escapeHtml, maskWebhookUrl } from '../lib/ui-helpers';
   import type { Account, AccountWebhook } from '../lib/types';
   import { getActiveWorkspaceId } from '../lib/workspaces';

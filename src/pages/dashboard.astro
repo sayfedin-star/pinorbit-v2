@@ -245,7 +245,9 @@ import KPIStatCard from '../components/ui/KPIStatCard.astro';
 
 <script>
   import { requireAuth } from '../lib/auth';
-  import { getDashboardKPIs, getPins, getLogs } from '../lib/supabase';
+  import { getDashboardKPIs } from '../lib/dashboard';
+  import { getPins } from '../lib/pins';
+  import { getLogs } from '../lib/logs';
   import { renderStatusBadge, formatDate, formatTime, renderEmptyStateHTML, escapeHtml } from '../lib/ui-helpers';
   import { getActiveWorkspaceId } from '../lib/workspaces';
 

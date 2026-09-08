@@ -980,11 +980,9 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Create a schedule via Configure
 </Layout>
 
 <script>
+  import { humanCron, humanCronTitle } from '../../lib/cron-helper';
+  import { fmtAuditTimestamp, fmtDuration } from '../../lib/format-audit';
   import {
-    humanCron,
-    humanCronTitle,
-    fmtAuditTimestamp,
-    fmtDuration,
     escapeHtml as escHtml,
     timeAgo,
     toast,
