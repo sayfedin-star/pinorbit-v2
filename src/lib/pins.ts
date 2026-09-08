@@ -107,7 +107,12 @@ function getMockAccountPins(options: FetchAccountPinsOptions): FetchAccountPinsR
   };
 }
 
-export async function getPins(statusFilter?: string, accountIdFilter?: string, workspaceId?: string): Promise<Pin[]> {
+export async function getPins(
+  statusFilter?: string,
+  accountIdFilter?: string,
+  workspaceId?: string,
+  limit?: number
+): Promise<Pin[]> {
   if (!supabase) {
     let pins = mockPins;
     if (workspaceId) {
@@ -119,7 +124,8 @@ export async function getPins(statusFilter?: string, accountIdFilter?: string, w
     if (accountIdFilter && accountIdFilter !== 'all') {
       pins = pins.filter((p) => p.account_id === accountIdFilter);
     }
-    return pins;
+    const ordered = [...pins].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+    return typeof limit === 'number' ? ordered.slice(0, limit) : ordered;
   }
   try {
     let query = supabase
@@ -136,6 +142,9 @@ export async function getPins(statusFilter?: string, accountIdFilter?: string, w
     if (accountIdFilter && accountIdFilter !== 'all') {
       query = query.eq('account_id', accountIdFilter);
     }
+    if (typeof limit === 'number') {
+      query = query.limit(limit);
+    }
 
     const { data, error } = await query;
     if (error) {
@@ -148,6 +157,9 @@ export async function getPins(statusFilter?: string, accountIdFilter?: string, w
       }
       if (accountIdFilter && accountIdFilter !== 'all') {
         basicQuery = basicQuery.eq('account_id', accountIdFilter);
+      }
+      if (typeof limit === 'number') {
+        basicQuery = basicQuery.limit(limit);
       }
       const { data: basicData, error: basicErr } = await basicQuery;
       if (basicErr || !basicData) throw basicErr || new Error('No data');
@@ -171,7 +183,8 @@ export async function getPins(statusFilter?: string, accountIdFilter?: string, w
     if (accountIdFilter && accountIdFilter !== 'all') {
       pins = pins.filter((p) => p.account_id === accountIdFilter);
     }
-    return pins;
+    const ordered = [...pins].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+    return typeof limit === 'number' ? ordered.slice(0, limit) : ordered;
   }
 }
 
