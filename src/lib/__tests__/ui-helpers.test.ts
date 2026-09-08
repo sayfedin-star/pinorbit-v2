@@ -1,5 +1,18 @@
-import { describe, it, expect } from 'vitest';
-import { escapeHtml, formatDate, formatNumber, formatTime, humanAgeFromOldestPin, maskWebhookUrl, renderStatusBadge } from '../ui-helpers';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  escapeHtml,
+  formatDate,
+  formatNumber,
+  formatTime,
+  humanAgeFromOldestPin,
+  maskWebhookUrl,
+  renderStatusBadge,
+  apiJSON,
+  cleanPinterestUsername,
+  timeAgo,
+  toast,
+  copyToClipboard,
+} from '../ui-helpers';
 
 describe('ui-helpers test suite', () => {
   describe('escapeHtml', () => {
@@ -251,6 +264,114 @@ describe('ui-helpers test suite', () => {
       // 2 years ago = 730 days
       const iso730d = new Date(now - 730 * 86_400_000).toISOString();
       expect(humanAgeFromOldestPin(iso730d, now)).toBe('2y 0m');
+    });
+  });
+
+  describe('cleanPinterestUsername', () => {
+    it('cleans various Pinterest URLs and username formats', () => {
+      expect(cleanPinterestUsername('https://pinterest.com/pinorbit_app')).toBe('pinorbit_app');
+      expect(cleanPinterestUsername('https://www.pinterest.co.uk/user_one/')).toBe('user_one');
+      expect(cleanPinterestUsername('http://pinterest.com/user_two/boards')).toBe('user_two');
+      expect(cleanPinterestUsername('@cool_user')).toBe('cool_user');
+      expect(cleanPinterestUsername('@@double_at')).toBe('double_at');
+      expect(cleanPinterestUsername('plain_username')).toBe('plain_username');
+      expect(cleanPinterestUsername('   spaced_user   ')).toBe('spaced_user');
+    });
+
+    it('handles null, undefined, and empty string safely', () => {
+      expect(cleanPinterestUsername(null)).toBe('');
+      expect(cleanPinterestUsername(undefined)).toBe('');
+      expect(cleanPinterestUsername('')).toBe('');
+    });
+  });
+
+  describe('timeAgo', () => {
+    it('returns fallback for null, undefined, or invalid input', () => {
+      expect(timeAgo(null)).toBe('—');
+      expect(timeAgo(undefined)).toBe('—');
+      expect(timeAgo('invalid-date')).toBe('—');
+      expect(timeAgo(null, 'Never')).toBe('Never');
+    });
+
+    it('formats relative times correctly', () => {
+      const now = Date.now();
+      const viNow = vi.spyOn(Date, 'now').mockReturnValue(now);
+
+      // < 1m
+      expect(timeAgo(new Date(now - 30_000).toISOString())).toBe('just now');
+      // Future date
+      expect(timeAgo(new Date(now + 10_000).toISOString())).toBe('just now');
+      // 5 mins
+      expect(timeAgo(new Date(now - 5 * 60_000).toISOString())).toBe('5m ago');
+      // 4 hours
+      expect(timeAgo(new Date(now - 4 * 3600_000).toISOString())).toBe('4h ago');
+      // 3 days
+      expect(timeAgo(new Date(now - 3 * 86400_000).toISOString())).toBe('3d ago');
+      // 60 days (~2 months)
+      expect(timeAgo(new Date(now - 60 * 86400_000).toISOString())).toBe('2mo ago');
+      // 400 days (~1 year)
+      expect(timeAgo(new Date(now - 400 * 86400_000).toISOString())).toBe('1y ago');
+
+      viNow.mockRestore();
+    });
+  });
+
+  describe('apiJSON', () => {
+    it('sends request with application/json header and returns parsed JSON', async () => {
+      const originalFetch = globalThis.fetch;
+      let capturedInit: RequestInit | undefined;
+      globalThis.fetch = vi.fn(async (input, init) => {
+        capturedInit = init;
+        return new Response(JSON.stringify({ success: true, count: 42 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+      const data = await apiJSON('/api/test', { method: 'POST', body: JSON.stringify({ a: 1 }) });
+      expect(data).toEqual({ success: true, count: 42 });
+      expect(new Headers(capturedInit?.headers).get('Content-Type')).toBe('application/json');
+
+      globalThis.fetch = originalFetch;
+    });
+
+    it('throws custom error message from server if res.ok is false', async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async () => {
+        return new Response(JSON.stringify({ error: 'Workspace limit exceeded' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+      await expect(apiJSON('/api/test')).rejects.toThrow('Workspace limit exceeded');
+
+      globalThis.fetch = originalFetch;
+    });
+
+    it('falls back to HTTP status when error payload is not provided', async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async () => {
+        return new Response('Not Found', {
+          status: 404,
+          headers: { 'Content-Type': 'text/plain' },
+        });
+      });
+
+      await expect(apiJSON('/api/missing')).rejects.toThrow('HTTP 404');
+
+      globalThis.fetch = originalFetch;
+    });
+  });
+
+  describe('toast and copyToClipboard in non-DOM environment', () => {
+    it('toast does not crash when window/document is undefined', () => {
+      expect(() => toast('Test notification')).not.toThrow();
+    });
+
+    it('copyToClipboard returns false gracefully when clipboard is unavailable', async () => {
+      const result = await copyToClipboard('test text');
+      expect(result).toBe(false);
     });
   });
 });

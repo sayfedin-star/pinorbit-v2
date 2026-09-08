@@ -86,8 +86,9 @@ export function formatNumber(num: number | null | undefined): string {
   return num.toLocaleString('en-US');
 }
 
-export function escapeHtml(str: string): string {
-  return (str || '')
+export function escapeHtml(str: string | null | undefined): string {
+  if (!str) return '';
+  return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -221,6 +222,96 @@ export function humanAgeFromOldestPin(oldestIso: string | null | undefined, nowM
   if (y > 0) return `${y}y ${m}m`;
   if (m > 0) return `${m}m ${d}d`;
   return `${d}d`;
+}
+
+export async function apiJSON<T = any>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers || {});
+  if (!headers.has('Content-Type') && !(init.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+  const res = await fetch(input, { ...init, headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as any)?.error || (data as any)?.message || `HTTP ${res.status}`);
+  }
+  return data as T;
+}
+
+export function cleanPinterestUsername(input: string | null | undefined): string {
+  let u = String(input || '').trim();
+  u = u.replace(/^(https?:\/\/)?(www\.)?pinterest\.[a-z.]+\//i, '');
+  u = u.replace(/\/.*$/, '');
+  u = u.replace(/^@+/, '').trim();
+  return u;
+}
+
+export function timeAgo(iso?: string | null, fallback = '—'): string {
+  if (!iso) return fallback;
+  const time = new Date(iso).getTime();
+  if (isNaN(time)) return fallback;
+  const ms = Date.now() - time;
+  if (ms < 0) return 'just now';
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  const mo = Math.floor(d / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.floor(mo / 12)}y ago`;
+}
+
+export function toast(message: string, type: 'success' | 'error' | 'info' = 'success'): void {
+  if (typeof document === 'undefined') return;
+  let root = document.getElementById('toast-root');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'toast-root';
+    root.setAttribute('aria-live', 'polite');
+    root.className = 'fixed bottom-4 right-4 z-[70] flex flex-col gap-2 w-80 max-w-[calc(100vw-2rem)]';
+    document.body.appendChild(root);
+  }
+  const colors = {
+    success: 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400',
+    error: 'border-rose-500/40 text-rose-600 dark:text-rose-400',
+    info: 'border-primary/40 text-primary',
+  };
+  const icons = { success: '✓', error: '✕', info: 'ℹ' };
+  const el = document.createElement('div');
+  el.className = `flex items-start gap-2.5 rounded-xl border bg-card p-3 text-xs font-semibold shadow-lg ${colors[type]} transition-all animate-in fade-in slide-in-from-bottom-2`;
+  el.innerHTML = `<span class="flex-shrink-0 font-bold">${icons[type]}</span><span class="flex-1 text-foreground">${escapeHtml(message)}</span>
+    <button class="text-muted-foreground hover:text-foreground cursor-pointer" aria-label="Dismiss">✕</button>`;
+  el.querySelector('button')?.addEventListener('click', () => el.remove());
+  root.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transition = 'opacity .3s';
+    setTimeout(() => el.remove(), 300);
+  }, 4000);
+}
+
+export async function copyToClipboard(text: string, btn?: HTMLElement | null): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard) {
+    toast('Clipboard not available', 'error');
+    return false;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) {
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<span class="text-emerald-500 font-bold">✓</span>';
+      setTimeout(() => {
+        btn.innerHTML = orig;
+      }, 1200);
+    }
+    toast(`Copied "${text}" to clipboard!`);
+    return true;
+  } catch {
+    toast('Failed to copy', 'error');
+    return false;
+  }
 }
 
 export * from './cron-helper';
