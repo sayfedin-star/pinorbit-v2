@@ -34,6 +34,7 @@ export {
   toast,
   copyToClipboard,
   cleanPinterestUsername,
+  fmtDate,
 } from '../lib/ui-helpers';
 
 export { fmtAuditTimestamp, fmtDuration } from '../lib/format-audit';

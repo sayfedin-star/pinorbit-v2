@@ -81,9 +81,22 @@ export function maskWebhookUrl(url: string | null | undefined): string {
   }
 }
 
-export function formatNumber(num: number | null | undefined): string {
-  if (num === null || num === undefined || isNaN(num)) return '0';
-  return num.toLocaleString('en-US');
+export function formatNumber(num: number | string | null | undefined): string {
+  if (num === null || num === undefined) return '0';
+  const n = typeof num === 'string' ? Number(num) : num;
+  if (isNaN(n)) return '0';
+  return n.toLocaleString('en-US');
+}
+
+export function fmtDate(isoString?: string | null): string {
+  if (!isoString) return '—';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return '—';
+  }
 }
 
 export function escapeHtml(str: string | null | undefined): string {

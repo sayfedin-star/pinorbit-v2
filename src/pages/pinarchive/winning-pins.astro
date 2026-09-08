@@ -660,6 +660,8 @@ import RepurposeModal from '../../components/pinarchive/RepurposeModal.astro';
 </Layout>
 
 <script>
+  import { escapeHtml, fmtDate, formatNumber as fmtNumber } from '../../lib/ui-helpers';
+
   let rawPins: any[] = [];
   let rawAccounts: any[] = [];
   let filteredPins: any[] = [];
@@ -672,36 +674,10 @@ import RepurposeModal from '../../components/pinarchive/RepurposeModal.astro';
   const selectedForCompare = new Set<string>();
   let currentPeekIndex = -1;
 
-  function escapeHtml(str?: string | null): string {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  function fmtNumber(n: number | string | null | undefined): string {
-    const num = Number(n) || 0;
-    return num.toLocaleString('en-US');
-  }
-
   function fmtCompact(n: number): string {
     if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
     if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k';
     return String(Math.round(n));
-  }
-
-  function fmtDate(isoString?: string | null): string {
-    if (!isoString) return '—';
-    try {
-      const d = new Date(isoString);
-      if (isNaN(d.getTime())) return '—';
-      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    } catch {
-      return '—';
-    }
   }
 
   function getPinDeltaByActiveTimeframe(p: any): number {
