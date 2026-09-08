@@ -2,3 +2,5 @@
 | 2 | 20260823000000_pinarchive_relay_enrichment.sql | annotations/SEO/social/board/follower enrichment, pa_runs trigger includes 'refresh' | 20260822000000 | Apply manually via Supabase SQL Editor (Project kuuugffvyokywtgmdrfk) |
 | 3 | 20260823000000_pinarchive_notes.sql | Manual notes and notes_updated_at columns on pa_pins | 20260823000000 | Apply manually via Supabase SQL Editor (Project kuuugffvyokywtgmdrfk) |
 | 8 | 20260901000000_pa_overview_sums_rpc.sql | pa_workspace_sums RPC for overview KPI sums | 20260831120000 | Apply via Supabase MCP (Project kuuugffvyokywtgmdrfk) |
+| 9 | 20260909000000_pa_accounts_oldest_pin_at.sql | oldest_pin_at on pa_accounts (monotonic, discovery-written) | 20260901000000 | Apply manually via Supabase SQL Editor (Project kuuugffvyokywtgmdrfk) |
+

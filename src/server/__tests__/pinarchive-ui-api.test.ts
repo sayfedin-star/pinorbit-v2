@@ -212,6 +212,74 @@ describe('PinArchive Dashboard UI Read Layer API Suite', () => {
       expect(json2.accounts[0].oldest_pin_at).toBe('2026-04-09T00:14:38.000Z');
       expect(gasCall).not.toHaveBeenCalled();
     });
+
+    it('reads oldest_pin_at directly from DB and bypasses gasCall entirely when column is populated', async () => {
+      mockPinArchiveClient.from.mockImplementation((table: string) => {
+        if (table === 'pa_accounts') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue({
+                  data: [
+                    {
+                      id: 'acc-db',
+                      username: 'roseisabelle555',
+                      status: 'active',
+                      pins_count: 6,
+                      follower_count: 891,
+                      last_run_at: '2026-08-23T00:00:00Z',
+                      oldest_pin_at: '2026-01-15T12:00:00.000Z',
+                    },
+                  ],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'pa_pins') {
+          return {
+            select: vi.fn().mockImplementation((fields: string, options?: any) => {
+              if (options?.head) {
+                return {
+                  eq: vi.fn().mockResolvedValue({
+                    count: 2,
+                    error: null,
+                  }),
+                };
+              }
+              return {
+                eq: vi.fn().mockReturnValue({
+                  order: vi.fn().mockReturnValue({
+                    range: vi.fn().mockResolvedValue({
+                      data: [
+                        { saves: 100, share_count: 20, archived_at: '2026-08-23T00:00:00Z' },
+                        { saves: 50, share_count: 5, archived_at: null },
+                      ],
+                      error: null,
+                    }),
+                  }),
+                }),
+              };
+            }),
+          };
+        }
+        return {};
+      });
+
+      const req = new Request('http://localhost:4321/api/pinarchive/overview');
+      const res = await overviewHandler({
+        request: req,
+        locals: { user: mockUser, supabase: {}, activeWorkspaceId: mockWsId },
+      } as any);
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+      expect(json.accounts[0].username).toBe('roseisabelle555');
+      expect(json.accounts[0].oldest_pin_at).toBe('2026-01-15T12:00:00.000Z');
+      expect(gasCall).not.toHaveBeenCalled();
+    });
   });
 
   describe('2. GET /api/pinarchive/pins', () => {

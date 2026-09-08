@@ -73,7 +73,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       sumsRpcSettled
     ] = await Promise.allSettled([
       db.from('pa_accounts')
-        .select('id, username, status, pins_count, follower_count, last_run_at, sheet_id, next_run_at, ingest_enabled, interval_days, backfill_status, backfill_cursor, last_result')
+        .select('id, username, status, pins_count, follower_count, last_run_at, sheet_id, next_run_at, ingest_enabled, interval_days, backfill_status, backfill_cursor, last_result, oldest_pin_at')
         .eq('workspace_id', ws)
         .limit(100),
       typeof db.rpc === 'function'
@@ -152,16 +152,21 @@ export const GET: APIRoute = async ({ request, locals }) => {
     }
 
     // 5. Query oldest pin timestamp (Account Age) via GAS bridge & edge cache
+    // Transitional fallback: only needed when one or more accounts lack a persisted oldest_pin_at
+    const needsGasAges = accounts.some((a: any) => !a.oldest_pin_at);
     const allUsernames = accounts.map((a: any) => a.username).filter(Boolean);
     const chunk1 = allUsernames.slice(0, 50);
     const chunk2 = allUsernames.slice(50, 100);
 
-    // TIER C Hardening: deterministic hash-based edge cache key (capped length, order-independent)
     const kv = getAnalyticsKV(locals);
     let cachedAges: Record<string, string | null> | null = null;
     let agesCacheKey = '';
 
-    if (allUsernames.length > 0) {
+    let agesRes1: any = null;
+    let agesRes2: any = null;
+
+    if (needsGasAges && allUsernames.length > 0) {
+      // TIER C Hardening: deterministic hash-based edge cache key (capped length, order-independent)
       const sortedJoined = [...allUsernames].sort().join('|');
       const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sortedJoined));
       const hashHex = Array.from(new Uint8Array(hashBuf))
@@ -178,27 +183,26 @@ export const GET: APIRoute = async ({ request, locals }) => {
       } catch (e: any) {
         console.warn('[PinArchiveOverview] Edge cache get error:', e?.message);
       }
-    }
 
-    let agesRes1: any = null;
-    let agesRes2: any = null;
-    if (cachedAges) {
-      agesRes1 = { ok: true, ages: cachedAges };
-      agesRes2 = { ok: true, ages: cachedAges };
-    } else if (allUsernames.length > 0) {
-      const [r1, r2] = await Promise.allSettled([
-        chunk1.length > 0
-          ? gasCall(locals.runtime?.env, ws, 'account_ages', { usernames: chunk1 })
-          : Promise.resolve({ ok: false }),
-        chunk2.length > 0
-          ? gasCall(locals.runtime?.env, ws, 'account_ages', { usernames: chunk2 })
-          : Promise.resolve({ ok: false }),
-      ]);
-      agesRes1 = r1.status === 'fulfilled' ? r1.value : null;
-      agesRes2 = r2.status === 'fulfilled' ? r2.value : null;
+      if (cachedAges) {
+        agesRes1 = { ok: true, ages: cachedAges };
+        agesRes2 = { ok: true, ages: cachedAges };
+      } else {
+        const [r1, r2] = await Promise.allSettled([
+          chunk1.length > 0
+            ? gasCall(locals.runtime?.env, ws, 'account_ages', { usernames: chunk1 })
+            : Promise.resolve({ ok: false }),
+          chunk2.length > 0
+            ? gasCall(locals.runtime?.env, ws, 'account_ages', { usernames: chunk2 })
+            : Promise.resolve({ ok: false }),
+        ]);
+        agesRes1 = r1.status === 'fulfilled' ? r1.value : null;
+        agesRes2 = r2.status === 'fulfilled' ? r2.value : null;
+      }
     }
 
     // Merge oldest_pin_at results across chunks
+    // 1. GAS / cache fallback first
     const combinedAges: Record<string, string | null> = {};
     if (agesRes1 && agesRes1.ok && agesRes1.ages) {
       Object.assign(combinedAges, agesRes1.ages);
@@ -207,8 +211,15 @@ export const GET: APIRoute = async ({ request, locals }) => {
       Object.assign(combinedAges, agesRes2.ages);
     }
 
+    // 2. Persisted DB column takes absolute precedence (overwrites GAS fallback)
+    for (const a of accounts) {
+      if (a.oldest_pin_at) {
+        combinedAges[a.username] = a.oldest_pin_at;
+      }
+    }
+
     // Save to edge cache (6 hours TTL if ages found, 30s if all null to avoid locking empty cache)
-    if (!cachedAges && agesCacheKey && Object.keys(combinedAges).length > 0) {
+    if (needsGasAges && !cachedAges && agesCacheKey && Object.keys(combinedAges).length > 0) {
       const hasAnyAge = Object.values(combinedAges).some((v) => Boolean(v));
       const ttl = hasAnyAge ? 6 * 3600 : 30;
       try {
