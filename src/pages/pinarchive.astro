@@ -1075,7 +1075,14 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
 </Layout>
 
 <script>
-  import { humanAgeFromOldestPin } from '../lib/ui-helpers';
+  import {
+    humanAgeFromOldestPin,
+    escapeHtml,
+    toast,
+    copyToClipboard,
+    cleanPinterestUsername,
+    timeAgo,
+  } from '../lib/ui-helpers';
 
   let rawAccounts: any[] = [];
   const selectedAccounts = new Set<string>();
@@ -1116,44 +1123,6 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     }
   }
 
-  function escapeHtml(str?: string | null): string {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  function toast(message: string, type: 'success' | 'error' | 'info' = 'success') {
-    let root = document.getElementById('toast-root');
-    if (!root) {
-      root = document.createElement('div');
-      root.id = 'toast-root';
-      root.setAttribute('aria-live', 'polite');
-      root.className = 'fixed bottom-4 right-4 z-[70] flex flex-col gap-2 w-80 max-w-[calc(100vw-2rem)]';
-      document.body.appendChild(root);
-    }
-    const colors = {
-      success: 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400',
-      error: 'border-rose-500/40 text-rose-600 dark:text-rose-400',
-      info: 'border-primary/40 text-primary',
-    };
-    const icons = { success: '✓', error: '✕', info: 'ℹ' };
-    const el = document.createElement('div');
-    el.className = `flex items-start gap-2.5 rounded-xl border bg-card p-3 text-xs font-semibold shadow-lg ${colors[type]} transition-all animate-in fade-in slide-in-from-bottom-2`;
-    el.innerHTML = `<span class="flex-shrink-0">${icons[type]}</span><span class="flex-1 text-foreground">${escapeHtml(message)}</span>
-      <button class="text-muted-foreground hover:text-foreground cursor-pointer" aria-label="Dismiss">✕</button>`;
-    el.querySelector('button')?.addEventListener('click', () => el.remove());
-    root.appendChild(el);
-    setTimeout(() => {
-      el.style.opacity = '0';
-      el.style.transition = 'opacity .3s';
-      setTimeout(() => el.remove(), 300);
-    }, 4200);
-  }
-
   // Number formatters
   function fmtNumberFull(n: number | string | null | undefined): string {
     const num = Number(n) || 0;
@@ -1167,22 +1136,6 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
 
   function fmtMetric(n: number | string | null | undefined): string {
     return isCompactNumbers ? fmtNumberCompact(n) : fmtNumberFull(n);
-  }
-
-  function timeAgo(isoString?: string | null): string {
-    if (!isoString) return 'never';
-    try {
-      const diffMs = Date.now() - new Date(isoString).getTime();
-      if (isNaN(diffMs) || diffMs < 0) return 'recently';
-      const mins = Math.floor(diffMs / 60000);
-      if (mins < 60) return `${Math.max(1, mins)}m ago`;
-      const hrs = Math.floor(mins / 60);
-      if (hrs < 24) return `${hrs}h ago`;
-      const days = Math.floor(hrs / 24);
-      return `${days}d ago`;
-    } catch {
-      return 'recently';
-    }
   }
 
   function formatNextRun(isoString?: string | null): string {
@@ -1237,20 +1190,6 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     }
     const initial = clean.slice(0, 2).toUpperCase() || 'PA';
     return { bg: palettes[hash], initial };
-  }
-
-  async function copyToClipboard(text: string, btn?: HTMLElement) {
-    try {
-      await navigator.clipboard.writeText(text);
-      if (btn) {
-        const orig = btn.innerHTML;
-        btn.innerHTML = '<span class="text-emerald-500 font-bold">✓</span>';
-        setTimeout(() => { btn.innerHTML = orig; }, 1200);
-      }
-      toast(`Copied "${text}" to clipboard!`);
-    } catch {
-      toast('Failed to copy', 'error');
-    }
   }
 
   // ─── Filter & Search Engine ───────────────────────────────────────────────
@@ -2935,14 +2874,6 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     setupArchitectureGuideModal();
 
     // ─── Add Creator Account Modal Controls ──────────────────────────────────
-    function cleanPinterestUsername(input: string): string {
-      let u = String(input || '').trim();
-      u = u.replace(/^(https?:\/\/)?(www\.)?pinterest\.[a-z.]+\//i, '');
-      u = u.replace(/\/.*$/, '');
-      u = u.replace(/^@+/, '').trim();
-      return u;
-    }
-
     function setupAddCreatorModal() {
       const modal = document.getElementById('add-creator-modal');
       const openBtn = document.getElementById('open-add-creator-modal');
