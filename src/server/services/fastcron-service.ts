@@ -4,12 +4,13 @@ import { decryptToken } from '../lib/token-crypto';
 import { evaluateTokenCandidates, maskToken } from '../lib/token-resolver';
 import { validateSafeUrl } from '../lib/ssrf-guard';
 import { getEffectiveSecret } from './webhook-secrets';
+import { FASTCRON_BASE } from '../lib/fastcron-client';
 import type {
   ScheduleSyncResponse,
   TriggerSyncResponse,
 } from '../../lib/types';
 
-export const FASTCRON_BASE = 'https://www.fastcron.com/api/v1';
+export { FASTCRON_BASE };
 
 export function getDispatchEndpointUrl(runtimeEnv?: Record<string, any>): string {
   const base = (runtimeEnv?.DISPATCH_BASE_URL as string) ||
