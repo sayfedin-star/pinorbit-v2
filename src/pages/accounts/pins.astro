@@ -548,7 +548,7 @@ import Layout from '../../layouts/Layout.astro';
           </td>
           <td class="px-4 py-3 font-medium text-foreground">
             <div class="flex items-center gap-3">
-              <img src="${escapeHtml(pin.image_url)}" alt="" class="h-10 w-10 rounded-lg object-cover border border-border bg-muted flex-shrink-0" onerror="this.src='https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=150&q=80'" />
+              <img src="${escapeHtml(pin.image_url)}" alt="" width="40" height="40" loading="lazy" decoding="async" class="h-10 w-10 rounded-lg object-cover border border-border bg-muted flex-shrink-0" onerror="this.src='https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=150&q=80'" />
               <div class="space-y-0.5">
                 <a href="#" class="font-semibold text-foreground hover:text-primary transition-colors max-w-sm truncate block pin-detail-trigger" data-id="${pin.id}">${escapeHtml(pin.title)}</a>
                 ${pin.description ? `<p class="max-w-xs truncate text-[11px] text-muted-foreground">${escapeHtml(pin.description)}</p>` : ''}
@@ -1002,7 +1002,7 @@ import Layout from '../../layouts/Layout.astro';
     if (content) {
       content.innerHTML = `
         <div class="flex items-start gap-4 pb-3 border-b border-border">
-          <img src="${escapeHtml(pin.image_url)}" alt="" class="h-20 w-20 rounded-xl object-cover border border-border bg-muted flex-shrink-0" />
+          <img src="${escapeHtml(pin.image_url)}" alt="" width="80" height="80" loading="lazy" decoding="async" class="h-20 w-20 rounded-xl object-cover border border-border bg-muted flex-shrink-0" />
           <div class="space-y-1">
             <h4 class="font-bold text-sm text-foreground">${escapeHtml(pin.title)}</h4>
             <p class="text-xs text-muted-foreground">${escapeHtml(pin.description || 'No description provided.')}</p>

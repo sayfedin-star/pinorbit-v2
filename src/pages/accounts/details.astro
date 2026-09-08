@@ -1685,7 +1685,7 @@ import ProviderBadge from '../../components/cron/ProviderBadge.astro';
         <tr class="transition-colors hover:bg-muted/40 text-xs">
           <td class="px-5 py-3 font-medium text-foreground">
             <div class="flex items-center gap-3">
-              <img src="${escapeHtml(pin.image_url)}" alt="" class="h-9 w-9 rounded-lg object-cover border border-border bg-muted flex-shrink-0" onerror="this.src='https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=150&q=80'" />
+              <img src="${escapeHtml(pin.image_url)}" alt="" width="36" height="36" loading="lazy" decoding="async" class="h-9 w-9 rounded-lg object-cover border border-border bg-muted flex-shrink-0" onerror="this.src='https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=150&q=80'" />
               <div class="space-y-0.5">
                 <p class="max-w-xs font-semibold truncate text-foreground" title="${escapeHtml(pin.title)}">${escapeHtml(pin.title)}</p>
                 ${pin.description ? `<p class="max-w-xs truncate text-[11px] text-muted-foreground">${escapeHtml(pin.description)}</p>` : ''}
