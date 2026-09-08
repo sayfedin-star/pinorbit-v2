@@ -1,6 +1,8 @@
 import { supabase } from './supabase-client';
 import {
   mockWebhooks,
+  mockAccounts,
+  matchesWorkspace,
   setMockWebhooks,
 } from './supabase-mock';
 import type { AccountWebhook, AccountWebhookSummary } from './types';
@@ -8,35 +10,55 @@ import type { AccountWebhook, AccountWebhookSummary } from './types';
 // 2. Fetch Account Webhooks
 export async function getAccountWebhooks(accountId?: string, workspaceId?: string): Promise<AccountWebhook[]> {
   if (!supabase) {
-    if (!accountId) return mockWebhooks;
-    return mockWebhooks.filter((w) => w.account_id === accountId);
+    if (accountId) {
+      return mockWebhooks.filter((w) => w.account_id === accountId);
+    }
+    if (workspaceId) {
+      const accIds = mockAccounts.filter((a) => matchesWorkspace(a.workspace_id, workspaceId)).map((a) => a.id);
+      return mockWebhooks.filter((w) => accIds.includes(w.account_id));
+    }
+    return mockWebhooks;
   }
   try {
-    let query = supabase
-      .from('account_webhooks')
-      .select('*')
+    let query: any;
+
+    if (accountId) {
+      query = supabase
+        .from('account_webhooks')
+        .select('*')
+        .eq('account_id', accountId);
+    } else if (workspaceId) {
+      query = supabase
+        .from('account_webhooks')
+        .select('*, accounts!inner(id, workspace_id)')
+        .eq('accounts.workspace_id', workspaceId);
+    } else {
+      query = supabase
+        .from('account_webhooks')
+        .select('*');
+    }
+
+    query = query
       .order('priority', { ascending: true })
       .order('created_at', { ascending: true });
 
-    if (accountId) {
-      query = query.eq('account_id', accountId);
-    } else if (workspaceId) {
-      const { data: accs } = await supabase.from('accounts').select('id').eq('workspace_id', workspaceId);
-      if (accs && accs.length > 0) {
-        const accIds = accs.map((a: any) => a.id);
-        query = query.in('account_id', accIds);
-      } else {
-        return [];
-      }
-    }
-
     const { data, error } = await query;
     if (error) throw error;
-    return (data as AccountWebhook[]) || [];
+    if (!data) return [];
+    return data.map((item: any) => {
+      const { accounts: _acc, ...hook } = item;
+      return hook as AccountWebhook;
+    });
   } catch (err) {
     console.warn('Supabase fetch account_webhooks error, using fallback:', err);
-    if (!accountId) return mockWebhooks;
-    return mockWebhooks.filter((w) => w.account_id === accountId);
+    if (accountId) {
+      return mockWebhooks.filter((w) => w.account_id === accountId);
+    }
+    if (workspaceId) {
+      const accIds = mockAccounts.filter((a) => matchesWorkspace(a.workspace_id, workspaceId)).map((a) => a.id);
+      return mockWebhooks.filter((w) => accIds.includes(w.account_id));
+    }
+    return mockWebhooks;
   }
 }
 
@@ -263,19 +285,60 @@ export async function deleteAccountWebhook(
 }
 
 export async function getAccountWebhookSummary(accountId: string): Promise<AccountWebhookSummary> {
-  const webhooks = await getAccountWebhooks(accountId);
-  const totalWebhooks = webhooks.length;
-  const activeWebhooks = webhooks.filter((w) => w.is_active).length;
-  const primaryHook = webhooks.find((w) => w.is_primary);
-  const primaryWebhookLabel = primaryHook ? primaryHook.label : 'None';
-  const totalRemainingCapacity = webhooks
-    .filter((w) => w.is_active)
-    .reduce((sum, w) => sum + (w.remaining_capacity || 0), 0);
+  if (!supabase) {
+    const webhooks = mockWebhooks.filter((w) => w.account_id === accountId);
+    const totalWebhooks = webhooks.length;
+    const activeWebhooks = webhooks.filter((w) => w.is_active).length;
+    const primaryHook = webhooks.find((w) => w.is_primary);
+    const primaryWebhookLabel = primaryHook ? primaryHook.label : 'None';
+    const totalRemainingCapacity = webhooks
+      .filter((w) => w.is_active)
+      .reduce((sum, w) => sum + (w.remaining_capacity || 0), 0);
 
-  return {
-    totalWebhooks,
-    activeWebhooks,
-    primaryWebhookLabel,
-    totalRemainingCapacity,
-  };
+    return {
+      totalWebhooks,
+      activeWebhooks,
+      primaryWebhookLabel,
+      totalRemainingCapacity,
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('account_webhooks')
+      .select('label, is_active, is_primary, remaining_capacity')
+      .eq('account_id', accountId);
+
+    if (error || !data) {
+      return {
+        totalWebhooks: 0,
+        activeWebhooks: 0,
+        primaryWebhookLabel: 'None',
+        totalRemainingCapacity: 0,
+      };
+    }
+
+    const totalWebhooks = data.length;
+    const activeWebhooks = data.filter((w) => w.is_active).length;
+    const primaryHook = data.find((w) => w.is_primary);
+    const primaryWebhookLabel = primaryHook ? primaryHook.label : 'None';
+    const totalRemainingCapacity = data
+      .filter((w) => w.is_active)
+      .reduce((sum, w) => sum + (w.remaining_capacity || 0), 0);
+
+    return {
+      totalWebhooks,
+      activeWebhooks,
+      primaryWebhookLabel,
+      totalRemainingCapacity,
+    };
+  } catch (err) {
+    console.warn('getAccountWebhookSummary error:', err);
+    return {
+      totalWebhooks: 0,
+      activeWebhooks: 0,
+      primaryWebhookLabel: 'None',
+      totalRemainingCapacity: 0,
+    };
+  }
 }
