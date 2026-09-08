@@ -3,6 +3,7 @@ import {
   mockLogs,
   mockAuditLogs,
   mockImportSessions,
+  matchesWorkspace,
   type RawLog,
 } from './supabase-mock';
 import type { Log, AuditLog, ImportSession, PinDeliveryLog } from './types';
@@ -52,6 +53,35 @@ export async function getLogs(limit = 50, workspaceId?: string): Promise<Log[]> 
   } catch (err) {
     console.warn('Supabase fetch logs error, using fallback:', err);
     return mockLogs.slice(0, limit);
+  }
+}
+
+// 5a. Count Logs (Head count for dashboard KPIs)
+export async function countLogs(workspaceId?: string): Promise<number> {
+  if (!supabase) {
+    if (workspaceId) {
+      return mockLogs.filter((l) => matchesWorkspace(l.workspace_id, workspaceId)).length;
+    }
+    return mockLogs.length;
+  }
+  try {
+    let query = supabase
+      .from('logs')
+      .select('id', { count: 'exact', head: true });
+
+    if (workspaceId) {
+      query = query.eq('workspace_id', workspaceId);
+    }
+
+    const { count, error } = await query;
+    if (error) throw error;
+    return count ?? 0;
+  } catch (err) {
+    console.warn('Supabase count logs error, using fallback:', err);
+    if (workspaceId) {
+      return mockLogs.filter((l) => matchesWorkspace(l.workspace_id, workspaceId)).length;
+    }
+    return mockLogs.length;
   }
 }
 

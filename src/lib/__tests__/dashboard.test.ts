@@ -170,5 +170,32 @@ describe('Dashboard Server-Side Pin Status Counts Suite', () => {
     expect(kpis.postedPins).toBe(1);
     expect(kpis.failedPins).toBe(baselineFailed);
     expect(kpis.failedPins).toBe(1);
+    expect(typeof kpis.totalLogs).toBe('number');
+  });
+
+  it('countLogs executes head count query on logs table when supabase is active', async () => {
+    const eqSpy = vi.fn().mockReturnThis();
+    const selectSpy = vi.fn().mockReturnValue({
+      eq: eqSpy,
+      then: (resolve: any) => resolve({ count: 77, error: null }),
+    });
+    eqSpy.mockReturnValue({
+      then: (resolve: any) => resolve({ count: 77, error: null }),
+    });
+
+    const mockSupabase: any = {
+      from: vi.fn().mockReturnValue({
+        select: selectSpy,
+      }),
+    };
+
+    vi.spyOn(supabaseClientModule, 'supabase', 'get').mockReturnValue(mockSupabase);
+
+    const { countLogs } = await import('../logs');
+    const count = await countLogs('ws-777');
+    expect(mockSupabase.from).toHaveBeenCalledWith('logs');
+    expect(selectSpy).toHaveBeenCalledWith('id', { count: 'exact', head: true });
+    expect(eqSpy).toHaveBeenCalledWith('workspace_id', 'ws-777');
+    expect(count).toBe(77);
   });
 });
