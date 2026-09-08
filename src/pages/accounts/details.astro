@@ -1265,10 +1265,18 @@ import ProviderBadge from '../../components/cron/ProviderBadge.astro';
       renderScheduling(currentAccount);
       renderRecentLogs(logs);
 
-      // Auto-reschedule pending pins to pre-computed pacing slots
-      await rescheduleAccountPendingPins(accountId);
-
+      // Render initial pins table immediately (0ms blocking delay)
       await loadRecentPins();
+
+      // Auto-reschedule pending pins to pre-computed pacing slots in background
+      rescheduleAccountPendingPins(accountId)
+        .then((res) => {
+          if (res && res.count > 0) {
+            // Silently refresh pins table if timestamps were modified
+            loadRecentPins();
+          }
+        })
+        .catch((e) => console.warn('[details] reschedule deferred:', e));
     } catch (err: any) {
       if (retries > 0) {
         setTimeout(() => loadAllData(retries - 1), 1500);
