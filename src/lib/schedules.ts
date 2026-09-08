@@ -120,6 +120,8 @@ export async function rescheduleAccountPendingPins(accountId: string): Promise<{
       return { count: typeof rpcData === 'number' ? rpcData : jsCount, error: null };
     }
 
+    console.warn('[schedules] RPC reschedule_account_pending_pins unavailable, entering REST fallback:', rpcError);
+
     // 2. Direct REST API Fallback: Update Supabase database directly
     const { data: accountData } = await supabase
       .from('accounts')
