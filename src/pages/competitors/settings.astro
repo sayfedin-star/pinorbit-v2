@@ -1679,7 +1679,7 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Create a schedule via Configure
 
       const colProfile = `<td class="py-3 px-4" data-col="profile">
         <div class="flex items-center gap-2.5">
-          ${c.avatar_url ? `<img src="${escHtml(c.avatar_url)}" alt="" class="h-7 w-7 rounded-full object-cover border border-border" />` : `<div class="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-xs">@</div>`}
+          ${c.avatar_url ? `<img src="${escHtml(c.avatar_url)}" alt="" width="28" height="28" loading="lazy" decoding="async" class="h-7 w-7 rounded-full object-cover border border-border" />` : `<div class="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-xs">@</div>`}
           <div>
             <div class="font-semibold text-foreground text-xs">@${escHtml(c.username)}</div>
             <div class="text-[10px] text-muted-foreground">${escHtml(c.full_name || 'Competitor')}</div>

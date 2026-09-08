@@ -1207,7 +1207,7 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Configure automated scraping sc
 
           return `<td class="${padClass}">
             <div class="flex items-center gap-3 ${isHidden ? 'opacity-65' : ''}">
-              <img src="${avatar}" alt="${escHtml(c.username)}" loading="lazy" class="${avatarSize} rounded-xl object-cover border border-border shadow-2xs flex-shrink-0" onerror="this.src='https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'" />
+              <img src="${avatar}" alt="${escHtml(c.username)}" loading="lazy" decoding="async" class="${avatarSize} aspect-square rounded-xl object-cover border border-border shadow-2xs flex-shrink-0" onerror="this.src='https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'" />
               <div class="flex flex-col min-w-0">
                 <div class="flex items-center gap-1.5 flex-wrap">
                   <a href="/competitors/details?id=${c.id}" aria-label="View detailed analytics for ${escHtml(c.full_name || c.username)}" class="text-xs font-bold ${nameColorClass} transition-colors truncate text-left max-w-[200px] sm:max-w-[280px]">
@@ -1719,7 +1719,7 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Configure automated scraping sc
     const drawerAvatar = c.avatar_url && /^https?:\/\//i.test(c.avatar_url) ? c.avatar_url : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80';
     drawerBody.innerHTML = `
       <div class="flex items-center gap-3.5 pb-4 border-b border-border">
-        <img src="${escHtml(drawerAvatar)}" class="h-12 w-12 rounded-xl object-cover border border-border shadow-xs" />
+        <img src="${escHtml(drawerAvatar)}" width="48" height="48" loading="lazy" decoding="async" class="h-12 w-12 rounded-xl object-cover border border-border shadow-xs" />
         <div class="min-w-0 flex-1">
           <div class="text-sm font-bold text-foreground truncate">${escHtml(c.full_name || c.username)}</div>
           <div class="text-xs text-muted-foreground flex items-center gap-1">
@@ -1817,7 +1817,7 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Configure automated scraping sc
               return `
               <th class="py-3 px-4 font-bold text-foreground">
                 <div class="flex items-center gap-2">
-                  <img src="${escHtml(compAvatar)}" class="h-6 w-6 rounded-lg object-cover border border-border" />
+                  <img src="${escHtml(compAvatar)}" width="24" height="24" loading="lazy" decoding="async" class="h-6 w-6 rounded-lg object-cover border border-border" />
                   <span class="truncate max-w-[120px]">@${escHtml(c.username)}</span>
                 </div>
               </th>`;
