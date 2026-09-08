@@ -264,7 +264,7 @@ import KPIStatCard from '../components/ui/KPIStatCard.astro';
       // P1: Scheduling & Auth DB
       Promise.all([
         getDashboardKPIs(activeWsId),
-        getPins('all', undefined, activeWsId),
+        getPins('all', undefined, activeWsId, 5),
         getLogs(5, activeWsId),
       ]),
       // P3: Analytics DB (30D window)
