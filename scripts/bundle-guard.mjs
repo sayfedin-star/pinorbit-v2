@@ -155,6 +155,42 @@ walkDir(srcDir, (filePath) => {
   });
 });
 
+// 4. Check all <img> tags for required loading and decoding attributes
+walkDir(srcDir, (filePath) => {
+  if (!filePath.endsWith('.astro') && !filePath.startsWith(path.join(srcDir, 'scripts'))) return;
+  if (filePath.includes('__tests__') || filePath.includes('.test.')) return;
+
+  const relPath = path.relative(rootDir, filePath).replace(/\\/g, '/');
+  const content = fs.readFileSync(filePath, 'utf8');
+  const imgRegex = /<img\b[\s\S]*?(?:\/?>)/gi;
+  let match;
+
+  while ((match = imgRegex.exec(content)) !== null) {
+    const tag = match[0];
+    const tagStartIndex = match.index;
+    const lineNum = content.substring(0, tagStartIndex).split('\n').length;
+    const snippet = tag.replace(/\s+/g, ' ').slice(0, 100);
+
+    if (!tag.includes('loading=') && !tag.includes('loading')) {
+      errors.push({
+        file: relPath,
+        line: lineNum,
+        rule: "Missing 'loading' attribute on <img> tag (must be 'lazy' or 'eager')",
+        snippet,
+      });
+    }
+
+    if (!tag.includes('decoding=') && !tag.includes('decoding')) {
+      errors.push({
+        file: relPath,
+        line: lineNum,
+        rule: "Missing 'decoding' attribute on <img> tag (must be 'async')",
+        snippet,
+      });
+    }
+  }
+});
+
 // Report Results
 console.log('\n🔍 --- PinOrbit Bundle Guard ---');
 

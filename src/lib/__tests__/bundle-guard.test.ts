@@ -109,4 +109,33 @@ export const prerender = false;
       }
     }
   });
+
+  it('detects and blocks <img> tags missing loading or decoding attributes', () => {
+    const testAstroFile = path.join(rootDir, 'src/pages/__test_bundle_guard_img.astro');
+    fs.writeFileSync(
+      testAstroFile,
+      `---
+export const prerender = false;
+---
+<div>
+  <img src="https://example.com/test.png" alt="Test" />
+</div>
+`,
+      'utf8'
+    );
+
+    try {
+      expect(() => {
+        execSync(`node "${guardScriptPath}"`, {
+          cwd: rootDir,
+          encoding: 'utf8',
+          stdio: 'pipe',
+        });
+      }).toThrow();
+    } finally {
+      if (fs.existsSync(testAstroFile)) {
+        fs.unlinkSync(testAstroFile);
+      }
+    }
+  });
 });
