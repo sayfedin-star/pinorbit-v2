@@ -336,33 +336,61 @@ export async function getAccountPinStats(accountId: string): Promise<AccountPinS
   try {
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
+    const todayStr = todayStart.toISOString();
 
-    const [
-      totalRes,
-      pendingRes,
-      retryingRes,
-      postedRes,
-      failedRes,
-      accRes,
-      todayPostedRes,
-    ] = await Promise.all([
-      supabase.from('pins').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
-      supabase.from('pins').select('*', { count: 'exact', head: true }).eq('account_id', accountId).in('status', ['pending', 'processing']),
-      supabase.from('pins').select('*', { count: 'exact', head: true }).eq('account_id', accountId).eq('status', 'pending').gt('retry_count', 0),
-      supabase.from('pins').select('*', { count: 'exact', head: true }).eq('account_id', accountId).eq('status', 'posted'),
-      supabase.from('pins').select('*', { count: 'exact', head: true }).eq('account_id', accountId).eq('status', 'failed'),
-      supabase.from('accounts').select('max_pins_per_day').eq('id', accountId).maybeSingle(),
-      supabase.from('pins').select('*', { count: 'exact', head: true }).eq('account_id', accountId).eq('status', 'posted').gte('posted_at', todayStart.toISOString()),
+    const [pinsInitial, accRes] = await Promise.all([
+      supabase
+        .from('pins')
+        .select('status, retry_count, posted_at', { count: 'exact' })
+        .eq('account_id', accountId)
+        .range(0, 999),
+      supabase
+        .from('accounts')
+        .select('max_pins_per_day')
+        .eq('id', accountId)
+        .maybeSingle(),
     ]);
 
-    const total = totalRes.count ?? 0;
-    const pending = pendingRes.count ?? 0;
-    const retrying = retryingRes.count ?? 0;
-    const posted = postedRes.count ?? 0;
-    const failed = failedRes.count ?? 0;
+    let allPins = pinsInitial.data ? [...pinsInitial.data] : [];
+    if (pinsInitial.count && pinsInitial.count > allPins.length) {
+      let from = allPins.length;
+      while (from < pinsInitial.count) {
+        const nextChunk = await supabase
+          .from('pins')
+          .select('status, retry_count, posted_at')
+          .eq('account_id', accountId)
+          .range(from, from + 999);
+        if (!nextChunk.data || nextChunk.data.length === 0) break;
+        allPins.push(...nextChunk.data);
+        from += nextChunk.data.length;
+      }
+    }
+
+    let total = 0;
+    let pending = 0;
+    let retrying = 0;
+    let posted = 0;
+    let failed = 0;
+    let postedToday = 0;
+
+    for (const pin of allPins) {
+      total++;
+      if (pin.status === 'pending' || pin.status === 'processing') {
+        pending++;
+        if (pin.status === 'pending' && (pin.retry_count || 0) > 0) {
+          retrying++;
+        }
+      } else if (pin.status === 'posted') {
+        posted++;
+        if (pin.posted_at && pin.posted_at >= todayStr) {
+          postedToday++;
+        }
+      } else if (pin.status === 'failed') {
+        failed++;
+      }
+    }
 
     const maxDaily = accRes.data ? accRes.data.max_pins_per_day : 20;
-    const postedToday = todayPostedRes.count ?? 0;
     const remainingToday = Math.max(0, maxDaily - postedToday);
 
     return { total, pending, posted, failed, retrying, remainingToday };
