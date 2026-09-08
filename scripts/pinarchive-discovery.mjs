@@ -477,6 +477,29 @@ function computeNextRunDate(todayUTC = new Date().toISOString().slice(0, 10), in
   return nextTarget.toISOString();
 }
 
+// ── Oldest-pin monotonic min (window-safe under early-stop pagination) ──
+// existingIso: current pa_accounts.oldest_pin_at (ISO string or null).
+// pins: formatted pins carrying created_at_pinterest (e.g. allPinsForSheet).
+// Returns the oldest valid ISO timestamp, or null when none exists.
+function computeOldestPinAt(existingIso, pins) {
+  let bestMs = null;
+  if (existingIso) {
+    const t = new Date(existingIso).getTime();
+    if (Number.isFinite(t)) bestMs = t;
+  }
+  if (Array.isArray(pins)) {
+    for (const p of pins) {
+      const raw = p?.created_at_pinterest;
+      if (!raw) continue;
+      const t = new Date(raw).getTime();
+      if (!Number.isFinite(t)) continue;
+      if (bestMs === null || t < bestMs) bestMs = t;
+    }
+  }
+  return bestMs === null ? null : new Date(bestMs).toISOString();
+}
+
+
 // ── Main Process ──
 async function main() {
   checkEnv();
@@ -540,7 +563,7 @@ async function main() {
   // Load accounts from P4
   let accounts = await supaQuery(
     'pa_accounts',
-    'select=id,workspace_id,username,follower_count,status,ingest_enabled,interval_days,next_run_at,last_run_at,backfill_status,backfill_cursor,pins_count&order=username.asc'
+    'select=id,workspace_id,username,follower_count,status,ingest_enabled,interval_days,next_run_at,last_run_at,backfill_status,backfill_cursor,pins_count,oldest_pin_at&order=username.asc'
   );
   if (!accounts.length) {
     console.log('No accounts found in database.');
@@ -901,14 +924,19 @@ async function main() {
 
     const lastResult = `pages=${pageCount} fetched=${allPinsForSheet.length} +${newPinsCount} sheet=${sheetPushed}${sheetBreakdown}${circuitBroken ? ' (circuit-broken)' : ''}`;
 
-    await supaPatch('pa_accounts', `workspace_id=eq.${acc.workspace_id}&id=eq.${acc.id}`, {
+    const batchOldest = computeOldestPinAt(acc.oldest_pin_at || null, allPinsForSheet);
+
+    const accountPatch = {
       next_run_at: nextRunAt,
       last_run_at: new Date().toISOString(),
       backfill_status: circuitBroken ? (acc.backfill_status || 'in_progress') : (hasMore && cursor ? 'in_progress' : 'done'),
       backfill_cursor: circuitBroken ? (acc.backfill_cursor || cursor) : (hasMore && cursor ? cursor : null),
       last_result: lastResult,
       pins_count: knownPinIds.size,
-    });
+    };
+    if (batchOldest) accountPatch.oldest_pin_at = batchOldest;
+
+    await supaPatch('pa_accounts', `workspace_id=eq.${acc.workspace_id}&id=eq.${acc.id}`, accountPatch);
 
     // Record run telemetry in pa_runs
     await supaInsert('pa_runs', {
@@ -948,6 +976,7 @@ export {
   writeToGas,
   checkCalendarEligibility,
   computeNextRunDate,
+  computeOldestPinAt,
 };
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
