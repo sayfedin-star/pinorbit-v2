@@ -574,8 +574,11 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
                   <img
                     src="${escapeHtml(pin.image_url)}"
                     alt="Pin"
-                    class="h-12 w-9 rounded-lg object-cover border border-border shrink-0 bg-muted"
+                    width="36"
+                    height="48"
                     loading="lazy"
+                    decoding="async"
+                    class="h-12 w-9 rounded-lg object-cover border border-border shrink-0 bg-muted"
                   />
                   <div class="min-w-0 max-w-sm">
                     <span class="font-semibold text-foreground truncate block text-xs" title="${escapeHtml(pin.title)}">
@@ -660,8 +663,9 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
                   <img
                     src="${escapeHtml(pin.image_url)}"
                     alt="Pin"
-                    class="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
                     loading="lazy"
+                    decoding="async"
+                    class="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
                   <div class="absolute top-2 left-2">
                     <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-background/90 text-primary border border-border shadow-xs">

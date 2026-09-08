@@ -656,6 +656,7 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
                 src="${escapeHtml(imageUrl)}"
                 alt="${escapeHtml(p.title || 'Pinterest Pin')}"
                 loading="lazy"
+                decoding="async"
                 class="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
                 onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');"
               />
@@ -778,7 +779,7 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
         <td class="py-2.5 px-3" data-col="preview">
           <a href="${escapeHtml(detailsUrl)}" class="block h-10 w-10 rounded-lg overflow-hidden bg-muted/50 shrink-0">
             ${imageUrl ? `
-              <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(p.title || 'Pin')}" loading="lazy" class="w-full h-full object-cover" />
+              <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(p.title || 'Pin')}" loading="lazy" decoding="async" class="w-full h-full object-cover" />
             ` : `
               <div class="w-full h-full flex items-center justify-center text-muted-foreground text-[10px]">No img</div>
             `}
