@@ -351,7 +351,7 @@ if (intelConnId) {
             <td class="py-3 px-4 min-w-[240px]" data-intel-col="pin">
               <div class="flex items-center gap-3">
                 ${item.image_url 
-                  ? `<img src="${escapeHtml(item.image_url)}" alt="" class="w-9 h-9 rounded-lg object-cover border border-border bg-muted shrink-0" loading="lazy" />` 
+                  ? `<img src="${escapeHtml(item.image_url)}" alt="" width="36" height="36" loading="lazy" decoding="async" class="w-9 h-9 rounded-lg object-cover border border-border bg-muted shrink-0" />` 
                   : `<div class="w-9 h-9 rounded-lg bg-muted border border-border flex items-center justify-center text-muted-foreground text-xs shrink-0 font-bold">📌</div>`
                 }
                 <div class="min-w-0 flex-1">

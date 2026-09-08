@@ -1967,7 +1967,7 @@ TASK:
               return `
                 <div class="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-xs">
                   <div class="flex items-center gap-3">
-                    <img src="${escapeHtml(p.image_url)}" class="h-14 w-14 object-cover rounded-xl border border-border" />
+                    <img src="${escapeHtml(p.image_url)}" width="56" height="56" loading="lazy" decoding="async" class="h-14 w-14 object-cover rounded-xl border border-border" />
                     <div class="min-w-0 flex-1">
                       <div class="flex items-center gap-1 mb-1">
                         ${renderStrategyBadge(st)}

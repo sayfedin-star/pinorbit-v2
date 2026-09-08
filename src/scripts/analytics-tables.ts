@@ -269,7 +269,7 @@ async function renderS2() {
             <td class="py-3 px-4">
               <div class="flex items-center gap-3">
                 <div class="h-10 w-10 flex-shrink-0 overflow-hidden rounded-md border border-border bg-muted">
-                  <img src="${escapeHtml(asText(p.image_url, FALLBACK_IMG))}" alt="Pin" class="h-full w-full object-cover" loading="lazy" />
+                  <img src="${escapeHtml(asText(p.image_url, FALLBACK_IMG))}" alt="Pin" loading="lazy" decoding="async" class="h-full w-full object-cover" />
                 </div>
                 <div class="min-w-0 max-w-[200px]">
                   <a href="https://pinterest.com/pin/${escapeHtml(asText(p.pin_id))}" target="_blank" rel="noopener noreferrer" class="block truncate font-semibold hover:text-primary transition-colors">
