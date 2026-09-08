@@ -434,6 +434,7 @@ export async function bulkDeletePins(
     const { error } = await supabase.from('pins').delete().in('id', pinIds);
     if (error) {
       console.warn('Supabase bulkDeletePins DB notice:', error.message);
+      return { count: 0, error: error.message };
     }
 
     try {
@@ -464,7 +465,7 @@ export async function bulkDeletePins(
     return { count: pinIds.length, error: null };
   } catch (err: any) {
     console.warn('bulkDeletePins exception:', err);
-    return { count: pinIds.length, error: null };
+    return { count: 0, error: err.message || 'Bulk delete failed' };
   }
 }
 
@@ -502,6 +503,7 @@ export async function bulkEditPins(
     const { error } = await supabase.from('pins').update(payload).in('id', pinIds);
     if (error) {
       console.warn('Supabase bulkEditPins DB notice:', error.message);
+      return { count: 0, error: error.message };
     }
 
     try {
@@ -532,7 +534,7 @@ export async function bulkEditPins(
     return { count: pinIds.length, error: null };
   } catch (err: any) {
     console.warn('bulkEditPins exception:', err);
-    return { count: pinIds.length, error: null };
+    return { count: 0, error: err.message || 'Bulk edit failed' };
   }
 }
 
@@ -580,6 +582,7 @@ export async function bulkRetryPinsNow(
 
     if (error) {
       console.warn('Supabase bulkRetryPinsNow DB notice:', error.message);
+      return { count: 0, error: error.message };
     }
 
     try {
@@ -610,7 +613,7 @@ export async function bulkRetryPinsNow(
     return { count: pinIds.length, error: null };
   } catch (err: any) {
     console.warn('bulkRetryPinsNow exception:', err);
-    return { count: pinIds.length, error: null };
+    return { count: 0, error: err.message || 'Bulk retry failed' };
   }
 }
 
@@ -663,6 +666,7 @@ export async function bulkCancelPins(
 
     if (error) {
       console.warn('Supabase bulkCancelPins DB notice:', error.message);
+      return { count: 0, error: error.message };
     }
 
     try {
@@ -693,6 +697,6 @@ export async function bulkCancelPins(
     return { count: pinIds.length, error: null };
   } catch (err: any) {
     console.warn('bulkCancelPins exception:', err);
-    return { count: pinIds.length, error: null };
+    return { count: 0, error: err.message || 'Bulk cancel failed' };
   }
 }

@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { getPins } from '../pins';
+import {
+  getPins,
+  bulkDeletePins,
+  bulkEditPins,
+  bulkRetryPinsNow,
+  bulkCancelPins,
+} from '../pins';
 import { mockPins, setMockPins } from '../supabase-mock';
 import * as supabaseClientModule from '../supabase-client';
 
@@ -101,5 +107,80 @@ describe('getPins Top-N & Limit Unit Tests', () => {
     const top2 = await getPins('all', undefined, undefined, 2);
 
     expect(top2).toEqual(all.slice(0, 2));
+  });
+});
+
+describe('Bulk Operations Error Propagation Suite', () => {
+  it('returns count: 0 and error message when bulkDeletePins encounters a DB error', async () => {
+    const mockSupabase: any = {
+      from: vi.fn().mockReturnValue({
+        delete: vi.fn().mockReturnValue({
+          in: vi.fn().mockResolvedValue({ error: { message: 'Database delete failure' } }),
+        }),
+      }),
+    };
+    vi.spyOn(supabaseClientModule, 'supabase', 'get').mockReturnValue(mockSupabase);
+
+    const res = await bulkDeletePins(['pin-1', 'pin-2']);
+    expect(res.count).toBe(0);
+    expect(res.error).toBe('Database delete failure');
+  });
+
+  it('returns count: 0 and error message when bulkDeletePins throws an exception', async () => {
+    const mockSupabase: any = {
+      from: vi.fn().mockImplementation(() => {
+        throw new Error('Network timeout during delete');
+      }),
+    };
+    vi.spyOn(supabaseClientModule, 'supabase', 'get').mockReturnValue(mockSupabase);
+
+    const res = await bulkDeletePins(['pin-1']);
+    expect(res.count).toBe(0);
+    expect(res.error).toBe('Network timeout during delete');
+  });
+
+  it('returns count: 0 and error message when bulkEditPins encounters a DB error', async () => {
+    const mockSupabase: any = {
+      from: vi.fn().mockReturnValue({
+        update: vi.fn().mockReturnValue({
+          in: vi.fn().mockResolvedValue({ error: { message: 'Database update constraint error' } }),
+        }),
+      }),
+    };
+    vi.spyOn(supabaseClientModule, 'supabase', 'get').mockReturnValue(mockSupabase);
+
+    const res = await bulkEditPins(['pin-1'], { board_name: 'New Board' });
+    expect(res.count).toBe(0);
+    expect(res.error).toBe('Database update constraint error');
+  });
+
+  it('returns count: 0 and error message when bulkRetryPinsNow encounters a DB error', async () => {
+    const mockSupabase: any = {
+      from: vi.fn().mockReturnValue({
+        update: vi.fn().mockReturnValue({
+          in: vi.fn().mockResolvedValue({ error: { message: 'Rate limit on retry' } }),
+        }),
+      }),
+    };
+    vi.spyOn(supabaseClientModule, 'supabase', 'get').mockReturnValue(mockSupabase);
+
+    const res = await bulkRetryPinsNow(['pin-1']);
+    expect(res.count).toBe(0);
+    expect(res.error).toBe('Rate limit on retry');
+  });
+
+  it('returns count: 0 and error message when bulkCancelPins encounters a DB error', async () => {
+    const mockSupabase: any = {
+      from: vi.fn().mockReturnValue({
+        update: vi.fn().mockReturnValue({
+          in: vi.fn().mockResolvedValue({ error: { message: 'Permission denied on cancel' } }),
+        }),
+      }),
+    };
+    vi.spyOn(supabaseClientModule, 'supabase', 'get').mockReturnValue(mockSupabase);
+
+    const res = await bulkCancelPins(['pin-1']);
+    expect(res.count).toBe(0);
+    expect(res.error).toBe('Permission denied on cancel');
   });
 });
