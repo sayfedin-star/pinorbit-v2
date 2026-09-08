@@ -279,14 +279,10 @@ import SectionHeader from '../components/ui/SectionHeader.astro';
 
 <script>
   import { requireAuth } from '../lib/auth';
-  import {
-    getAccounts,
-    getBoardsForAccount,
-    getPins,
-    bulkInsertPins,
-    getAccountWebhooks,
-    updateAccountAutoBoardSettings,
-  } from '../lib/supabase';
+  import { getAccounts, updateAccountAutoBoardSettings } from '../lib/accounts';
+  import { getBoardsForAccount } from '../lib/boards';
+  import { getPins, bulkInsertPins } from '../lib/pins';
+  import { getAccountWebhooks } from '../lib/webhooks';
   import { formatDate, escapeHtml } from '../lib/ui-helpers';
   import type { Account, Board, Pin, AccountWebhook } from '../lib/types';
 
@@ -866,6 +862,10 @@ Keto Cauliflower Rice Bowl,https://images.unsplash.com/photo-1546069901-ba9599a7
                 <img
                   src="${escapeHtml(r.rawImage)}"
                   alt="${escapeHtml(r.rawTitle)}"
+                  width="36"
+                  height="36"
+                  loading="lazy"
+                  decoding="async"
                   class="h-9 w-9 rounded-lg object-cover border border-border bg-muted flex-shrink-0"
                   onerror="this.src='https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=100&q=80'"
                 />

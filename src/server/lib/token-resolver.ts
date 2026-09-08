@@ -59,6 +59,8 @@ export function maskToken(token?: string | null): string {
   return '••••' + trimmed.slice(-4);
 }
 
+export const maskSecret = maskToken;
+
 function getClientAndTable(
   project: ProjectName,
   runtimeEnv?: Record<string, any>

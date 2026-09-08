@@ -27,15 +27,15 @@ export function fmtMetric(count: number | null | undefined, rate?: number | null
   return `${formatNum(Number.isFinite(c) ? c : 0)} (${formatPct(Number.isFinite(r) ? r : 0)})`;
 }
 
-export function escapeHtml(str: string | null | undefined): string {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+export {
+  escapeHtml,
+  apiJSON,
+  timeAgo,
+  toast,
+  copyToClipboard,
+  cleanPinterestUsername,
+  fmtDate,
+} from '../lib/ui-helpers';
 
 export { fmtAuditTimestamp, fmtDuration } from '../lib/format-audit';
 export type { AuditTimestampResult, AuditTimestampOptions } from '../lib/format-audit';

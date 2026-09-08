@@ -1014,9 +1014,15 @@ import ProviderBadge from '../../components/cron/ProviderBadge.astro';
   import {
     getAccountDetails,
     getAccountPinStats,
-    getAccountPins,
-    getAccountBoards,
-    getAccountRecentLogs,
+    updateAccountSchedule,
+    updateAccountScheduling,
+    updateAccountDailyLimit,
+    toggleAccountActive,
+  } from '../../lib/accounts';
+  import { getAccountPins } from '../../lib/pins';
+  import { getAccountBoards } from '../../lib/boards';
+  import { getAccountRecentLogs } from '../../lib/logs';
+  import {
     getAccountWebhookSummary,
     getAccountWebhooks,
     createAccountWebhook,
@@ -1024,13 +1030,11 @@ import ProviderBadge from '../../components/cron/ProviderBadge.astro';
     toggleAccountWebhookActive,
     deleteAccountWebhook,
     setPrimaryWebhook,
-    updateAccountSchedule,
-    updateAccountScheduling,
-    updateAccountDailyLimit,
-    toggleAccountActive,
-    rescheduleAccountPendingPins,
-  } from '../../lib/supabase';
-  import { renderStatusBadge, formatDate, formatTime, renderEmptyStateHTML, escapeHtml, fmtAuditTimestamp, humanCronTitle, humanCron } from '../../lib/ui-helpers';
+  } from '../../lib/webhooks';
+  import { rescheduleAccountPendingPins } from '../../lib/schedules';
+  import { renderStatusBadge, formatDate, formatTime, renderEmptyStateHTML, escapeHtml, maskWebhookUrl } from '../../lib/ui-helpers';
+  import { humanCron, humanCronTitle } from '../../lib/cron-helper';
+  import { fmtAuditTimestamp } from '../../lib/format-audit';
   import type { Account, AccountPinStats, Pin, Log, AccountWebhook, Board } from '../../lib/types';
 
   let currentAccount: Account | null = null;
@@ -1265,10 +1269,18 @@ import ProviderBadge from '../../components/cron/ProviderBadge.astro';
       renderScheduling(currentAccount);
       renderRecentLogs(logs);
 
-      // Auto-reschedule pending pins to pre-computed pacing slots
-      await rescheduleAccountPendingPins(accountId);
-
+      // Render initial pins table immediately (0ms blocking delay)
       await loadRecentPins();
+
+      // Auto-reschedule pending pins to pre-computed pacing slots in background
+      rescheduleAccountPendingPins(accountId)
+        .then((res) => {
+          if (res && res.count > 0) {
+            // Silently refresh pins table if timestamps were modified
+            loadRecentPins();
+          }
+        })
+        .catch((e) => console.warn('[details] reschedule deferred:', e));
     } catch (err: any) {
       if (retries > 0) {
         setTimeout(() => loadAllData(retries - 1), 1500);
@@ -1685,7 +1697,7 @@ import ProviderBadge from '../../components/cron/ProviderBadge.astro';
         <tr class="transition-colors hover:bg-muted/40 text-xs">
           <td class="px-5 py-3 font-medium text-foreground">
             <div class="flex items-center gap-3">
-              <img src="${escapeHtml(pin.image_url)}" alt="" class="h-9 w-9 rounded-lg object-cover border border-border bg-muted flex-shrink-0" onerror="this.src='https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=150&q=80'" />
+              <img src="${escapeHtml(pin.image_url)}" alt="" width="36" height="36" loading="lazy" decoding="async" class="h-9 w-9 rounded-lg object-cover border border-border bg-muted flex-shrink-0" onerror="this.src='https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=150&q=80'" />
               <div class="space-y-0.5">
                 <p class="max-w-xs font-semibold truncate text-foreground" title="${escapeHtml(pin.title)}">${escapeHtml(pin.title)}</p>
                 ${pin.description ? `<p class="max-w-xs truncate text-[11px] text-muted-foreground">${escapeHtml(pin.description)}</p>` : ''}
@@ -2344,9 +2356,7 @@ import ProviderBadge from '../../components/cron/ProviderBadge.astro';
             </td>
           </tr>`
         : activeAccountWebhooks.map((hook) => {
-            const masked = hook.webhook_url.length > 25
-              ? hook.webhook_url.slice(0, 22) + '••••' + hook.webhook_url.slice(-4)
-              : hook.webhook_url;
+            const masked = maskWebhookUrl(hook.webhook_url);
             const monthlyCap = hook.monthly_capacity ?? 500;
             const monthlyUsage = hook.executions_used ?? hook.monthly_usage ?? 0;
             const remCap = Math.max(0, monthlyCap - monthlyUsage);
@@ -2421,9 +2431,7 @@ import ProviderBadge from '../../components/cron/ProviderBadge.astro';
             'inbox'
           )
         : activeAccountWebhooks.map((hook) => {
-            const masked = hook.webhook_url.length > 25
-              ? hook.webhook_url.slice(0, 22) + '••••' + hook.webhook_url.slice(-4)
-              : hook.webhook_url;
+            const masked = maskWebhookUrl(hook.webhook_url);
             const remCap = Math.max(0, (hook.monthly_capacity ?? 500) - (hook.monthly_usage ?? 0));
             const capPct = Math.min(100, Math.round((remCap / (hook.monthly_capacity || 500)) * 100));
 

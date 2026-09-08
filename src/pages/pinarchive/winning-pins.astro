@@ -660,6 +660,8 @@ import RepurposeModal from '../../components/pinarchive/RepurposeModal.astro';
 </Layout>
 
 <script>
+  import { escapeHtml, fmtDate, formatNumber as fmtNumber } from '../../lib/ui-helpers';
+
   let rawPins: any[] = [];
   let rawAccounts: any[] = [];
   let filteredPins: any[] = [];
@@ -672,36 +674,10 @@ import RepurposeModal from '../../components/pinarchive/RepurposeModal.astro';
   const selectedForCompare = new Set<string>();
   let currentPeekIndex = -1;
 
-  function escapeHtml(str?: string | null): string {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  function fmtNumber(n: number | string | null | undefined): string {
-    const num = Number(n) || 0;
-    return num.toLocaleString('en-US');
-  }
-
   function fmtCompact(n: number): string {
     if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
     if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k';
     return String(Math.round(n));
-  }
-
-  function fmtDate(isoString?: string | null): string {
-    if (!isoString) return '—';
-    try {
-      const d = new Date(isoString);
-      if (isNaN(d.getTime())) return '—';
-      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    } catch {
-      return '—';
-    }
   }
 
   function getPinDeltaByActiveTimeframe(p: any): number {
@@ -858,7 +834,7 @@ import RepurposeModal from '../../components/pinarchive/RepurposeModal.astro';
       if (topVel) topVel.textContent = `+${fmtNumber(deltaVal)} saves`;
       if (topSaves) topSaves.textContent = `${fmtNumber(topPin.saves)} total · @${topPin.account_username || topPin.board_name || 'account'}`;
       if (thumbWrapper && topPin.image_url) {
-        thumbWrapper.innerHTML = `<img src="${escapeHtml(topPin.image_url)}" class="w-full h-full object-cover rounded-xl" />`;
+        thumbWrapper.innerHTML = `<img src="${escapeHtml(topPin.image_url)}" loading="lazy" decoding="async" class="w-full h-full object-cover rounded-xl" />`;
       }
     }
 
@@ -1005,6 +981,7 @@ import RepurposeModal from '../../components/pinarchive/RepurposeModal.astro';
                 src="${escapeHtml(imageUrl)}"
                 alt="${escapeHtml(p.title || 'Pinterest Pin')}"
                 loading="lazy"
+                decoding="async"
                 class="w-full h-full object-cover object-center group-hover/img:scale-105 transition-transform duration-300"
                 onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');"
               />
@@ -1141,7 +1118,7 @@ import RepurposeModal from '../../components/pinarchive/RepurposeModal.astro';
           <td class="py-3 px-3">
             <div class="flex items-center gap-3">
               <div class="h-11 w-11 rounded-xl bg-muted shrink-0 overflow-hidden border border-border cursor-pointer group-hover:border-primary/40 transition-colors" data-peek-trigger="${escapeHtml(p.id)}">
-                ${p.image_url ? `<img src="${escapeHtml(p.image_url)}" class="h-full w-full object-cover" />` : '<div class="h-full w-full bg-muted"></div>'}
+                ${p.image_url ? `<img src="${escapeHtml(p.image_url)}" loading="lazy" decoding="async" class="h-full w-full object-cover" />` : '<div class="h-full w-full bg-muted"></div>'}
               </div>
               <div class="min-w-0 max-w-sm">
                 <a
@@ -1522,7 +1499,7 @@ import RepurposeModal from '../../components/pinarchive/RepurposeModal.astro';
               <li class="flex items-center justify-between py-2 px-3 text-xs rounded-xl hover:bg-muted/40 transition-colors">
                 <div class="flex items-center gap-2.5 min-w-0">
                   <div class="h-8 w-8 rounded-lg bg-muted overflow-hidden shrink-0 border border-border cursor-pointer" data-peek-trigger="${escapeHtml(p.id)}">
-                    ${p.image_url ? `<img src="${escapeHtml(p.image_url)}" class="h-full w-full object-cover" />` : ''}
+                    ${p.image_url ? `<img src="${escapeHtml(p.image_url)}" loading="lazy" decoding="async" class="h-full w-full object-cover" />` : ''}
                   </div>
                   <a href="javascript:void(0)" data-peek-trigger="${escapeHtml(p.id)}" class="font-bold text-foreground hover:text-primary transition-colors truncate max-w-md">
                     ${escapeHtml(p.title || `Pin ${p.pin_id}`)}
@@ -1624,7 +1601,7 @@ import RepurposeModal from '../../components/pinarchive/RepurposeModal.astro';
       content.innerHTML = `
         <!-- Image & Top Badges -->
         <div class="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-muted/60 border border-border shadow-md group">
-          <img src="${escapeHtml(p.image_url)}" class="w-full h-full object-cover" />
+          <img src="${escapeHtml(p.image_url)}" loading="lazy" decoding="async" class="w-full h-full object-cover" />
           <a href="${escapeHtml(p.image_url)}" target="_blank" rel="noopener noreferrer" class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white font-bold text-xs gap-1.5 backdrop-blur-xs">
             <span>Open High-Resolution</span>
             <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
@@ -1991,7 +1968,7 @@ TASK:
               return `
                 <div class="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-xs">
                   <div class="flex items-center gap-3">
-                    <img src="${escapeHtml(p.image_url)}" class="h-14 w-14 object-cover rounded-xl border border-border" />
+                    <img src="${escapeHtml(p.image_url)}" width="56" height="56" loading="lazy" decoding="async" class="h-14 w-14 object-cover rounded-xl border border-border" />
                     <div class="min-w-0 flex-1">
                       <div class="flex items-center gap-1 mb-1">
                         ${renderStrategyBadge(st)}

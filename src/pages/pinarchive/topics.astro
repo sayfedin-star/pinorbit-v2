@@ -423,6 +423,7 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
                 src="${escapeHtml(imageUrl)}"
                 alt="${escapeHtml(p.title || 'Pinterest Pin')}"
                 loading="lazy"
+                decoding="async"
                 class="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
                 onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');"
               />

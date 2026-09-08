@@ -543,12 +543,12 @@ ROUTER on: action
 
 <script>
   import { requireAuth } from '../../lib/auth';
+  import { getAccountDetails } from '../../lib/accounts';
   import {
-    getAccountDetails,
     getAccountWebhooks,
     createAccountWebhook,
     updateAccountWebhook,
-  } from '../../lib/supabase';
+  } from '../../lib/webhooks';
   import { escapeHtml } from '../../lib/ui-helpers';
   import type { Account, AccountWebhook } from '../../lib/types';
 

@@ -245,7 +245,9 @@ import KPIStatCard from '../components/ui/KPIStatCard.astro';
 
 <script>
   import { requireAuth } from '../lib/auth';
-  import { getDashboardKPIs, getPins, getLogs } from '../lib/supabase';
+  import { getDashboardKPIs } from '../lib/dashboard';
+  import { getPins } from '../lib/pins';
+  import { getLogs } from '../lib/logs';
   import { renderStatusBadge, formatDate, formatTime, renderEmptyStateHTML, escapeHtml } from '../lib/ui-helpers';
   import { getActiveWorkspaceId } from '../lib/workspaces';
 
@@ -264,7 +266,7 @@ import KPIStatCard from '../components/ui/KPIStatCard.astro';
       // P1: Scheduling & Auth DB
       Promise.all([
         getDashboardKPIs(activeWsId),
-        getPins('all', undefined, activeWsId),
+        getPins('all', undefined, activeWsId, 5),
         getLogs(5, activeWsId),
       ]),
       // P3: Analytics DB (30D window)
@@ -314,12 +316,16 @@ import KPIStatCard from '../components/ui/KPIStatCard.astro';
         } else {
           const topPins = recentPins.slice(0, 5);
           const pinsHtml = topPins
-            .map((pin) => `
+            .map((pin, i) => `
               <div class="flex items-center justify-between p-3.5 transition-colors hover:bg-muted/40">
                 <div class="flex items-center gap-3 min-w-0">
                   <img
                     src="${escapeHtml(pin.image_url)}"
                     alt="${escapeHtml(pin.title)}"
+                    width="44"
+                    height="44"
+                    ${i === 0 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"'}
+                    decoding="async"
                     class="h-11 w-11 rounded-xl object-cover border border-border bg-muted flex-shrink-0"
                     onerror="this.src='https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=150&q=80'"
                   />

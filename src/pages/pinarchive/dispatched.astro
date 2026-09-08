@@ -574,8 +574,11 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
                   <img
                     src="${escapeHtml(pin.image_url)}"
                     alt="Pin"
-                    class="h-12 w-9 rounded-lg object-cover border border-border shrink-0 bg-muted"
+                    width="36"
+                    height="48"
                     loading="lazy"
+                    decoding="async"
+                    class="h-12 w-9 rounded-lg object-cover border border-border shrink-0 bg-muted"
                   />
                   <div class="min-w-0 max-w-sm">
                     <span class="font-semibold text-foreground truncate block text-xs" title="${escapeHtml(pin.title)}">
@@ -660,8 +663,9 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
                   <img
                     src="${escapeHtml(pin.image_url)}"
                     alt="Pin"
-                    class="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
                     loading="lazy"
+                    decoding="async"
+                    class="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
                   <div class="absolute top-2 left-2">
                     <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-background/90 text-primary border border-border shadow-xs">
@@ -959,7 +963,7 @@ import EditStagedPinModal from '../../components/pinarchive/EditStagedPinModal.a
     function renderRow(item: any): string {
       const { formatted, relative } = formatDate(item.sent_at);
       const thumbnailHtml = item.pin_image_url
-        ? `<img src="${escapeHtml(item.pin_image_url)}" alt="Pin" class="h-10 w-8 rounded object-cover border border-border shrink-0 bg-muted" loading="lazy" />`
+        ? `<img src="${escapeHtml(item.pin_image_url)}" alt="Pin" width="32" height="40" loading="lazy" decoding="async" class="h-10 w-8 rounded object-cover border border-border shrink-0 bg-muted" />`
         : `<div class="h-10 w-8 rounded border border-dashed border-border bg-muted flex items-center justify-center shrink-0 text-muted-foreground">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
           </div>`;

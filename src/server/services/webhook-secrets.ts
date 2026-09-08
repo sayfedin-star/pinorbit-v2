@@ -225,12 +225,16 @@ export async function getSecretStatus(
 }
 
 /**
- * Masks a secret for display in UI (shows first 8 chars + ellipsis).
+ * Canonical secret masker returning ••••XXXX (last 4 characters).
  */
-export function maskSecret(secret: string): string {
-  if (!secret || secret.length <= 8) return '********';
-  return secret.slice(0, 8) + '...';
+export function maskSecret(secret?: string | null): string {
+  if (!secret || typeof secret !== 'string') return '';
+  const trimmed = secret.trim();
+  if (trimmed.length <= 4) return '••••' + trimmed;
+  return '••••' + trimmed.slice(-4);
 }
+
+export const maskToken = maskSecret;
 
 /**
  * Retrieves masked secret status for UI display.

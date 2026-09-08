@@ -1,5 +1,5 @@
-import { supabase, isSupabaseConfigured } from './supabase';
-import { ACTIVE_WORKSPACE_COOKIE, DEFAULT_WORKSPACE_ID } from './workspaces';
+import { supabase, isSupabaseConfigured } from './supabase-client';
+import { ACTIVE_WORKSPACE_COOKIE, DEFAULT_WORKSPACE_ID } from './constants/workspaces';
 import type { Workspace } from './types';
 
 /**

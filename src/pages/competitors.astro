@@ -689,14 +689,16 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Configure automated scraping sc
   import { parsePinterestPayload } from '../lib/competitors';
   import { getActiveWorkspaceId } from '../lib/workspaces';
   import type { Competitor, CompetitorDeltaStats } from '../lib/types';
+  import {
+    apiJSON,
+    escapeHtml as escHtml,
+    cleanPinterestUsername,
+    timeAgo,
+    toast,
+    copyToClipboard,
+  } from '../lib/ui-helpers';
 
   // ─── Server-only CRUD for Competitors (via admin endpoints) ───
-  async function apiJSON(url: string, opts: RequestInit = {}) {
-    const r = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error((d as any).error || `HTTP ${r.status}`);
-    return d as any;
-  }
   async function getCompetitors() { return (await apiJSON('/api/admin/competitors')).competitors as any[]; }
   async function getCompetitorDetails(id: string) { return apiJSON(`/api/admin/competitors?id=${encodeURIComponent(id)}`); }
   async function addCompetitor(data: any) { return (await apiJSON('/api/admin/competitors', { method: 'POST', body: JSON.stringify(data) })).competitor; }
@@ -789,34 +791,9 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Configure automated scraping sc
   const hideSelectedBtn = $('hide-selected-btn'), hideSelectedIcon = $('hide-selected-icon'), hideSelectedLabel = $('hide-selected-label');
 
   // ─── Formatting helpers ───────────────────────────────────────────────────
-  const escHtml = (s: any) => String(s ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m] as string));
   const fmtFull = (n: number | null | undefined) => (n ?? 0).toLocaleString('en-US');
   const fmtCompact = (n: number | null | undefined) => new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n ?? 0);
   const formatMetric = (n: number | null | undefined) => isCompactNumbers ? fmtCompact(n) : fmtFull(n);
-
-  function cleanPinterestUsername(input: string): string {
-    let u = String(input || '').trim();
-    u = u.replace(/^(https?:\/\/)?(www\.)?pinterest\.[a-z.]+\//i, '');
-    u = u.replace(/\/.*$/, '');
-    u = u.replace(/^@+/, '').trim();
-    return u;
-  }
-
-  function timeAgo(iso?: string | null): string {
-    if (!iso) return '—';
-    const ms = Date.now() - new Date(iso).getTime();
-    if (isNaN(ms) || ms < 0) return '—';
-    const m = Math.floor(ms / 60000);
-    if (m < 1) return 'just now';
-    if (m < 60) return `${m}m ago`;
-    const h = Math.floor(m / 60);
-    if (h < 24) return `${h}h ago`;
-    const d = Math.floor(h / 24);
-    if (d < 30) return `${d}d ago`;
-    const mo = Math.floor(d / 30);
-    if (mo < 12) return `${mo}mo ago`;
-    return `${Math.floor(mo / 12)}y ago`;
-  }
 
   function activityOf(c: Competitor): { label: string; dot: string; pill: string; status: 'active' | 'cooling' | 'stale' | 'unknown' } {
     if (!c.last_pin_at) return { label: 'Unknown', dot: 'bg-muted-foreground/40', pill: 'bg-muted text-muted-foreground border-border', status: 'unknown' };
@@ -877,19 +854,6 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Configure automated scraping sc
       <circle cx="${last[0]}" cy="${last[1]}" r="3.5" fill="currentColor"/></svg>`;
   }
 
-  // ─── Toasts ───────────────────────────────────────────────────────────────
-  function toast(message: string, type: 'success' | 'error' | 'info' = 'success') {
-    const colors = { success: 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400', error: 'border-rose-500/40 text-rose-600 dark:text-rose-400', info: 'border-primary/40 text-primary' };
-    const icons = { success: '✓', error: '✕', info: 'ℹ' };
-    const el = document.createElement('div');
-    el.className = `flex items-start gap-2.5 rounded-xl border bg-card p-3 text-xs font-semibold shadow-lg ${colors[type]} transition-all animate-in fade-in slide-in-from-bottom-2`;
-    el.innerHTML = `<span class="flex-shrink-0 font-bold">${icons[type]}</span><span class="flex-1 text-foreground">${escHtml(message)}</span>
-      <button class="text-muted-foreground hover:text-foreground" aria-label="Dismiss">✕</button>`;
-    el.querySelector('button')!.addEventListener('click', () => el.remove());
-    $('toast-root').appendChild(el);
-    setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3800);
-  }
-
   // ─── Overlays & Modals ────────────────────────────────────────────────────
   function showOverlay(el: HTMLElement) {
     el.classList.remove('hidden');
@@ -916,21 +880,6 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Configure automated scraping sc
   }
   $('confirm-cancel').addEventListener('click', () => { hideOverlay($('confirm-modal')); confirmResolve?.(false); });
   $('confirm-ok').addEventListener('click', () => { hideOverlay($('confirm-modal')); confirmResolve?.(true); });
-
-  // ─── Copy to Clipboard Helper ─────────────────────────────────────────────
-  async function copyToClipboard(text: string, btn?: HTMLElement) {
-    try {
-      await navigator.clipboard.writeText(text);
-      if (btn) {
-        const orig = btn.innerHTML;
-        btn.innerHTML = '<span class="text-emerald-500 font-bold">✓</span>';
-        setTimeout(() => { btn.innerHTML = orig; }, 1200);
-      }
-      toast(`Copied "${text}" to clipboard!`);
-    } catch {
-      toast('Failed to copy', 'error');
-    }
-  }
 
   // ─── Filtering & Sorting Engine ───────────────────────────────────────────
   function applySortAndFilter(): Competitor[] {
@@ -1258,7 +1207,7 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Configure automated scraping sc
 
           return `<td class="${padClass}">
             <div class="flex items-center gap-3 ${isHidden ? 'opacity-65' : ''}">
-              <img src="${avatar}" alt="${escHtml(c.username)}" loading="lazy" class="${avatarSize} rounded-xl object-cover border border-border shadow-2xs flex-shrink-0" onerror="this.src='https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'" />
+              <img src="${avatar}" alt="${escHtml(c.username)}" loading="lazy" decoding="async" class="${avatarSize} aspect-square rounded-xl object-cover border border-border shadow-2xs flex-shrink-0" onerror="this.src='https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'" />
               <div class="flex flex-col min-w-0">
                 <div class="flex items-center gap-1.5 flex-wrap">
                   <a href="/competitors/details?id=${c.id}" aria-label="View detailed analytics for ${escHtml(c.full_name || c.username)}" class="text-xs font-bold ${nameColorClass} transition-colors truncate text-left max-w-[200px] sm:max-w-[280px]">
@@ -1770,7 +1719,7 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Configure automated scraping sc
     const drawerAvatar = c.avatar_url && /^https?:\/\//i.test(c.avatar_url) ? c.avatar_url : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80';
     drawerBody.innerHTML = `
       <div class="flex items-center gap-3.5 pb-4 border-b border-border">
-        <img src="${escHtml(drawerAvatar)}" class="h-12 w-12 rounded-xl object-cover border border-border shadow-xs" />
+        <img src="${escHtml(drawerAvatar)}" width="48" height="48" loading="lazy" decoding="async" class="h-12 w-12 rounded-xl object-cover border border-border shadow-xs" />
         <div class="min-w-0 flex-1">
           <div class="text-sm font-bold text-foreground truncate">${escHtml(c.full_name || c.username)}</div>
           <div class="text-xs text-muted-foreground flex items-center gap-1">
@@ -1868,7 +1817,7 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Configure automated scraping sc
               return `
               <th class="py-3 px-4 font-bold text-foreground">
                 <div class="flex items-center gap-2">
-                  <img src="${escHtml(compAvatar)}" class="h-6 w-6 rounded-lg object-cover border border-border" />
+                  <img src="${escHtml(compAvatar)}" width="24" height="24" loading="lazy" decoding="async" class="h-6 w-6 rounded-lg object-cover border border-border" />
                   <span class="truncate max-w-[120px]">@${escHtml(c.username)}</span>
                 </div>
               </th>`;

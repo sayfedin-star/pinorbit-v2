@@ -165,7 +165,9 @@ const schedulingTabs = [
 
 <script>
   import { requireAuth } from '../../lib/auth';
-  import { getDashboardKPIs, getPins, getLogs, getImportSessions } from '../../lib/supabase';
+  import { getDashboardKPIs } from '../../lib/dashboard';
+  import { getPins } from '../../lib/pins';
+  import { getLogs, getImportSessions } from '../../lib/logs';
   import { renderStatusBadge, formatDate, formatTime, renderEmptyStateHTML, escapeHtml } from '../../lib/ui-helpers';
   import { getActiveWorkspaceId } from '../../lib/workspaces';
 
@@ -180,7 +182,7 @@ const schedulingTabs = [
       const activeWsId = getActiveWorkspaceId();
       const [kpis, recentPins, latestLogs, importSessions] = await Promise.all([
         getDashboardKPIs(activeWsId),
-        getPins('all', undefined, activeWsId),
+        getPins('all', undefined, activeWsId, 5),
         getLogs(4, activeWsId),
         getImportSessions(4, activeWsId),
       ]);
@@ -282,12 +284,16 @@ const schedulingTabs = [
         } else {
           const topPins = recentPins.slice(0, 5);
           const pinsHtml = topPins
-            .map((pin) => `
+            .map((pin, i) => `
               <div class="flex items-center justify-between p-4 transition-colors hover:bg-muted/40">
                 <div class="flex items-center gap-3.5 min-w-0">
                   <img
                     src="${escapeHtml(pin.image_url)}"
                     alt="${escapeHtml(pin.title)}"
+                    width="48"
+                    height="48"
+                    ${i === 0 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"'}
+                    decoding="async"
                     class="h-12 w-12 rounded-lg object-cover border border-border bg-muted flex-shrink-0"
                     onerror="this.src='https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=150&q=80'"
                   />
