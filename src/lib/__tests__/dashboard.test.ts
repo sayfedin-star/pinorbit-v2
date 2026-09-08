@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { countPinsByStatus, getDashboardKPIs } from '../dashboard';
 import { setMockPins, mockPins, DEFAULT_WS_ID } from '../supabase-mock';
 import * as supabaseClientModule from '../supabase-client';
+import type { Pin } from '../types';
 
 describe('Dashboard Server-Side Pin Status Counts Suite', () => {
   beforeEach(() => {
@@ -145,7 +146,7 @@ describe('Dashboard Server-Side Pin Status Counts Suite', () => {
   it('verifies 100% behavioral parity between old in-memory aggregation and new server counts', async () => {
     vi.spyOn(supabaseClientModule, 'supabase', 'get').mockReturnValue(null);
 
-    const testPins = [
+    const testPins: Pin[] = [
       { id: 'p1', status: 'pending', workspace_id: DEFAULT_WS_ID, created_at: '2026-03-01T00:00:00Z', title: '1', account_id: 'acc-1', description: null, image_url: '', board_name: null, link: null, source: 'csv', posted_at: null, scheduled_for: null },
       { id: 'p2', status: 'processing', workspace_id: DEFAULT_WS_ID, created_at: '2026-03-02T00:00:00Z', title: '2', account_id: 'acc-1', description: null, image_url: '', board_name: null, link: null, source: 'csv', posted_at: null, scheduled_for: null },
       { id: 'p3', status: 'pending', workspace_id: DEFAULT_WS_ID, created_at: '2026-03-03T00:00:00Z', title: '3', account_id: 'acc-1', description: null, image_url: '', board_name: null, link: null, source: 'csv', posted_at: null, scheduled_for: null },
