@@ -11,7 +11,7 @@ function getSchedulingUrl(): string {
   if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.PUBLIC_SCHEDULING_SUPABASE_URL) {
     return import.meta.env.PUBLIC_SCHEDULING_SUPABASE_URL;
   }
-  return 'https://eygdoetdwqllvsxpvoex.supabase.co';
+  return '';
 }
 
 function getSchedulingPublishableKey(): string {
@@ -24,7 +24,7 @@ function getSchedulingPublishableKey(): string {
   if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.PUBLIC_SCHEDULING_SUPABASE_PUBLISHABLE_KEY) {
     return import.meta.env.PUBLIC_SCHEDULING_SUPABASE_PUBLISHABLE_KEY;
   }
-  return 'sb_publishable_efxKrwXCOaj9CM5oxD-WjA_jqvB5iGD';
+  return '';
 }
 
 export const supabaseUrl = getSchedulingUrl();
