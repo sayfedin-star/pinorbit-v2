@@ -250,6 +250,7 @@ import KPIStatCard from '../components/ui/KPIStatCard.astro';
   import { getLogs } from '../lib/logs';
   import { renderStatusBadge, formatDate, formatTime, renderEmptyStateHTML, escapeHtml } from '../lib/ui-helpers';
   import { getActiveWorkspaceId } from '../lib/workspaces';
+  import { fetchJson, withTimeout } from '../lib/fetch-timeout';
 
   async function init() {
     const isAuth = await requireAuth();
@@ -257,34 +258,41 @@ import KPIStatCard from '../components/ui/KPIStatCard.astro';
     await loadCommandCenter();
   }
 
+  const BRANCH_BUDGET_MS = 10000;
+
   async function loadCommandCenter() {
     const activeWsId = getActiveWorkspaceId();
     const numFmt = new Intl.NumberFormat('en-US');
+    const encWs = encodeURIComponent(activeWsId);
 
-    // Rule R3 & GATE G4: Fault-isolated loading via Promise.allSettled
-    const [p1Result, analyticsResult, compResult, paResult] = await Promise.allSettled([
-      // P1: Scheduling & Auth DB
-      Promise.all([
-        getDashboardKPIs(activeWsId),
-        getPins('all', undefined, activeWsId, 5),
-        getLogs(5, activeWsId),
-      ]),
-      // P3: Analytics DB (30D window)
-      fetch(`/api/analytics/connections?window_days=30&workspace_id=${encodeURIComponent(activeWsId)}`).then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      }),
-      // P2: Competitors DB
-      fetch(`/api/admin/competitors?workspace_id=${encodeURIComponent(activeWsId)}`).then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      }),
-      // PinArchive DB
-      fetch(`/api/pinarchive/overview?workspace_id=${encodeURIComponent(activeWsId)}`).then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      }),
+    // Decoupled: each card settles independently; a hung branch degrades alone (never blocks siblings).
+    // Each loader catches internally, so allSettled resolves as soon as the SLOWEST settles (≤ budget).
+    await Promise.allSettled([
+      loadScheduling(activeWsId, numFmt),
+      loadAnalytics(encWs, numFmt),
+      loadCompetitors(encWs),
+      loadPinArchive(encWs, numFmt),
     ]);
+  }
+
+  async function loadScheduling(activeWsId: string, numFmt: Intl.NumberFormat) {
+    let p1Result: { status: 'fulfilled'; value: any } | { status: 'rejected'; reason: any };
+    try {
+      // P1: Scheduling & Auth DB — single budget over the combined fan-out
+      const [kpis, recentPins, latestLogs] = await withTimeout(
+        Promise.all([
+          getDashboardKPIs(activeWsId),
+          getPins('all', undefined, activeWsId, 5),
+          getLogs(5, activeWsId),
+        ]),
+        BRANCH_BUDGET_MS,
+        'scheduling'
+      );
+      p1Result = { status: 'fulfilled', value: [kpis, recentPins, latestLogs] };
+    } catch (e) {
+      console.error('Error loading Scheduling branch:', e);
+      p1Result = { status: 'rejected', reason: e };
+    }
 
     // 1. Render Module: Scheduling
     const schedVal = document.getElementById('metric-scheduling-val');
@@ -400,6 +408,17 @@ import KPIStatCard from '../components/ui/KPIStatCard.astro';
       if (schedSub) schedSub.textContent = 'Scheduling service unreachable';
       if (schedBadge) schedBadge.innerHTML = '<span class="text-rose-500 font-bold">Failed to load P1</span>';
     }
+  }
+
+  async function loadAnalytics(encWs: string, numFmt: Intl.NumberFormat) {
+    let analyticsResult: { status: 'fulfilled'; value: any } | { status: 'rejected'; reason: any };
+    try {
+      const value = await fetchJson<any>(`/api/analytics/connections?window_days=30&workspace_id=${encWs}`, BRANCH_BUDGET_MS);
+      analyticsResult = { status: 'fulfilled', value };
+    } catch (e) {
+      console.error('Error loading Analytics branch:', e);
+      analyticsResult = { status: 'rejected', reason: e };
+    }
 
     // 2. Render Module: Analytics
     const anVal = document.getElementById('metric-analytics-val');
@@ -433,6 +452,17 @@ import KPIStatCard from '../components/ui/KPIStatCard.astro';
       if (subAnOutbound) subAnOutbound.textContent = '—';
       if (subAnSaves) subAnSaves.textContent = '—';
     }
+  }
+
+  async function loadCompetitors(encWs: string) {
+    let compResult: { status: 'fulfilled'; value: any } | { status: 'rejected'; reason: any };
+    try {
+      const value = await fetchJson<any>(`/api/admin/competitors?workspace_id=${encWs}`, BRANCH_BUDGET_MS);
+      compResult = { status: 'fulfilled', value };
+    } catch (e) {
+      console.error('Error loading Competitors branch:', e);
+      compResult = { status: 'rejected', reason: e };
+    }
 
     // 3. Render Module: Competitors
     const compVal = document.getElementById('metric-competitors-val');
@@ -450,6 +480,17 @@ import KPIStatCard from '../components/ui/KPIStatCard.astro';
     } else {
       if (compVal) compVal.textContent = 'Degraded';
       if (compSub) compSub.textContent = 'Competitor engine unreachable';
+    }
+  }
+
+  async function loadPinArchive(encWs: string, numFmt: Intl.NumberFormat) {
+    let paResult: { status: 'fulfilled'; value: any } | { status: 'rejected'; reason: any };
+    try {
+      const value = await fetchJson<any>(`/api/pinarchive/overview?workspace_id=${encWs}`, BRANCH_BUDGET_MS);
+      paResult = { status: 'fulfilled', value };
+    } catch (e) {
+      console.error('Error loading PinArchive branch:', e);
+      paResult = { status: 'rejected', reason: e };
     }
 
     // 4. Render Module: PinArchive
