@@ -141,4 +141,33 @@ describe('Dashboard Server-Side Pin Status Counts Suite', () => {
     expect(typeof kpis.postedPins).toBe('number');
     expect(typeof kpis.failedPins).toBe('number');
   });
+
+  it('verifies 100% behavioral parity between old in-memory aggregation and new server counts', async () => {
+    vi.spyOn(supabaseClientModule, 'supabase', 'get').mockReturnValue(null);
+
+    const testPins = [
+      { id: 'p1', status: 'pending', workspace_id: DEFAULT_WS_ID, created_at: '2026-03-01T00:00:00Z', title: '1', account_id: 'acc-1', description: null, image_url: '', board_name: null, link: null, source: 'csv', posted_at: null, scheduled_for: null },
+      { id: 'p2', status: 'processing', workspace_id: DEFAULT_WS_ID, created_at: '2026-03-02T00:00:00Z', title: '2', account_id: 'acc-1', description: null, image_url: '', board_name: null, link: null, source: 'csv', posted_at: null, scheduled_for: null },
+      { id: 'p3', status: 'pending', workspace_id: DEFAULT_WS_ID, created_at: '2026-03-03T00:00:00Z', title: '3', account_id: 'acc-1', description: null, image_url: '', board_name: null, link: null, source: 'csv', posted_at: null, scheduled_for: null },
+      { id: 'p4', status: 'posted', workspace_id: DEFAULT_WS_ID, created_at: '2026-03-04T00:00:00Z', title: '4', account_id: 'acc-1', description: null, image_url: '', board_name: null, link: null, source: 'csv', posted_at: null, scheduled_for: null },
+      { id: 'p5', status: 'failed', workspace_id: DEFAULT_WS_ID, created_at: '2026-03-05T00:00:00Z', title: '5', account_id: 'acc-1', description: null, image_url: '', board_name: null, link: null, source: 'csv', posted_at: null, scheduled_for: null },
+      { id: 'p6', status: 'processing', workspace_id: DEFAULT_WS_ID, created_at: '2026-03-06T00:00:00Z', title: '6', account_id: 'acc-1', description: null, image_url: '', board_name: null, link: null, source: 'csv', posted_at: null, scheduled_for: null },
+    ];
+    setMockPins(testPins);
+
+    // Old in-memory baseline calculation:
+    const baselinePending = testPins.filter((p) => p.status === 'pending' || p.status === 'processing').length;
+    const baselinePosted = testPins.filter((p) => p.status === 'posted').length;
+    const baselineFailed = testPins.filter((p) => p.status === 'failed').length;
+
+    // New optimized counts:
+    const kpis = await getDashboardKPIs(DEFAULT_WS_ID);
+
+    expect(kpis.pendingPins).toBe(baselinePending);
+    expect(kpis.pendingPins).toBe(4); // 2 pending + 2 processing
+    expect(kpis.postedPins).toBe(baselinePosted);
+    expect(kpis.postedPins).toBe(1);
+    expect(kpis.failedPins).toBe(baselineFailed);
+    expect(kpis.failedPins).toBe(1);
+  });
 });

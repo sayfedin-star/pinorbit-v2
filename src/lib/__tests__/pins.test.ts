@@ -93,4 +93,13 @@ describe('getPins Top-N & Limit Unit Tests', () => {
     await getPins('all', undefined, undefined, 5);
     expect(limitSpy).toHaveBeenCalledWith(5);
   });
+
+  it('guarantees identical parity between full list slice and getPins with limit', async () => {
+    vi.spyOn(supabaseClientModule, 'supabase', 'get').mockReturnValue(null);
+
+    const all = await getPins('all');
+    const top2 = await getPins('all', undefined, undefined, 2);
+
+    expect(top2).toEqual(all.slice(0, 2));
+  });
 });
