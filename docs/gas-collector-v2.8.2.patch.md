@@ -26,7 +26,7 @@ This document contains the canonical Google Apps Script (GAS) Collector v2.8.2 s
 - **[F4] Read-Only Header Mapping**: `handleAccountAges_` uses `readHeaderMap_` instead of `ensureSchema_`, eliminating write side-effects (`setValue`) during read actions and preventing lock collisions.
 - **[F5] UTC Timestamp Determinism**: Plain text timestamps formatted as `YYYY-MM-DD HH:MM:SS` are parsed deterministically as UTC by appending `Z`.
 - **[F5 Checklist] Timezone Setting**: Added mandatory `(GMT+00:00) UTC` setting in Apps Script project settings.
-- **[Version] Bumped**: Version updated to `2.8.1` across `doGet`, `ping`, and `account_ages`.
+- **[Version] Bumped**: Version updated to `2.8.2` across `doGet`, `ping`, and `account_ages`.
 
 ---
 
