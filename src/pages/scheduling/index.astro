@@ -282,12 +282,16 @@ const schedulingTabs = [
         } else {
           const topPins = recentPins.slice(0, 5);
           const pinsHtml = topPins
-            .map((pin) => `
+            .map((pin, i) => `
               <div class="flex items-center justify-between p-4 transition-colors hover:bg-muted/40">
                 <div class="flex items-center gap-3.5 min-w-0">
                   <img
                     src="${escapeHtml(pin.image_url)}"
                     alt="${escapeHtml(pin.title)}"
+                    width="48"
+                    height="48"
+                    ${i === 0 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"'}
+                    decoding="async"
                     class="h-12 w-12 rounded-lg object-cover border border-border bg-muted flex-shrink-0"
                     onerror="this.src='https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=150&q=80'"
                   />
