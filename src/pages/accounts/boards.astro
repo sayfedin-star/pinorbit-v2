@@ -272,7 +272,8 @@ export const prerender = false;
     createBoard,
     updateBoard,
   } from '../../lib/supabase';
-  import { formatDate, escapeHtml, fmtAuditTimestamp } from '../../lib/ui-helpers';
+  import { formatDate, escapeHtml } from '../../lib/ui-helpers';
+  import { fmtAuditTimestamp } from '../../lib/format-audit';
   import type { Account, Board, AccountWebhook } from '../../lib/types';
 
   let accountId = '';

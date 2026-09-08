@@ -172,7 +172,7 @@ describe('ui-helpers test suite', () => {
 
   describe('humanCron & humanCronTitle', () => {
     it('formats 5-part daily cron expressions with minute and hour correctly', async () => {
-      const { humanCron, humanCronTitle } = await import('../ui-helpers');
+      const { humanCron, humanCronTitle } = await import('../cron-helper');
       expect(humanCronTitle('11 15 * * *', 'UTC')).toBe('Daily at 15:11 UTC');
       expect(humanCronTitle('14 15 * * *', 'UTC')).toBe('Daily at 15:14 UTC');
       expect(humanCronTitle('0 2 * * *', 'UTC')).toBe('Daily at 02:00 UTC');

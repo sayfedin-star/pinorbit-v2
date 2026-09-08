@@ -63,7 +63,8 @@ const schedulingTabs = [
 <script>
   import { requireAuth } from '../lib/auth';
   import { getLogs, getPinDeliveryLogs } from '../lib/supabase';
-  import { renderStatusBadge, formatDate, renderEmptyStateHTML, escapeHtml, maskWebhookUrl, fmtAuditTimestamp } from '../lib/ui-helpers';
+  import { renderStatusBadge, formatDate, renderEmptyStateHTML, escapeHtml, maskWebhookUrl } from '../lib/ui-helpers';
+  import { fmtAuditTimestamp } from '../lib/format-audit';
   import type { Log, PinDeliveryLog } from '../lib/types';
 
   let currentTab: 'delivery' | 'system' = 'delivery';
