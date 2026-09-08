@@ -180,7 +180,7 @@ const schedulingTabs = [
       const activeWsId = getActiveWorkspaceId();
       const [kpis, recentPins, latestLogs, importSessions] = await Promise.all([
         getDashboardKPIs(activeWsId),
-        getPins('all', undefined, activeWsId),
+        getPins('all', undefined, activeWsId, 5),
         getLogs(4, activeWsId),
         getImportSessions(4, activeWsId),
       ]);
