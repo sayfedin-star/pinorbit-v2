@@ -535,8 +535,18 @@ export async function updateAccountSchedule(
         if (res3.data) {
           updated = { ...res3.data, ...updatePayload };
           error = null;
+        } else {
+          error = res3.error || error;
         }
       }
+    }
+
+    if (!updated) {
+      return {
+        data: mergedSession as Partial<Account>,
+        error: error?.message || 'Schedule update failed',
+        success: false,
+      };
     }
 
     // Trigger Pre-Computed Pacing Engine to recalculate pending pin timestamps
@@ -548,8 +558,8 @@ export async function updateAccountSchedule(
 
     return { data: ({ ...mergedSession, ...updated }) as Account, error: null, success: true };
   } catch (err: any) {
-    console.warn('updateAccountSchedule non-fatal fallback:', err);
-    return { data: mergedSession as Partial<Account>, error: null, success: true };
+    console.warn('updateAccountSchedule failure:', err);
+    return { data: mergedSession as Partial<Account>, error: err?.message || 'Schedule update failed', success: false };
   }
 }
 
