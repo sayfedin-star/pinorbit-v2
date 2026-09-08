@@ -376,38 +376,80 @@ async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
     console.log('ℹ️ sheet_write skipped: GAS URL not configured');
     return { ok: true, skipped: true };
   }
+  const rowsCount = Array.isArray(payload?.rows) ? payload.rows.length : 0;
+  const username = String(payload?.username || '');
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const startedAt = Date.now();
     try {
       const res = await fetch(gasUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-ingest-secret': secret,
-        },
+        headers: { 'Content-Type': 'application/json', 'x-ingest-secret': secret },
         body: JSON.stringify({ ...payload, action: 'sheet_write', secret }),
         signal: AbortSignal.timeout(30000),
+        redirect: 'follow',
       });
+      const elapsedMs = Date.now() - startedAt;
+      const contentType = res.headers.get('content-type') || '';
+      const bodyText = await res.text().catch(() => '');
 
-      const data = await res.json().catch(() => ({}));
-      if (data?.ok === false && data?.error === 'locked' && attempt < maxRetries) {
-        const backoffMs = Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000);
-        console.warn(`⚠️ [GAS Write] Lock conflict detected on attempt ${attempt + 1}/${maxRetries + 1}, retrying after ${Math.round(backoffMs / 1000)}s...`);
-        await sleep(backoffMs);
-        continue;
+      // Tier-0 diagnostics: exactly the 5 approved fields; never the secret, never full rows
+      console.log(`🩺 [GAS Write] @${username} attempt ${attempt + 1}/${maxRetries + 1}: status=${res.status} ct=${contentType || 'none'} elapsed=${elapsedMs}ms rows=${rowsCount}`);
+
+      // (1) HTTP error: evaluated FIRST
+      if (!res.ok) {
+        const typed = `GAS_HTTP_${res.status}: ${bodyText.slice(0, 300).replace(/\s+/g, ' ')}`;
+        if ((res.status >= 500 || res.status === 429) && attempt < maxRetries) {
+          await sleep(Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000));
+          continue;
+        }
+        return { ok: false, error: typed };
+      }
+
+      let data = null;
+      try { data = JSON.parse(bodyText); } catch { data = null; }
+
+      // (2) Non-JSON / empty body check (for 2xx responses with non-JSON content)
+      if (data === null || typeof data !== 'object') {
+        const typed = `GAS_NON_JSON(status=${res.status},ct=${contentType || 'none'}): ${bodyText.slice(0, 300).replace(/\s+/g, ' ')}`;
+        const transient = res.ok || res.status >= 500 || res.status === 429;
+        if (transient && attempt < maxRetries) {
+          await sleep(Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000));
+          continue;
+        }
+        return { ok: false, error: typed };
+      }
+
+      // (3) Lock conflict check
+      if (data.ok === false && data.error === 'locked') {
+        if (attempt < maxRetries) {
+          console.warn(`⚠️ [GAS Write] Lock conflict detected on attempt ${attempt + 1}/${maxRetries + 1}, retrying...`);
+          await sleep(Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000));
+          continue;
+        }
+        return { ok: false, error: 'locked' };
+      }
+
+      // (4) Success telemetry
+      if (data.ok) {
+        console.log(`✅ [GAS Write] @${username}: written=${typeof data.written === 'number' ? data.written : (Number(data.appended) || 0) + (Number(data.updated) || 0)} (app=${data.appended ?? '-'}, upd=${data.updated ?? '-'}, unch=${data.unchanged ?? '-'}) in ${elapsedMs}ms`);
       }
       return data;
     } catch (err) {
+      const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+      const typed = isTimeout
+        ? `GAS_TIMEOUT_30S(elapsed=${Date.now() - startedAt}ms): ${err.message}`
+        : (err?.message || 'Unknown GAS write error');
       if (attempt < maxRetries) {
-        const backoffMs = Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000);
-        console.warn(`⚠️ [GAS Write] Error on attempt ${attempt + 1}/${maxRetries + 1}: ${err.message}, retrying after ${Math.round(backoffMs / 1000)}s...`);
-        await sleep(backoffMs);
+        console.warn(`⚠️ [GAS Write] Error on attempt ${attempt + 1}/${maxRetries + 1}: ${err.message}, retrying...`);
+        await sleep(Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000));
         continue;
       }
       console.warn(`❌ [GAS Write] Failed after ${maxRetries + 1} attempts: ${err.message}`);
-      return { ok: false, error: err.message };
+      return { ok: false, error: typed };
     }
   }
+  return { ok: false, error: 'gas_write_exhausted' };
 }
 
 // ── Calendar-Aligned Eligibility Helpers (Tier 1) ──

@@ -13,6 +13,17 @@ describe('PinArchive v2.7.1 Reconciliation & Resilience Suite', () => {
     vi.restoreAllMocks();
   });
 
+  const createMockResponse = (status: number, body: string | object, contentType = 'application/json') => {
+    const textBody = typeof body === 'string' ? body : JSON.stringify(body);
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: new Headers({ 'content-type': contentType }),
+      text: async () => textBody,
+      json: async () => (typeof body === 'string' ? JSON.parse(body) : body),
+    };
+  };
+
   describe('writeToGas Retry & Backoff Resilience', () => {
     it('returns { ok: true, skipped: true } when gasUrl is empty or whitespace', async () => {
       const res = await writeToGas('', mockSecret, {});
@@ -20,17 +31,16 @@ describe('PinArchive v2.7.1 Reconciliation & Resilience Suite', () => {
     });
 
     it('succeeds on first attempt without retrying when GAS responds ok: true', async () => {
-      const fetchMock = vi.fn().mockResolvedValue({
-        status: 200,
-        json: async () => ({
+      const fetchMock = vi.fn().mockResolvedValue(
+        createMockResponse(200, {
           ok: true,
           version: '2.7.1',
           written: 131,
           appended: 110,
           updated: 21,
           unchanged: 116,
-        }),
-      });
+        })
+      );
       vi.stubGlobal('fetch', fetchMock);
 
       const res = await writeToGas(mockGasUrl, mockSecret, { username: 'testuser', rows: [] });
@@ -45,22 +55,16 @@ describe('PinArchive v2.7.1 Reconciliation & Resilience Suite', () => {
       const fetchMock = vi.fn().mockImplementation(async () => {
         callCount++;
         if (callCount < 3) {
-          return {
-            status: 200,
-            json: async () => ({ ok: false, error: 'locked' }),
-          };
+          return createMockResponse(200, { ok: false, error: 'locked' });
         }
-        return {
-          status: 200,
-          json: async () => ({
-            ok: true,
-            version: '2.7.1',
-            written: 50,
-            appended: 50,
-            updated: 0,
-            unchanged: 0,
-          }),
-        };
+        return createMockResponse(200, {
+          ok: true,
+          version: '2.7.1',
+          written: 50,
+          appended: 50,
+          updated: 0,
+          unchanged: 0,
+        });
       });
       vi.stubGlobal('fetch', fetchMock);
 
@@ -71,10 +75,7 @@ describe('PinArchive v2.7.1 Reconciliation & Resilience Suite', () => {
     });
 
     it('returns failure object after exhausting all retries on persistent lock conflict', async () => {
-      const fetchMock = vi.fn().mockResolvedValue({
-        status: 200,
-        json: async () => ({ ok: false, error: 'locked' }),
-      });
+      const fetchMock = vi.fn().mockResolvedValue(createMockResponse(200, { ok: false, error: 'locked' }));
       vi.stubGlobal('fetch', fetchMock);
 
       const res = await writeToGas(mockGasUrl, mockSecret, { username: 'testuser', rows: [] }, 2);
@@ -91,6 +92,72 @@ describe('PinArchive v2.7.1 Reconciliation & Resilience Suite', () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(res.ok).toBe(false);
       expect(res.error).toBe('Network timeout');
+    });
+
+    it('retries on 200 with non-JSON HTML body up to maxRetries and returns GAS_NON_JSON', async () => {
+      const htmlBody = '<html><body>Temporarily Unavailable</body></html>';
+      const fetchMock = vi.fn().mockResolvedValue(createMockResponse(200, htmlBody, 'text/html'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await writeToGas(mockGasUrl, mockSecret, { username: 'testuser', rows: [] }, 2);
+      expect(fetchMock).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+      expect(res).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/^GAS_NON_JSON\(status=200,ct=text\/html\):/),
+      });
+    });
+
+    it('retries on 503 HTTP error with HTML body and returns GAS_HTTP_503', async () => {
+      const htmlBody = 'Service Unavailable';
+      const fetchMock = vi.fn().mockResolvedValue(createMockResponse(503, htmlBody, 'text/html'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await writeToGas(mockGasUrl, mockSecret, { username: 'testuser', rows: [] }, 2);
+      expect(fetchMock).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+      expect(res).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/^GAS_HTTP_503: Service Unavailable/),
+      });
+    });
+
+    it('retries on 500 HTTP error with JSON body and returns GAS_HTTP_500', async () => {
+      const jsonBody = { ok: false, error: 'internal_server_error' };
+      const fetchMock = vi.fn().mockResolvedValue(createMockResponse(500, jsonBody, 'application/json'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await writeToGas(mockGasUrl, mockSecret, { username: 'testuser', rows: [] }, 2);
+      expect(fetchMock).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+      expect(res).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/^GAS_HTTP_500:/),
+      });
+    });
+
+    it('does NOT retry on 400 validation error and returns typed GAS_HTTP_400 with exactly 1 call', async () => {
+      const validationBody = { ok: false, error: 'username required' };
+      const fetchMock = vi.fn().mockResolvedValue(createMockResponse(400, validationBody, 'application/json'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await writeToGas(mockGasUrl, mockSecret, { username: '', rows: [] }, 2);
+      expect(fetchMock).toHaveBeenCalledTimes(1); // Client validation error: no retry
+      expect(res).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/^GAS_HTTP_400:/),
+      });
+    });
+
+    it('retries on TimeoutError / AbortError and returns typed GAS_TIMEOUT_30S', async () => {
+      const timeoutErr = new Error('The operation was aborted due to timeout');
+      timeoutErr.name = 'TimeoutError';
+      const fetchMock = vi.fn().mockRejectedValue(timeoutErr);
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await writeToGas(mockGasUrl, mockSecret, { username: 'testuser', rows: [] }, 1);
+      expect(fetchMock).toHaveBeenCalledTimes(2); // 1 initial + 1 retry
+      expect(res).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/^GAS_TIMEOUT_30S\(elapsed=\d+ms\): The operation was aborted due to timeout/),
+      });
     });
   });
 
