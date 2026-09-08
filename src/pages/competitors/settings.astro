@@ -980,58 +980,20 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Create a schedule via Configure
 </Layout>
 
 <script>
-  import { humanCron, humanCronTitle } from '../../lib/cron-helper';
-  import { fmtAuditTimestamp, fmtDuration } from '../../lib/format-audit';
+  import {
+    humanCron,
+    humanCronTitle,
+    fmtAuditTimestamp,
+    fmtDuration,
+    escapeHtml as escHtml,
+    timeAgo,
+    toast,
+    apiJSON as fetchAPI,
+  } from '../../lib/ui-helpers';
 
   // ─── Helpers & Utilities ───────────────────────────────────────────────────
   const $ = (id: string) => document.getElementById(id) as HTMLElement;
-  const escHtml = (s: any) => String(s ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m] as string));
   const fmtCompact = (n: number | null | undefined) => new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n ?? 0);
-
-  function timeAgo(iso?: string | null): string {
-    if (!iso) return 'Never';
-    const ms = Date.now() - new Date(iso).getTime();
-    if (isNaN(ms) || ms < 0) return 'Just now';
-    const m = Math.floor(ms / 60000);
-    if (m < 1) return 'Just now';
-    if (m < 60) return `${m}m ago`;
-    const h = Math.floor(m / 60);
-    if (h < 24) return `${h}h ago`;
-    const d = Math.floor(h / 24);
-    return `${d}d ago`;
-  }
-
-  function toast(message: string, type: 'success' | 'error' | 'info' = 'success') {
-    const colors = {
-      success: 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400',
-      error: 'border-rose-500/40 text-rose-600 dark:text-rose-400',
-      info: 'border-primary/40 text-primary',
-    };
-    const icons = { success: '✓', error: '✕', info: 'ℹ' };
-    const el = document.createElement('div');
-    el.className = `flex items-start gap-2.5 rounded-xl border bg-card p-3 text-xs font-semibold shadow-lg ${colors[type]}`;
-    el.innerHTML = `<span class="flex-shrink-0">${icons[type]}</span><span class="flex-1 text-foreground">${escHtml(message)}</span>
-      <button class="text-muted-foreground hover:text-foreground" aria-label="Dismiss">✕</button>`;
-    el.querySelector('button')!.addEventListener('click', () => el.remove());
-    $('toast-root').appendChild(el);
-    setTimeout(() => {
-      el.style.opacity = '0';
-      el.style.transition = 'opacity .3s';
-      setTimeout(() => el.remove(), 300);
-    }, 4000);
-  }
-
-  async function fetchAPI(url: string, opts: RequestInit = {}) {
-    const res = await fetch(url, {
-      ...opts,
-      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(json.error || `HTTP ${res.status}`);
-    }
-    return json;
-  }
 
   function showModal(modal: HTMLElement) {
     modal?.classList.remove('hidden');
