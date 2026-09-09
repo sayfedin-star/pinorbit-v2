@@ -30,6 +30,10 @@ vi.mock('../../server/services/promotion-service', () => ({
   }),
 }));
 
+vi.mock('../../server/lib/gas-bridge', () => ({
+  gasCall: vi.fn(),
+}));
+
 describe('PinArchive Features & RPCs Suite', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -318,6 +322,68 @@ describe('PinArchive Features & RPCs Suite', () => {
       } finally {
         global.fetch = originalFetch;
       }
+    });
+
+    it('executes sync_sheet_ages action and updates pa_accounts with sheet oldest_pin_at', async () => {
+      const updateMock = vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ error: null }),
+        }),
+      });
+
+      mockPinArchiveClient.from.mockImplementation((table: string) => {
+        if (table === 'pa_accounts') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                in: vi.fn().mockResolvedValue({
+                  data: [{ id: mockAccId, username: 'foodblogger', status: 'active' }],
+                  error: null,
+                }),
+              }),
+            }),
+            update: updateMock,
+          };
+        }
+        return { select: vi.fn(), update: updateMock };
+      });
+
+      const { gasCall } = await import('../../server/lib/gas-bridge');
+      vi.mocked(gasCall).mockResolvedValueOnce({
+        ok: true,
+        version: '2.8.2',
+        ages: {
+          foodblogger: '2026-06-03T03:20:10.000Z',
+        },
+      });
+
+      const req = new Request('http://localhost:4321/api/pinarchive/accounts-gas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: mockWsId,
+          action: 'sync_sheet_ages',
+          usernames: ['foodblogger'],
+        }),
+      });
+
+      const res = await accountsGasHandler({
+        request: req,
+        locals: { user: mockUser, supabase: {}, activeWorkspaceId: mockWsId },
+      } as any);
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+      expect(json.action).toBe('sync_sheet_ages');
+      expect(json.results).toEqual([
+        {
+          username: 'foodblogger',
+          ok: true,
+          summary: { oldest_pin_at: '2026-06-03T03:20:10.000Z' },
+        },
+      ]);
+      expect(updateMock).toHaveBeenCalledWith({ oldest_pin_at: '2026-06-03T03:20:10.000Z' });
     });
   });
 });

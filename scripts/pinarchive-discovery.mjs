@@ -499,6 +499,29 @@ function computeOldestPinAt(existingIso, pins) {
   return bestMs === null ? null : new Date(bestMs).toISOString();
 }
 
+// ── Protect oldest_pin_at against poisoning from partial/incremental runs ──
+// currentIso: current pa_accounts.oldest_pin_at (or null)
+// batchOldest: minimum pin timestamp found in this discovery batch (or null)
+// isFullBackfillComplete: true only if backfill reached the very end of account history (!hasMore && !cursor)
+function resolveAccountOldestPinAt(currentIso, batchOldest, isFullBackfillComplete = false) {
+  if (!batchOldest) return null;
+  if (currentIso) {
+    const prevMs = new Date(currentIso).getTime();
+    const nextMs = new Date(batchOldest).getTime();
+    // Strictly monotonic decrease: only update if discovered pin is strictly older than existing baseline
+    if (Number.isFinite(nextMs) && nextMs < prevMs) {
+      return batchOldest;
+    }
+    return null;
+  }
+  // If currentIso is null, only set if full backfill reached the end of history.
+  // Never initialize from partial/incremental runs (prevents polluting with recent batch min).
+  if (isFullBackfillComplete) {
+    return batchOldest;
+  }
+  return null;
+}
+
 
 // ── Main Process ──
 async function main() {
@@ -925,6 +948,8 @@ async function main() {
     const lastResult = `pages=${pageCount} fetched=${allPinsForSheet.length} +${newPinsCount} sheet=${sheetPushed}${sheetBreakdown}${circuitBroken ? ' (circuit-broken)' : ''}`;
 
     const batchOldest = computeOldestPinAt(acc.oldest_pin_at || null, allPinsForSheet);
+    const isFullBackfillComplete = !circuitBroken && !hasMore && !cursor && acc.backfill_status !== 'done';
+    const nextOldestPinAt = resolveAccountOldestPinAt(acc.oldest_pin_at || null, batchOldest, isFullBackfillComplete);
 
     const accountPatch = {
       next_run_at: nextRunAt,
@@ -934,7 +959,7 @@ async function main() {
       last_result: lastResult,
       pins_count: knownPinIds.size,
     };
-    if (batchOldest) accountPatch.oldest_pin_at = batchOldest;
+    if (nextOldestPinAt) accountPatch.oldest_pin_at = nextOldestPinAt;
 
     await supaPatch('pa_accounts', `workspace_id=eq.${acc.workspace_id}&id=eq.${acc.id}`, accountPatch);
 
@@ -977,6 +1002,7 @@ export {
   checkCalendarEligibility,
   computeNextRunDate,
   computeOldestPinAt,
+  resolveAccountOldestPinAt,
 };
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

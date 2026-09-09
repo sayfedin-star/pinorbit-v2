@@ -5,6 +5,7 @@ import { dbClients } from '../../../server/db/clients';
 import { promoteCandidates } from '../../../server/services/promotion-service';
 import { errorStatus } from '../../../server/lib/http-error';
 import { USERNAME_REGEX } from '../../../lib/validation/pinterest';
+import { gasCall } from '../../../server/lib/gas-bridge';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -37,7 +38,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   const action = String(body.action || '').trim().toLowerCase();
-  const ALLOWED_ACTIONS = ['run_now', 'audit_sweep', 'sync_now', 'pause', 'resume', 'set_interval', 'status'];
+  const ALLOWED_ACTIONS = ['run_now', 'audit_sweep', 'sync_now', 'sync_sheet_ages', 'pause', 'resume', 'set_interval', 'status'];
   if (!ALLOWED_ACTIONS.includes(action)) {
     return json({ success: false, error: `Invalid action: must be one of ${ALLOWED_ACTIONS.join(', ')}` }, 422);
   }
@@ -81,7 +82,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .filter((u) => USERNAME_REGEX.test(u))
       .slice(0, 50);
 
-    if (usernames.length === 0 && action !== 'run_now' && action !== 'audit_sweep') {
+    if (usernames.length === 0 && action !== 'run_now' && action !== 'audit_sweep' && action !== 'sync_sheet_ages') {
       return json({ success: false, error: 'At least one valid username is required.' }, 422);
     }
 
@@ -208,6 +209,67 @@ export const POST: APIRoute = async ({ request, locals }) => {
           error: promRes.error,
           summary: { promoted: promRes.promoted, checked: promRes.checked },
         });
+      }
+    } else if (action === 'sync_sheet_ages') {
+      let targetUsernames = usernames;
+      if (targetUsernames.length === 0) {
+        const { data: allAccs, error: accErr } = await db
+          .from('pa_accounts')
+          .select('username')
+          .eq('workspace_id', wsCtx.workspaceId);
+        if (accErr) {
+          return json({ success: false, error: `Failed to load workspace accounts: ${accErr.message}` }, 500);
+        }
+        targetUsernames = (allAccs || []).map((a: any) => a.username.toLowerCase()).filter(Boolean);
+      }
+
+      if (targetUsernames.length === 0) {
+        return json({
+          success: true,
+          action,
+          results: [],
+          message: 'No accounts found in workspace to sync.',
+        });
+      }
+
+      // Chunk usernames into batches of 50 (matching GAS capacity)
+      const chunks: string[][] = [];
+      for (let i = 0; i < targetUsernames.length; i += 50) {
+        chunks.push(targetUsernames.slice(i, i + 50));
+      }
+
+      for (const chunk of chunks) {
+        const gasRes = await gasCall(runtimeEnv, wsCtx.workspaceId, 'account_ages', { usernames: chunk }, 30000);
+        if (!gasRes || !gasRes.ok) {
+          for (const u of chunk) {
+            results.push({
+              username: u,
+              ok: false,
+              error: gasRes?.error || 'GAS account_ages call failed',
+            });
+          }
+          continue;
+        }
+
+        const ages = gasRes.ages || {};
+        for (const u of chunk) {
+          const sheetAgeIso = ages[u];
+          if (sheetAgeIso && typeof sheetAgeIso === 'string') {
+            const { error: updErr } = await db
+              .from('pa_accounts')
+              .update({ oldest_pin_at: sheetAgeIso })
+              .eq('workspace_id', wsCtx.workspaceId)
+              .eq('username', u);
+
+            if (updErr) {
+              results.push({ username: u, ok: false, error: `DB update failed: ${updErr.message}` });
+            } else {
+              results.push({ username: u, ok: true, summary: { oldest_pin_at: sheetAgeIso } });
+            }
+          } else {
+            results.push({ username: u, ok: true, summary: { oldest_pin_at: null, note: 'no pins found in sheet' } });
+          }
+        }
       }
     } else if (action === 'pause') {
       await db

@@ -186,6 +186,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
         interval_days: intervalDays,
       });
 
+      // Best-effort check if Google Sheet already contains pins for this creator
+      if (gasAddRes?.ok) {
+        try {
+          const agesRes = await gasCall(runtimeEnv, workspaceId, 'account_ages', {
+            usernames: [acc.username],
+          });
+          if (agesRes?.ok && agesRes.ages?.[acc.username]) {
+            const initialAge = agesRes.ages[acc.username];
+            await pinArchive
+              .from('pa_accounts')
+              .update({ oldest_pin_at: initialAge })
+              .eq('id', newRow.id);
+          }
+        } catch {
+          // Non-fatal: new accounts will be populated upon backfill or sync
+        }
+      }
+
       const itemResult: Record<string, any> = {
         id: newRow.id,
         username: acc.username,
