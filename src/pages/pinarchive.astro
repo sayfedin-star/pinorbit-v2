@@ -768,6 +768,38 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
           </tbody>
         </table>
       </div>
+
+      <!-- Accounts Pagination Controls Bar -->
+      <div id="accounts-pagination-bar" class="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-border bg-card/50">
+        <div class="text-xs text-muted-foreground">
+          Showing <span id="accounts-page-start" class="font-bold text-foreground font-mono">0</span>–<span id="accounts-page-end" class="font-bold text-foreground font-mono">0</span> of <span id="accounts-total-count" class="font-bold text-foreground font-mono">0</span> accounts
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-xs font-medium text-muted-foreground whitespace-nowrap">
+            Page <span id="accounts-current-page" class="font-bold text-foreground font-mono">1</span> of <span id="accounts-total-pages" class="font-bold text-foreground font-mono">1</span>
+          </span>
+          <div class="flex items-center gap-1">
+            <button
+              id="accounts-prev-page-btn"
+              type="button"
+              disabled
+              class="p-1.5 rounded-lg border border-border bg-card text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
+              title="Previous Page"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button
+              id="accounts-next-page-btn"
+              type="button"
+              disabled
+              class="p-1.5 rounded-lg border border-border bg-card text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
+              title="Next Page"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ═══ Add Creator Account Modal ═══ -->
@@ -1109,6 +1141,7 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     cleanPinterestUsername,
     timeAgo,
   } from '../lib/ui-helpers';
+  import { paginateItems, type PaginationResult } from '../lib/pagination-helper';
 
   let rawAccounts: any[] = [];
   const selectedAccounts = new Set<string>();
@@ -1120,6 +1153,12 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
   let isCompactNumbers = localStorage.getItem('pa_num_fmt') === 'compact';
   let isCompactDensity = localStorage.getItem('pa_density') === 'compact';
   let competitorMap = new Map<string, { id: string; username: string }>();
+
+  // Pagination State (50 accounts/page)
+  const ACCOUNTS_PAGE_SIZE = 50;
+  let accountsCurrentPage = 1;
+  let currentFilteredAccounts: any[] = [];
+  let currentPagedAccounts: any[] = [];
 
   async function loadCompetitorUsernames() {
     try {
@@ -1149,15 +1188,18 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     }
   }
 
-  // Number formatters
+  // Number formatters (Hoisted for O(1) single-instance reuse)
+  const cachedFullFormatter = new Intl.NumberFormat('en-US');
+  const cachedCompactFormatter = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+
   function fmtNumberFull(n: number | string | null | undefined): string {
     const num = Number(n) || 0;
-    return num.toLocaleString('en-US');
+    return cachedFullFormatter.format(num);
   }
 
   function fmtNumberCompact(n: number | string | null | undefined): string {
     const num = Number(n) || 0;
-    return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(num);
+    return cachedCompactFormatter.format(num);
   }
 
   function fmtMetric(n: number | string | null | undefined): string {
@@ -1219,7 +1261,10 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
   }
 
   // ─── Filter & Search Engine ───────────────────────────────────────────────
-  function filterAndRenderAccounts() {
+  function filterAndRenderAccounts(resetPage = false) {
+    if (resetPage) {
+      accountsCurrentPage = 1;
+    }
     let filtered = [...rawAccounts];
 
     // Status filter
@@ -1243,7 +1288,47 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
       );
     }
 
-    renderAccountsStrip(filtered);
+    currentFilteredAccounts = filtered;
+    const paginated = paginateItems(filtered, accountsCurrentPage, ACCOUNTS_PAGE_SIZE);
+    accountsCurrentPage = paginated.currentPage;
+    currentPagedAccounts = paginated.pagedItems;
+
+    renderAccountsStrip(paginated.pagedItems, paginated);
+    updateAccountsPaginationUI(paginated);
+  }
+
+  function syncSelectAllCheckbox() {
+    const selectAllCb = document.getElementById('select-all-accounts-cb') as HTMLInputElement | null;
+    if (!selectAllCb) return;
+    if (currentPagedAccounts.length === 0) {
+      selectAllCb.checked = false;
+      selectAllCb.indeterminate = false;
+      return;
+    }
+    const pageSelectedCount = currentPagedAccounts.filter((a: any) => selectedAccounts.has(a.id)).length;
+    selectAllCb.checked = pageSelectedCount === currentPagedAccounts.length;
+    selectAllCb.indeterminate = pageSelectedCount > 0 && pageSelectedCount < currentPagedAccounts.length;
+  }
+
+  function updateAccountsPaginationUI(paginated: PaginationResult<any>) {
+    const pageStartEl = document.getElementById('accounts-page-start');
+    const pageEndEl = document.getElementById('accounts-page-end');
+    const totalCountEl = document.getElementById('accounts-total-count');
+    const currentPageEl = document.getElementById('accounts-current-page');
+    const totalPagesEl = document.getElementById('accounts-total-pages');
+    const prevBtn = document.getElementById('accounts-prev-page-btn') as HTMLButtonElement | null;
+    const nextBtn = document.getElementById('accounts-next-page-btn') as HTMLButtonElement | null;
+
+    if (pageStartEl) pageStartEl.textContent = String(paginated.pageStart);
+    if (pageEndEl) pageEndEl.textContent = String(paginated.pageEnd);
+    if (totalCountEl) totalCountEl.textContent = String(paginated.totalItems);
+    if (currentPageEl) currentPageEl.textContent = String(paginated.currentPage);
+    if (totalPagesEl) totalPagesEl.textContent = String(paginated.totalPages);
+
+    if (prevBtn) prevBtn.disabled = !paginated.hasPrev;
+    if (nextBtn) nextBtn.disabled = !paginated.hasNext;
+
+    syncSelectAllCheckbox();
   }
 
   // ─── Column Visibility ───────────────────────────────────────────────────
@@ -1391,16 +1476,20 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
 
     document.getElementById('select-all-accounts-cb')?.addEventListener('change', (e) => {
       const checked = (e.target as HTMLInputElement).checked;
-      const inputs = document.querySelectorAll<HTMLInputElement>('input[data-acc-select]');
-      inputs.forEach(cb => {
-        cb.checked = checked;
-        const id = cb.getAttribute('data-acc-select');
-        if (id) {
-          if (checked) selectedAccounts.add(id);
-          else selectedAccounts.delete(id);
+      // Standard Page-Scoped Selection: only select/deselect rows on the current page
+      currentPagedAccounts.forEach((acc: any) => {
+        if (checked) {
+          selectedAccounts.add(acc.id);
+        } else {
+          selectedAccounts.delete(acc.id);
         }
       });
+      const inputs = document.querySelectorAll<HTMLInputElement>('#accounts-table-body input[data-acc-select]');
+      inputs.forEach(cb => {
+        cb.checked = checked;
+      });
       updateSelectedAccountsUI();
+      syncSelectAllCheckbox();
     });
   }
 
@@ -1462,10 +1551,11 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
   }
 
   // ─── Table Body Renderer ──────────────────────────────────────────────────
-  function renderAccountsStrip(accounts: any[]) {
+  function renderAccountsStrip(accounts: any[], paginated?: PaginationResult<any>) {
     const tbody = document.getElementById('accounts-table-body');
     const stripCount = document.getElementById('accounts-strip-count');
-    if (stripCount) stripCount.textContent = `${accounts.length} ${accounts.length === 1 ? 'Account' : 'Accounts'}`;
+    const total = paginated ? paginated.totalItems : (currentFilteredAccounts.length || accounts.length);
+    if (stripCount) stripCount.textContent = `${total} ${total === 1 ? 'Account' : 'Accounts'}`;
 
     if (!tbody) return;
 
@@ -1657,19 +1747,7 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
       })
       .join('');
 
-    attachAccountSelectionListeners();
-    attachAccountIngestToggleListeners();
-    attachSingleDeleteListeners();
-    attachIntervalChangeListeners();
-    attachSendToCompetitorListeners();
-
-    // Copy handle listeners
-    tbody.querySelectorAll<HTMLElement>('[data-pa-copy-handle]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        copyToClipboard(btn.dataset.paCopyHandle!, btn);
-      });
-    });
+    setupDelegatedTableListeners();
   }
 
   // ─── Density & Number Format Switches ────────────────────────────────────
@@ -1715,31 +1793,54 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     btn.addEventListener('click', () => {
       activeStatusTab = (btn.dataset.statusTab as any) || 'all';
       syncStatusTabClasses();
-      filterAndRenderAccounts();
+      filterAndRenderAccounts(true);
     });
   });
 
   const searchInput = document.getElementById('account-search-input') as HTMLInputElement | null;
   const searchClearBtn = document.getElementById('pa-search-clear-btn');
   const intervalFilterSelect = document.getElementById('pa-interval-filter') as HTMLSelectElement | null;
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   searchInput?.addEventListener('input', () => {
-    accountSearchTerm = searchInput.value.trim();
-    if (accountSearchTerm) searchClearBtn?.classList.remove('hidden');
+    const val = searchInput.value.trim();
+    if (val) searchClearBtn?.classList.remove('hidden');
     else searchClearBtn?.classList.add('hidden');
-    filterAndRenderAccounts();
+
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      accountSearchTerm = val;
+      filterAndRenderAccounts(true);
+    }, 250);
   });
 
   searchClearBtn?.addEventListener('click', () => {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
     if (searchInput) searchInput.value = '';
     accountSearchTerm = '';
     searchClearBtn?.classList.add('hidden');
-    filterAndRenderAccounts();
+    filterAndRenderAccounts(true);
   });
 
   intervalFilterSelect?.addEventListener('change', () => {
     selectedInterval = intervalFilterSelect.value;
-    filterAndRenderAccounts();
+    filterAndRenderAccounts(true);
+  });
+
+  // Setup accounts table pagination navigation
+  document.getElementById('accounts-prev-page-btn')?.addEventListener('click', () => {
+    if (accountsCurrentPage > 1) {
+      accountsCurrentPage--;
+      filterAndRenderAccounts(false);
+    }
+  });
+
+  document.getElementById('accounts-next-page-btn')?.addEventListener('click', () => {
+    const totalPages = Math.max(1, Math.ceil(currentFilteredAccounts.length / ACCOUNTS_PAGE_SIZE));
+    if (accountsCurrentPage < totalPages) {
+      accountsCurrentPage++;
+      filterAndRenderAccounts(false);
+    }
   });
 
   // ─── Overview & KPIs ──────────────────────────────────────────────────────
@@ -2195,248 +2296,6 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     });
   }
 
-  // ─── Account Ingest Toggle & Selection ────────────────────────────────────
-  function attachAccountIngestToggleListeners() {
-    // Handle 🟢 / ⏸ status badge clicks
-    document.querySelectorAll<HTMLElement>('[data-acc-status-toggle]').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-acc-status-toggle');
-        const currentStatus = btn.getAttribute('data-current-status');
-        if (!id) return;
-        const enabled = currentStatus === 'paused'; // if paused -> active; if active -> paused
-
-        btn.style.opacity = '0.4';
-        btn.style.pointerEvents = 'none';
-
-        const root = document.getElementById('pinarchive-page-root');
-        const wsId = root?.getAttribute('data-workspace-id');
-
-        try {
-          const res = await fetch('/api/pinarchive/accounts-ingest-toggle', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              workspace_id: wsId,
-              account_ids: [id],
-              ingest_enabled: enabled,
-            }),
-          });
-
-          if (res.status === 403) {
-            toast('Admin access required to toggle account ingestion.', 'error');
-            return;
-          }
-
-          const json = await res.json().catch(() => ({}));
-          if (!res.ok || !json.success) {
-            toast(json.error || 'Failed to update account ingest status.', 'error');
-          } else {
-            const target = rawAccounts.find(a => a.id === id);
-            if (target) {
-              target.ingest_enabled = enabled;
-              target.status = enabled ? 'active' : 'paused';
-            }
-            toast(`@${target?.username || 'Account'} is now ${enabled ? 'active' : 'paused'}`);
-            filterAndRenderAccounts();
-          }
-        } catch (e: any) {
-          toast(e.message || 'Error updating account status', 'error');
-        } finally {
-          btn.style.opacity = '1';
-          btn.style.pointerEvents = 'auto';
-        }
-      });
-    });
-
-    // Fallback for any lingering toggle switches
-    document.querySelectorAll<HTMLInputElement>('[data-acc-ingest-toggle]').forEach((cb) => {
-      cb.addEventListener('change', async () => {
-        const id = cb.getAttribute('data-acc-ingest-toggle');
-        if (!id) return;
-        const enabled = cb.checked;
-        cb.disabled = true;
-
-        const root = document.getElementById('pinarchive-page-root');
-        const wsId = root?.getAttribute('data-workspace-id');
-
-        try {
-          const res = await fetch('/api/pinarchive/accounts-ingest-toggle', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              workspace_id: wsId,
-              account_ids: [id],
-              ingest_enabled: enabled,
-            }),
-          });
-
-          if (res.status === 403) {
-            cb.checked = !enabled;
-            toast('Admin access required to toggle account ingestion.', 'error');
-            return;
-          }
-
-          const json = await res.json();
-          if (!res.ok || !json.success) {
-            cb.checked = !enabled;
-            toast(json.error || 'Failed to update account ingest status.', 'error');
-          } else {
-            const target = rawAccounts.find(a => a.id === id);
-            if (target) {
-              target.ingest_enabled = enabled;
-              target.status = enabled ? 'active' : 'paused';
-            }
-            toast(`@${target?.username || 'Account'} is now ${enabled ? 'active' : 'paused'}`);
-            filterAndRenderAccounts();
-          }
-        } catch (e: any) {
-          cb.checked = !enabled;
-          toast(e.message || 'Error updating account status', 'error');
-        } finally {
-          cb.disabled = false;
-        }
-      });
-    });
-  }
-
-  function updateSelectedAccountsUI() {
-    const actionBar = document.getElementById('accounts-action-bar');
-    const selectedLabel = document.getElementById('accounts-selected-label');
-    const count = selectedAccounts.size;
-
-    if (count > 0) {
-      if (actionBar) {
-        actionBar.classList.remove('hidden');
-        actionBar.classList.add('flex');
-      }
-      if (selectedLabel) selectedLabel.textContent = `${count} selected`;
-    } else {
-      if (actionBar) {
-        actionBar.classList.add('hidden');
-        actionBar.classList.remove('flex');
-      }
-    }
-  }
-
-  function attachAccountSelectionListeners() {
-    document.querySelectorAll<HTMLInputElement>('input[data-acc-select]').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const id = cb.getAttribute('data-acc-select');
-        if (!id) return;
-        if (cb.checked) selectedAccounts.add(id);
-        else selectedAccounts.delete(id);
-        updateSelectedAccountsUI();
-      });
-    });
-  }
-
-  function attachIntervalChangeListeners() {
-    document.querySelectorAll<HTMLSelectElement>('.interval-select').forEach((sel) => {
-      sel.addEventListener('change', async () => {
-        const username = sel.getAttribute('data-username');
-        const accountId = sel.getAttribute('data-account-id');
-        const prevDays = sel.getAttribute('data-prev-days');
-        const newDays = parseInt(sel.value, 10);
-        if (!newDays) return;
-
-        sel.disabled = true;
-        try {
-          const root = document.getElementById('pinarchive-page-root');
-          const wsId = root?.getAttribute('data-workspace-id');
-          const res = await fetch('/api/pinarchive/accounts-interval', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              workspace_id: wsId,
-              account_id: accountId || undefined,
-              username: username || undefined,
-              interval_days: newDays,
-            }),
-          });
-          const json = await res.json();
-          if (!res.ok || !json.success) {
-            sel.value = prevDays || '3';
-            toast(json.error || 'Failed to update interval', 'error');
-          } else {
-            sel.setAttribute('data-prev-days', String(newDays));
-            // Update in local array
-            const target = rawAccounts.find(a => (accountId && a.id === accountId) || (username && a.username === username));
-            if (target) {
-              target.interval_days = newDays;
-              if (json.next_run_dates && (json.next_run_dates[target.id] || json.next_run_dates[target.username])) {
-                target.next_run_at = json.next_run_dates[target.id] || json.next_run_dates[target.username];
-              }
-            }
-            toast(`Discovery interval for @${username || 'account'} set to ${newDays}d`);
-            filterAndRenderAccounts();
-          }
-        } catch (e: any) {
-          sel.value = prevDays || '3';
-          toast(e.message || 'Error updating interval', 'error');
-        } finally {
-          sel.disabled = false;
-        }
-      });
-    });
-  }
-
-  // ─── Send to Competitor Intelligence (Single Row) ─────────────────────────
-  function attachSendToCompetitorListeners() {
-    document.querySelectorAll<HTMLButtonElement>('[data-send-to-comp-user]').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const username = btn.getAttribute('data-send-to-comp-user');
-        if (!username) return;
-
-        const confirmed = confirm(`Track @${username} in Competitor Intelligence?`);
-        if (!confirmed) return;
-
-        const root = document.getElementById('pinarchive-page-root');
-        const wsId = root?.getAttribute('data-workspace-id');
-
-        btn.disabled = true;
-        try {
-          const res = await fetch('/api/admin/competitors', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              workspace_id: wsId,
-              username,
-              account_type: 'competitor',
-            }),
-          });
-          const json = await res.json();
-          if (res.ok && json.success) {
-            toast(`Sent @${username} to Competitor Intelligence & dispatched scraper!`);
-            const compId = json.competitor?.id || json.competitors?.[0]?.id;
-            // Dispatch immediate scraping for this competitor
-            fetch('/api/admin/competitor-ops', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                action: 'dispatch',
-                workspace_id: wsId,
-                competitor_id: compId || undefined,
-                target_username: username,
-                trigger: 'pinarchive_send',
-                force: true,
-              }),
-            }).catch(console.warn);
-
-            loadOverview(1);
-          } else {
-            toast(json.error || 'Failed to send account to Competitor Intelligence', 'error');
-          }
-        } catch (err: any) {
-          toast(err.message || 'Network error', 'error');
-        } finally {
-          btn.disabled = false;
-        }
-      });
-    });
-  }
-
   // ─── Delete Accounts Modal ────────────────────────────────────────────────
   let pendingDeleteIds: string[] = [];
 
@@ -2460,15 +2319,292 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
     pendingDeleteIds = [];
   }
 
-  function attachSingleDeleteListeners() {
-    document.querySelectorAll<HTMLButtonElement>('[data-single-delete-acc-id]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-single-delete-acc-id');
-        if (id) openDeleteAccountsModal([id]);
+  // ─── Delegated Action Handlers ────────────────────────────────────────────
+  async function handleAccountStatusToggle(btn: HTMLElement) {
+    const id = btn.getAttribute('data-acc-status-toggle');
+    const currentStatus = btn.getAttribute('data-current-status');
+    if (!id) return;
+    const enabled = currentStatus === 'paused'; // if paused -> active; if active -> paused
+
+    btn.style.opacity = '0.4';
+    btn.style.pointerEvents = 'none';
+
+    const root = document.getElementById('pinarchive-page-root');
+    const wsId = root?.getAttribute('data-workspace-id');
+
+    try {
+      const res = await fetch('/api/pinarchive/accounts-ingest-toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: wsId,
+          account_ids: [id],
+          ingest_enabled: enabled,
+        }),
       });
-    });
+
+      if (res.status === 403) {
+        toast('Admin access required to toggle account ingestion.', 'error');
+        return;
+      }
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) {
+        toast(json.error || 'Failed to update account ingest status.', 'error');
+      } else {
+        const target = rawAccounts.find(a => a.id === id);
+        if (target) {
+          target.ingest_enabled = enabled;
+          target.status = enabled ? 'active' : 'paused';
+        }
+        toast(`@${target?.username || 'Account'} is now ${enabled ? 'active' : 'paused'}`);
+        filterAndRenderAccounts(false);
+      }
+    } catch (e: any) {
+      toast(e.message || 'Error updating account status', 'error');
+    } finally {
+      btn.style.opacity = '1';
+      btn.style.pointerEvents = 'auto';
+    }
   }
+
+  async function handleIngestSwitchToggle(cb: HTMLInputElement) {
+    const id = cb.getAttribute('data-acc-ingest-toggle');
+    if (!id) return;
+    const enabled = cb.checked;
+    cb.disabled = true;
+
+    const root = document.getElementById('pinarchive-page-root');
+    const wsId = root?.getAttribute('data-workspace-id');
+
+    try {
+      const res = await fetch('/api/pinarchive/accounts-ingest-toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: wsId,
+          account_ids: [id],
+          ingest_enabled: enabled,
+        }),
+      });
+
+      if (res.status === 403) {
+        cb.checked = !enabled;
+        toast('Admin access required to toggle account ingestion.', 'error');
+        return;
+      }
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        cb.checked = !enabled;
+        toast(json.error || 'Failed to update account ingest status.', 'error');
+      } else {
+        const target = rawAccounts.find(a => a.id === id);
+        if (target) {
+          target.ingest_enabled = enabled;
+          target.status = enabled ? 'active' : 'paused';
+        }
+        toast(`@${target?.username || 'Account'} is now ${enabled ? 'active' : 'paused'}`);
+        filterAndRenderAccounts(false);
+      }
+    } catch (e: any) {
+      cb.checked = !enabled;
+      toast(e.message || 'Error updating account status', 'error');
+    } finally {
+      cb.disabled = false;
+    }
+  }
+
+  async function handleIntervalChange(sel: HTMLSelectElement) {
+    const username = sel.getAttribute('data-username');
+    const accountId = sel.getAttribute('data-account-id');
+    const prevDays = sel.getAttribute('data-prev-days');
+    const newDays = parseInt(sel.value, 10);
+    if (!newDays) return;
+
+    sel.disabled = true;
+    try {
+      const root = document.getElementById('pinarchive-page-root');
+      const wsId = root?.getAttribute('data-workspace-id');
+      const res = await fetch('/api/pinarchive/accounts-interval', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: wsId,
+          account_id: accountId || undefined,
+          username: username || undefined,
+          interval_days: newDays,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        sel.value = prevDays || '3';
+        toast(json.error || 'Failed to update interval', 'error');
+      } else {
+        sel.setAttribute('data-prev-days', String(newDays));
+        const target = rawAccounts.find(a => (accountId && a.id === accountId) || (username && a.username === username));
+        if (target) {
+          target.interval_days = newDays;
+          if (json.next_run_dates && (json.next_run_dates[target.id] || json.next_run_dates[target.username])) {
+            target.next_run_at = json.next_run_dates[target.id] || json.next_run_dates[target.username];
+          }
+        }
+        toast(`Discovery interval for @${username || 'account'} set to ${newDays}d`);
+        filterAndRenderAccounts(false);
+      }
+    } catch (e: any) {
+      sel.value = prevDays || '3';
+      toast(e.message || 'Error updating interval', 'error');
+    } finally {
+      sel.disabled = false;
+    }
+  }
+
+  async function handleSendToCompetitor(btn: HTMLButtonElement) {
+    const username = btn.getAttribute('data-send-to-comp-user');
+    if (!username) return;
+
+    const confirmed = confirm(`Track @${username} in Competitor Intelligence?`);
+    if (!confirmed) return;
+
+    const root = document.getElementById('pinarchive-page-root');
+    const wsId = root?.getAttribute('data-workspace-id');
+
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/admin/competitors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: wsId,
+          username,
+          account_type: 'competitor',
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        toast(`Sent @${username} to Competitor Intelligence & dispatched scraper!`);
+        const compId = json.competitor?.id || json.competitors?.[0]?.id;
+        fetch('/api/admin/competitor-ops', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'dispatch',
+            workspace_id: wsId,
+            competitor_id: compId || undefined,
+            target_username: username,
+            trigger: 'pinarchive_send',
+            force: true,
+          }),
+        }).catch(console.warn);
+
+        loadOverview(1);
+      } else {
+        toast(json.error || 'Failed to send account to Competitor Intelligence', 'error');
+      }
+    } catch (err: any) {
+      toast(err.message || 'Network error', 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ─── Central Delegated Event Listener on Table Body ────────────────────────
+  let delegatedListenersAttached = false;
+  function setupDelegatedTableListeners() {
+    if (delegatedListenersAttached) return;
+    const tbody = document.getElementById('accounts-table-body');
+    if (!tbody) return;
+
+    tbody.addEventListener('change', (e) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      if (target.matches('input[data-acc-select]')) {
+        const cb = target as HTMLInputElement;
+        const id = cb.getAttribute('data-acc-select');
+        if (!id) return;
+        if (cb.checked) selectedAccounts.add(id);
+        else selectedAccounts.delete(id);
+        updateSelectedAccountsUI();
+        syncSelectAllCheckbox();
+        return;
+      }
+
+      if (target.matches('.interval-select')) {
+        handleIntervalChange(target as HTMLSelectElement);
+        return;
+      }
+
+      if (target.matches('input[data-acc-ingest-toggle]')) {
+        handleIngestSwitchToggle(target as HTMLInputElement);
+        return;
+      }
+    });
+
+    tbody.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      const toggleBtn = target.closest<HTMLElement>('[data-acc-status-toggle]');
+      if (toggleBtn) {
+        e.stopPropagation();
+        handleAccountStatusToggle(toggleBtn);
+        return;
+      }
+
+      const copyBtn = target.closest<HTMLElement>('[data-pa-copy-handle]');
+      if (copyBtn) {
+        e.stopPropagation();
+        const handle = copyBtn.getAttribute('data-pa-copy-handle') || copyBtn.dataset.paCopyHandle;
+        if (handle) copyToClipboard(handle, copyBtn);
+        return;
+      }
+
+      const compBtn = target.closest<HTMLButtonElement>('[data-send-to-comp-user]');
+      if (compBtn) {
+        e.stopPropagation();
+        handleSendToCompetitor(compBtn);
+        return;
+      }
+
+      const delBtn = target.closest<HTMLButtonElement>('[data-single-delete-acc-id]');
+      if (delBtn) {
+        e.stopPropagation();
+        const id = delBtn.getAttribute('data-single-delete-acc-id');
+        if (id) openDeleteAccountsModal([id]);
+        return;
+      }
+    });
+
+    delegatedListenersAttached = true;
+  }
+
+  function updateSelectedAccountsUI() {
+    const actionBar = document.getElementById('accounts-action-bar');
+    const selectedLabel = document.getElementById('accounts-selected-label');
+    const count = selectedAccounts.size;
+
+    if (count > 0) {
+      if (actionBar) {
+        actionBar.classList.remove('hidden');
+        actionBar.classList.add('flex');
+      }
+      if (selectedLabel) selectedLabel.textContent = `${count} selected`;
+    } else {
+      if (actionBar) {
+        actionBar.classList.add('hidden');
+        actionBar.classList.remove('flex');
+      }
+    }
+  }
+
+  // Safe backward-compatible wrappers for any historical callers
+  function attachAccountSelectionListeners() { setupDelegatedTableListeners(); }
+  function attachAccountIngestToggleListeners() { setupDelegatedTableListeners(); }
+  function attachSingleDeleteListeners() { setupDelegatedTableListeners(); }
+  function attachIntervalChangeListeners() { setupDelegatedTableListeners(); }
+  function attachSendToCompetitorListeners() { setupDelegatedTableListeners(); }
 
   // ─── Bulk Action Buttons ──────────────────────────────────────────────────
   function setupBulkActionButtons() {

@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { paginateItems } from '../pagination-helper';
 
 describe('paginateItems pure helper suite', () => {
@@ -107,5 +107,51 @@ describe('paginateItems pure helper suite', () => {
     expect(res.totalItems).toBe(0);
     expect(res.pagedItems).toEqual([]);
     expect(res.currentPage).toBe(1);
+  });
+
+  it('verifies worst-case interaction performance (< 100ms per render on 50 accounts + 10 consecutive keystrokes + filter toggle)', () => {
+    const cachedFullFormatter = new Intl.NumberFormat('en-US');
+    const cachedCompactFormatter = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+
+    const accounts = Array.from({ length: 50 }, (_, i) => ({
+      id: `acc-${i}`,
+      username: `creator_test_${i}`,
+      status: i % 3 === 0 ? 'paused' : 'active',
+      ingest_enabled: i % 3 !== 0,
+      follower_count: 154200 + i * 1000,
+      pins_count: 850 + i * 20,
+      oldest_pin_at: '2024-01-15T00:00:00Z',
+      interval_days: (i % 7) + 1,
+      changed_last_refresh: i % 5,
+      next_run_at: '2026-09-11T07:00:00Z',
+    }));
+
+    const searchQueries = ['c', 'cr', 'cre', 'crea', 'creat', 'creato', 'creator', 'creator_', 'creator_t', 'creator_test'];
+    const startMs = performance.now();
+
+    // 10 consecutive keystrokes
+    for (const q of searchQueries) {
+      const filtered = accounts.filter(
+        (a) => a.username.toLowerCase().includes(q) || a.status.toLowerCase().includes(q)
+      );
+      const paginated = paginateItems(filtered, 1, 50);
+      const renderedRows = paginated.pagedItems.map((a) => ({
+        username: a.username,
+        followers: cachedCompactFormatter.format(a.follower_count),
+        pins: cachedFullFormatter.format(a.pins_count),
+      }));
+      expect(renderedRows.length).toBeLessThanOrEqual(50);
+    }
+
+    // Filter toggles
+    for (const tab of ['active', 'paused', 'all']) {
+      const filtered = tab === 'all' ? accounts : accounts.filter((a) => a.status === tab);
+      const paginated = paginateItems(filtered, 1, 50);
+      expect(paginated.pagedItems.length).toBeLessThanOrEqual(50);
+    }
+
+    const elapsedMs = performance.now() - startMs;
+    // Strict Gate: 10 keystrokes + 3 filter toggles (13 full render cycles) MUST finish in < 100ms total (< 7.7ms/cycle)
+    expect(elapsedMs).toBeLessThan(100);
   });
 });
