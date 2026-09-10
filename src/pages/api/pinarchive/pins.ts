@@ -47,7 +47,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const sortCol = rawSort === 'velocity' ? 'velocity' : 'saves';
 
   const rawLimit = parseInt(searchParams.get('limit') || '50', 10);
-  const limit = Math.min(Math.max(isNaN(rawLimit) ? 50 : rawLimit, 1), 500);
+  const limit = Math.min(Math.max(isNaN(rawLimit) ? 50 : rawLimit, 1), 200);
 
   const q = searchParams.get('q')?.trim();
   const board = searchParams.get('board')?.trim();

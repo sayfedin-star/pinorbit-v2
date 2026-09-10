@@ -2068,7 +2068,7 @@ TASK:
     if (stageSelect?.value) params.set('stage', stageSelect.value);
     if (clusterToggle?.checked) params.set('in_cluster', '1');
     params.set('sort', currentSort.startsWith('velocity') ? 'velocity' : 'saves');
-    params.set('limit', '500');
+    params.set('limit', '200');
 
     try {
       const res = await fetch(`/api/pinarchive/pins?${params.toString()}`, { signal: AbortSignal.timeout(8000) });

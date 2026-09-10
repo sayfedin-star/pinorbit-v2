@@ -436,6 +436,42 @@ describe('PinArchive Dashboard UI Read Layer API Suite', () => {
       expect(limitMock).toHaveBeenCalledWith(25);
     });
 
+    it('clamps default limit parameter to 200 when limit=500 is requested', async () => {
+      const limitMock = vi.fn().mockResolvedValue({ data: [], error: null });
+      const orderMock = vi.fn().mockReturnValue({ limit: limitMock });
+      const queryMock: any = {
+        order: orderMock,
+        or: vi.fn().mockImplementation(() => queryMock),
+      };
+      const eqMock = vi.fn().mockReturnValue(queryMock);
+      const selectMock = vi.fn().mockReturnValue({ eq: eqMock });
+
+      mockPinArchiveClient.from.mockImplementation((table: string) => {
+        if (table === 'pa_workspace_settings') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === 'pa_pins') {
+          return { select: selectMock };
+        }
+        return {};
+      });
+
+      const req = new Request('http://localhost:4321/api/pinarchive/pins?limit=500');
+      const res = await pinsHandler({
+        request: req,
+        locals: { user: mockUser, supabase: {}, activeWorkspaceId: mockWsId },
+      } as any);
+
+      expect(res.status).toBe(200);
+      expect(limitMock).toHaveBeenCalledWith(200);
+    });
+
     it('filters pins by stage and returns updated count when ?stage=GROWING is passed', async () => {
       const mockPins = [
         {
