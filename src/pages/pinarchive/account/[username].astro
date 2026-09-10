@@ -223,6 +223,43 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
         </div>
       </div>
 
+      <!-- Growth Timeframe Slicer Pills (24h / 3d / 7d / All-Time) -->
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar" id="account-timeframe-controls">
+          <span class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider shrink-0 flex items-center gap-1">
+            <span>⚡ Growth Pace:</span>
+          </span>
+          <button
+            type="button"
+            data-timeframe="24h"
+            class="timeframe-pill px-3 py-1.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground shadow-2xs transition-all cursor-pointer shrink-0"
+          >
+            🔥 Last 24 Hours
+          </button>
+          <button
+            type="button"
+            data-timeframe="3d"
+            class="timeframe-pill px-3 py-1.5 rounded-xl text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+          >
+            📈 Last 3 Days
+          </button>
+          <button
+            type="button"
+            data-timeframe="7d"
+            class="timeframe-pill px-3 py-1.5 rounded-xl text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+          >
+            🗓️ Last 7 Days
+          </button>
+          <button
+            type="button"
+            data-timeframe="all"
+            class="timeframe-pill px-3 py-1.5 rounded-xl text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+          >
+            ⭐ All-Time Total
+          </button>
+        </div>
+      </div>
+
       <!-- Filter Controls Bar -->
       <div class="rounded-xl border border-border bg-card p-4 shadow-sm flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <!-- Search -->
@@ -287,7 +324,9 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
               <option value="repins">Total Repins</option>
               <option value="velocity">Velocity (Saves/Day)</option>
               <option value="share_count">Total Shares</option>
-              <option value="delta_saves">Δ Saves Growth</option>
+              <option value="delta_saves">Δ 24h Growth</option>
+              <option value="delta_3d">Δ 3d Growth</option>
+              <option value="delta_7d">Δ 7d Growth</option>
               <option value="newest">Newest on Pinterest</option>
             </select>
           </div>
@@ -493,6 +532,7 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
   let username = '';
   let currentSort = 'saves';
   let headerSort: { sort: string; asc: boolean } | null = null;
+  let activePace: '24h' | '3d' | '7d' | 'all' = '24h';
   let currentLimit = 50;
   let currentPage = 1;
   let currentSearch = '';
@@ -560,13 +600,15 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
     }
   }
 
-  function renderDeltaBadge(delta?: number | null, metric = 'saves'): string {
+  function renderDeltaBadge(delta?: number | null, metric = 'saves', pace = activePace): string {
+    if (pace === 'all') return '';
     const d = Number(delta) || 0;
+    const windowLabel = pace === '3d' ? '3 days' : pace === '7d' ? '7 days' : '24h';
     if (d > 0) {
-      return `<span class="inline-flex items-center text-[10px] font-bold text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded-md" title="Gained ${d} ${metric} since last snapshot">+${fmtNumber(d)}</span>`;
+      return `<span class="inline-flex items-center text-[10px] font-bold text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded-md" title="Gained ${d} ${metric} in last ${windowLabel}">+${fmtNumber(d)}</span>`;
     }
     if (d < 0) {
-      return `<span class="inline-flex items-center text-[10px] font-bold text-rose-500 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.2 rounded-md" title="Decreased by ${Math.abs(d)} ${metric} since last snapshot">${fmtNumber(d)}</span>`;
+      return `<span class="inline-flex items-center text-[10px] font-bold text-rose-500 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.2 rounded-md" title="Decreased by ${Math.abs(d)} ${metric} in last ${windowLabel}">${fmtNumber(d)}</span>`;
     }
     return '';
   }
@@ -597,7 +639,9 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
   }
 
   function renderSinglePinCard(p: any): string {
-    const isChanged = Number(p.delta_saves || 0) !== 0 || Number(p.delta_repins || 0) !== 0;
+    const curDeltaSaves = activePace === '3d' ? Number(p.delta_saves_3d || 0) : activePace === '7d' ? Number(p.delta_saves_7d || 0) : activePace === 'all' ? 0 : Number(p.delta_saves || 0);
+    const curDeltaRepins = activePace === '3d' ? Number(p.delta_repins_3d || 0) : activePace === '7d' ? Number(p.delta_repins_7d || 0) : activePace === 'all' ? 0 : Number(p.delta_repins || 0);
+    const isChanged = activePace === 'all' ? (Number(p.saves || 0) > 0) : (curDeltaSaves !== 0 || curDeltaRepins !== 0);
     const saves = Number(p.saves || 0);
     const repins = Number(p.repins || 0);
     const velocity = Number(p.velocity || 0);
@@ -609,8 +653,8 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
     const imageUrl = p.image_url || '';
     const pinId = p.id || '';
     const createdDate = fmtDate(p.created_at_pinterest);
-    const deltaBadge = renderDeltaBadge(p.delta_saves, 'saves');
-    const deltaRepinsBadge = renderDeltaBadge(p.delta_repins, 'repins');
+    const deltaBadge = renderDeltaBadge(curDeltaSaves, 'saves');
+    const deltaRepinsBadge = renderDeltaBadge(curDeltaRepins, 'repins');
 
     const tagsHtml = annotations.slice(0, 4).map((a: any) => {
       const name = typeof a === 'string' ? a : a?.name || '';
@@ -752,7 +796,9 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
   }
 
   function renderSinglePinTableRow(p: any): string {
-    const isChanged = Number(p.delta_saves || 0) !== 0 || Number(p.delta_repins || 0) !== 0;
+    const curDeltaSaves = activePace === '3d' ? Number(p.delta_saves_3d || 0) : activePace === '7d' ? Number(p.delta_saves_7d || 0) : activePace === 'all' ? 0 : Number(p.delta_saves || 0);
+    const curDeltaRepins = activePace === '3d' ? Number(p.delta_repins_3d || 0) : activePace === '7d' ? Number(p.delta_repins_7d || 0) : activePace === 'all' ? 0 : Number(p.delta_repins || 0);
+    const isChanged = activePace === 'all' ? (Number(p.saves || 0) > 0) : (curDeltaSaves !== 0 || curDeltaRepins !== 0);
     const saves = Number(p.saves || 0);
     const repins = Number(p.repins || 0);
     const comments = Number(p.comments || 0);
@@ -763,8 +809,8 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
     const imageUrl = p.image_url || '';
     const pinId = p.id || '';
     const createdDate = fmtDate(p.created_at_pinterest);
-    const deltaBadge = renderDeltaBadge(p.delta_saves, 'saves');
-    const deltaRepinsBadge = renderDeltaBadge(p.delta_repins, 'repins');
+    const deltaBadge = renderDeltaBadge(curDeltaSaves, 'saves');
+    const deltaRepinsBadge = renderDeltaBadge(curDeltaRepins, 'repins');
 
     const detailsUrl = `/pinarchive/details?id=${encodeURIComponent(pinId)}&from_account=${encodeURIComponent(username)}`;
 
@@ -1033,7 +1079,17 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
 
       let pins: any[] = json.pins || [];
       if (changedOnly) {
-        pins = pins.filter((p) => Number(p.delta_saves || 0) !== 0 || Number(p.delta_repins || 0) !== 0);
+        pins = pins.filter((p) => {
+          if (activePace === '3d') {
+            return Number(p.delta_saves_3d || 0) !== 0 || Number(p.delta_repins_3d || 0) !== 0;
+          } else if (activePace === '7d') {
+            return Number(p.delta_saves_7d || 0) !== 0 || Number(p.delta_repins_7d || 0) !== 0;
+          } else if (activePace === 'all') {
+            return Number(p.saves || 0) > 0;
+          } else {
+            return Number(p.delta_saves || 0) !== 0 || Number(p.delta_repins || 0) !== 0;
+          }
+        });
       }
       const total = changedOnly ? pins.length : Number(json.total || 0);
       totalLoadedPinsCount = total;
@@ -1467,6 +1523,17 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
     });
   }
 
+  function updatePaceButtonsUI() {
+    document.querySelectorAll<HTMLButtonElement>('#account-timeframe-controls [data-timeframe]').forEach((btn) => {
+      const tf = btn.getAttribute('data-timeframe');
+      if (tf === activePace) {
+        btn.className = 'timeframe-pill px-3 py-1.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground shadow-2xs transition-all cursor-pointer shrink-0';
+      } else {
+        btn.className = 'timeframe-pill px-3 py-1.5 rounded-xl text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0';
+      }
+    });
+  }
+
   function setupHeaderSortButtons() {
     document.querySelectorAll<HTMLButtonElement>('[data-header-sort]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -1513,6 +1580,32 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
         loadAccountPins();
       });
     }
+
+    // Growth Pace Timeframe Slicer Event Listeners (24h / 3d / 7d / all)
+    document.querySelectorAll<HTMLButtonElement>('#account-timeframe-controls [data-timeframe]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tf = (btn.getAttribute('data-timeframe') || '24h') as '24h' | '3d' | '7d' | 'all';
+        if (tf === activePace) return;
+        activePace = tf;
+        updatePaceButtonsUI();
+
+        // Strict Requirement: Reset headerSort so sort does not stick to previously clicked column
+        headerSort = null;
+        updateHeaderSortIcons();
+
+        // Auto align sort
+        if (activePace === '24h') currentSort = 'delta_saves';
+        else if (activePace === '3d') currentSort = 'delta_3d';
+        else if (activePace === '7d') currentSort = 'delta_7d';
+        else currentSort = 'saves';
+
+        const sortSelect = document.getElementById('account-pins-sort') as HTMLSelectElement | null;
+        if (sortSelect) sortSelect.value = currentSort;
+
+        currentPage = 1;
+        loadAccountPins();
+      });
+    });
 
     // Setup toggles and GAS controls
     setupIngestToggle();
