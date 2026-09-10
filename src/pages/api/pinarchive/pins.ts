@@ -199,40 +199,46 @@ export const GET: APIRoute = async ({ request, locals }) => {
   }
 
   try {
-    // 1. Load pa_workspace_settings for persisted filters
+    // 1 & 2. Load pa_workspace_settings and pa_accounts concurrently via Promise.allSettled
     let minSaves = 0;
     let minRepins = 0;
     let risA = 14;
     let risS = 34;
+    let accounts: any[] = [];
+    const accountMap = new Map<string, string>();
 
     try {
-      const settingsTable = db.from('pa_workspace_settings');
-      if (settingsTable && typeof settingsTable.select === 'function') {
-        const { data: wsSettings } = await settingsTable
-          .select('pin_filter_min_saves, pin_filter_min_repins, pin_filter_rising_age_days, pin_filter_rising_saves')
-          .eq('workspace_id', ws)
-          .maybeSingle();
+      const settingsTable = typeof db.from === 'function' ? db.from('pa_workspace_settings') : null;
+      const settingsPromise = settingsTable && typeof settingsTable.select === 'function'
+        ? settingsTable
+            .select('pin_filter_min_saves, pin_filter_min_repins, pin_filter_rising_age_days, pin_filter_rising_saves')
+            .eq('workspace_id', ws)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null });
 
+      const accTable = typeof db.from === 'function' ? db.from('pa_accounts') : null;
+      const accountsPromise = accTable && typeof accTable.select === 'function'
+        ? accTable
+            .select('id, username, status, follower_count, pins_count')
+            .eq('workspace_id', ws)
+            .order('username', { ascending: true })
+        : Promise.resolve({ data: [], error: null });
+
+      const [settingsResSettled, accountsResSettled] = await Promise.allSettled([
+        settingsPromise,
+        accountsPromise,
+      ]);
+
+      if (settingsResSettled.status === 'fulfilled' && settingsResSettled.value) {
+        const wsSettings = settingsResSettled.value.data;
         minSaves = Number(wsSettings?.pin_filter_min_saves || 0);
         minRepins = Number(wsSettings?.pin_filter_min_repins || 0);
         risA = Number(wsSettings?.pin_filter_rising_age_days ?? 14);
         risS = Number(wsSettings?.pin_filter_rising_saves ?? 34);
       }
-    } catch {
-      // Non-blocking fallback
-    }
 
-    // 2. Load accounts list for multi-account workspace mapping
-    let accounts: any[] = [];
-    const accountMap = new Map<string, string>();
-    try {
-      const accTable = db.from('pa_accounts');
-      if (accTable && typeof accTable.select === 'function') {
-        const { data: accountsData } = await accTable
-          .select('id, username, status, follower_count, pins_count')
-          .eq('workspace_id', ws)
-          .order('username', { ascending: true });
-
+      if (accountsResSettled.status === 'fulfilled' && accountsResSettled.value) {
+        const accountsData = accountsResSettled.value.data;
         accounts = Array.isArray(accountsData) ? accountsData : [];
         accounts.forEach((acc) => {
           accountMap.set(acc.id, acc.username);
