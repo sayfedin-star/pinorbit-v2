@@ -52,26 +52,39 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const accountId = rawAccountId && UUID_REGEX.test(rawAccountId) ? rawAccountId : null;
   const board = searchParams.get('board')?.trim() || null;
 
+  const rawLimit = parseInt(searchParams.get('limit') || '200', 10);
+  const limit = Math.min(Math.max(isNaN(rawLimit) ? 200 : rawLimit, 1), 200);
+  const rawOffset = parseInt(searchParams.get('offset') || '0', 10);
+  const offset = Math.max(isNaN(rawOffset) ? 0 : rawOffset, 0);
+
   try {
-    // Query honest, un-capped topic member pins via SQL JSON containment RPC
+    // Query honest, paginated topic member pins via SQL JSON containment RPC
     let namePins: any[] = [];
     const rpcRes = await db.rpc('pa_topic_pins', {
       p_workspace_id: ws,
       p_name: name,
       p_account_id: accountId,
       p_board: board,
+      p_limit: limit,
+      p_offset: offset,
     });
 
     if (!rpcRes.error && Array.isArray(rpcRes.data)) {
       namePins = rpcRes.data;
     } else {
       // Fallback: direct contains query
-      const { data: candidates, error: fallbackErr } = await db
+      let fallbackQuery = db
         .from('pa_pins')
         .select('id, pin_id, title, image_url, link, saves, repins, comments, share_count, velocity, annotations, seo_category, canonical_pin_id, archived_at, board_name, board_id, account_id, is_video, created_at_pinterest, notes')
         .eq('workspace_id', ws)
         .contains('annotations', JSON.stringify([{ name }]))
         .order('saves', { ascending: false });
+
+      if (typeof (fallbackQuery as any)?.range === 'function') {
+        fallbackQuery = fallbackQuery.range(offset, offset + limit - 1);
+      }
+
+      const { data: candidates, error: fallbackErr } = await fallbackQuery;
 
       if (fallbackErr) {
         return json({ success: false, error: fallbackErr.message }, 500);

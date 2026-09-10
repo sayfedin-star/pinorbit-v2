@@ -47,7 +47,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const sortCol = rawSort === 'velocity' ? 'velocity' : 'saves';
 
   const rawLimit = parseInt(searchParams.get('limit') || '50', 10);
-  const limit = Math.min(Math.max(isNaN(rawLimit) ? 50 : rawLimit, 1), 500);
+  const limit = Math.min(Math.max(isNaN(rawLimit) ? 50 : rawLimit, 1), 200);
 
   const q = searchParams.get('q')?.trim();
   const board = searchParams.get('board')?.trim();
@@ -175,6 +175,10 @@ export const GET: APIRoute = async ({ request, locals }) => {
           first_seen_at: p.first_seen_at,
           delta_saves: deltaSaves,
           delta_repins: Number(p.delta_repins || 0),
+          delta_saves_3d: Number(p.delta_saves_3d || 0),
+          delta_repins_3d: Number(p.delta_repins_3d || 0),
+          delta_saves_7d: Number(p.delta_saves_7d || 0),
+          delta_repins_7d: Number(p.delta_repins_7d || 0),
           delta_shares: Number(p.delta_shares || 0),
           delta_reactions: Number(p.delta_reactions || 0),
           last_snapshot_at: p.last_snapshot_at,
@@ -199,40 +203,46 @@ export const GET: APIRoute = async ({ request, locals }) => {
   }
 
   try {
-    // 1. Load pa_workspace_settings for persisted filters
+    // 1 & 2. Load pa_workspace_settings and pa_accounts concurrently via Promise.allSettled
     let minSaves = 0;
     let minRepins = 0;
     let risA = 14;
     let risS = 34;
+    let accounts: any[] = [];
+    const accountMap = new Map<string, string>();
 
     try {
-      const settingsTable = db.from('pa_workspace_settings');
-      if (settingsTable && typeof settingsTable.select === 'function') {
-        const { data: wsSettings } = await settingsTable
-          .select('pin_filter_min_saves, pin_filter_min_repins, pin_filter_rising_age_days, pin_filter_rising_saves')
-          .eq('workspace_id', ws)
-          .maybeSingle();
+      const settingsTable = typeof db.from === 'function' ? db.from('pa_workspace_settings') : null;
+      const settingsPromise = settingsTable && typeof settingsTable.select === 'function'
+        ? settingsTable
+            .select('pin_filter_min_saves, pin_filter_min_repins, pin_filter_rising_age_days, pin_filter_rising_saves')
+            .eq('workspace_id', ws)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null });
 
+      const accTable = typeof db.from === 'function' ? db.from('pa_accounts') : null;
+      const accountsPromise = accTable && typeof accTable.select === 'function'
+        ? accTable
+            .select('id, username, status, follower_count, pins_count')
+            .eq('workspace_id', ws)
+            .order('username', { ascending: true })
+        : Promise.resolve({ data: [], error: null });
+
+      const [settingsResSettled, accountsResSettled] = await Promise.allSettled([
+        settingsPromise,
+        accountsPromise,
+      ]);
+
+      if (settingsResSettled.status === 'fulfilled' && settingsResSettled.value) {
+        const wsSettings = settingsResSettled.value.data;
         minSaves = Number(wsSettings?.pin_filter_min_saves || 0);
         minRepins = Number(wsSettings?.pin_filter_min_repins || 0);
         risA = Number(wsSettings?.pin_filter_rising_age_days ?? 14);
         risS = Number(wsSettings?.pin_filter_rising_saves ?? 34);
       }
-    } catch {
-      // Non-blocking fallback
-    }
 
-    // 2. Load accounts list for multi-account workspace mapping
-    let accounts: any[] = [];
-    const accountMap = new Map<string, string>();
-    try {
-      const accTable = db.from('pa_accounts');
-      if (accTable && typeof accTable.select === 'function') {
-        const { data: accountsData } = await accTable
-          .select('id, username, status, follower_count, pins_count')
-          .eq('workspace_id', ws)
-          .order('username', { ascending: true });
-
+      if (accountsResSettled.status === 'fulfilled' && accountsResSettled.value) {
+        const accountsData = accountsResSettled.value.data;
         accounts = Array.isArray(accountsData) ? accountsData : [];
         accounts.forEach((acc) => {
           accountMap.set(acc.id, acc.username);
@@ -244,7 +254,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
 
     let query = db
       .from('pa_pins')
-      .select('id, pin_id, account_id, title, image_url, link, saves, repins, comments, share_count, velocity, annotations, seo_category, canonical_pin_id, archived_at, board_name, board_id, dominant_color, node_id, is_video, created_at_pinterest, notes, notes_updated_at')
+      .select('id, pin_id, account_id, title, image_url, link, saves, repins, comments, share_count, velocity, annotations, seo_category, canonical_pin_id, archived_at, board_name, is_video, created_at_pinterest')
       .eq('workspace_id', ws);
 
     if (accountId) {
@@ -287,21 +297,34 @@ export const GET: APIRoute = async ({ request, locals }) => {
       const CHUNK_SIZE = 100;
 
       try {
-        const metricsTable = db.from('pa_pin_metrics');
-        if (metricsTable && typeof metricsTable.select === 'function') {
+        const getMetricsTable = () => (typeof db.from === 'function' ? db.from('pa_pin_metrics') : null);
+        const testTable = getMetricsTable();
+        if (testTable && typeof testTable.select === 'function') {
+          const chunks: string[][] = [];
           for (let i = 0; i < pinIds.length; i += CHUNK_SIZE) {
-            const chunk = pinIds.slice(i, i + CHUNK_SIZE);
-            const { data: metricsData } = await metricsTable
+            chunks.push(pinIds.slice(i, i + CHUNK_SIZE));
+          }
+
+          const chunkPromises = chunks.map((chunk) => {
+            const table = getMetricsTable() || testTable;
+            const query = table
               .select('pin_ref, recorded_at, saves, repins, comments, shares, reactions_total')
               .in('pin_ref', chunk)
-              .order('recorded_at', { ascending: false })
-              .limit(chunk.length * 20);
+              .order('recorded_at', { ascending: false });
+            return typeof query?.limit === 'function' ? query.limit(chunk.length * 20) : query;
+          });
 
-            if (Array.isArray(metricsData)) {
-              for (const m of metricsData) {
-                const list = metricsMap.get(m.pin_ref) || [];
-                list.push(m);
-                metricsMap.set(m.pin_ref, list);
+          const chunkResults = await Promise.allSettled(chunkPromises);
+
+          for (const settled of chunkResults) {
+            if (settled.status === 'fulfilled' && settled.value) {
+              const metricsData = settled.value.data;
+              if (Array.isArray(metricsData)) {
+                for (const m of metricsData) {
+                  const list = metricsMap.get(m.pin_ref) || [];
+                  list.push(m);
+                  metricsMap.set(m.pin_ref, list);
+                }
               }
             }
           }
