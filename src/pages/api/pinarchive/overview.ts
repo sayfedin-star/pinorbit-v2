@@ -58,33 +58,32 @@ export const GET: APIRoute = async ({ request, locals }) => {
       ? settingsTable.select('cron_expression, schedule_status, fastcron_job_id').eq('workspace_id', ws).maybeSingle()
       : Promise.resolve({ data: null, error: null });
 
-    const pinsTable = typeof db.from === 'function' ? db.from('pa_pins') : null;
-    const countPromise = pinsTable && typeof pinsTable.select === 'function'
-      ? pinsTable.select('*', { count: 'exact', head: true }).eq('workspace_id', ws)
-      : Promise.resolve({ count: 0, error: null });
+    // Task 4: Accelerated Summary table & fast sums RPC
+    const statsTable = typeof db.from === 'function' ? db.from('pa_account_stats') : null;
+    const statsPromise = statsTable && typeof statsTable.select === 'function'
+      ? statsTable.select('account_id, pins_count, archived_count, sum_saves, sum_shares').eq('workspace_id', ws)
+      : Promise.resolve({ data: null, error: { message: 'stats table unavailable' } });
+
+    const fastSumsPromise = typeof db.rpc === 'function'
+      ? db.rpc('pa_workspace_sums_fast', { p_workspace_id: ws })
+      : Promise.resolve({ data: null, error: { message: 'fast sums rpc unavailable' } });
 
     // Tier 2: Execute all independent queries concurrently via Promise.allSettled
     const [
       accResSettled,
-      countRpcSettled,
       recentRunsSettled,
       wsSettingsSettled,
-      totalPinsSettled,
-      sumsRpcSettled
+      statsResSettled,
+      fastSumsSettled
     ] = await Promise.allSettled([
       db.from('pa_accounts')
         .select('id, username, status, pins_count, follower_count, last_run_at, sheet_id, next_run_at, ingest_enabled, interval_days, backfill_status, backfill_cursor, last_result, oldest_pin_at')
         .eq('workspace_id', ws)
         .limit(100),
-      typeof db.rpc === 'function'
-        ? db.rpc('pa_account_pin_counts', { p_workspace_id: ws })
-        : Promise.resolve({ data: [], error: null }),
       runsPromise,
       settingsPromise,
-      countPromise,
-      typeof db.rpc === 'function'
-        ? db.rpc('pa_workspace_sums', { p_workspace_id: ws })
-        : Promise.resolve({ data: [], error: null })
+      statsPromise,
+      fastSumsPromise
     ]);
 
     // 1. Process Accounts
@@ -94,15 +93,84 @@ export const GET: APIRoute = async ({ request, locals }) => {
     }
     let accounts = (accRes.data || []).map((a: any) => ({ ...a }));
 
-    // 2. Fetch live DB pin count per account (pins total + archived qualifying)
+    // 2. Fetch live DB pin count and KPI sums (Fast Path with Defensive Fallback)
     const countMap = new Map<string, number>();
     const archivedMap = new Map<string, number>();
-    const countRpc = countRpcSettled.status === 'fulfilled' ? countRpcSettled.value : null;
-    if (countRpc && !countRpc.error && Array.isArray(countRpc.data)) {
-      for (const row of countRpc.data) {
+    let totalPins = 0;
+    let sumSaves = 0;
+    let sumShares = 0;
+
+    const statsRes = statsResSettled.status === 'fulfilled' ? statsResSettled.value : null;
+    const fastSumsRes = fastSumsSettled.status === 'fulfilled' ? fastSumsSettled.value : null;
+
+    const isStatsValid = statsRes && !statsRes.error && Array.isArray(statsRes.data);
+    const isFastSumsValid = fastSumsRes && !fastSumsRes.error && Array.isArray(fastSumsRes.data) && fastSumsRes.data.length > 0;
+
+    if (isStatsValid && isFastSumsValid) {
+      for (const row of statsRes.data) {
         if (row.account_id) {
-          countMap.set(row.account_id, Number(row.pins || 0));
-          archivedMap.set(row.account_id, Number(row.archived ?? row.pins ?? 0));
+          countMap.set(row.account_id, Number(row.pins_count || 0));
+          archivedMap.set(row.account_id, Number(row.archived_count ?? row.pins_count ?? 0));
+        }
+      }
+      const fastSums = fastSumsRes.data[0];
+      sumSaves = Number(fastSums.sum_saves || 0);
+      sumShares = Number(fastSums.sum_shares || 0);
+      totalPins = Number(fastSums.total_pins || 0);
+    } else {
+      // Defensive fallback: run legacy queries if summary table or fast RPC is unavailable/errored
+      const pinsTable = typeof db.from === 'function' ? db.from('pa_pins') : null;
+      const countPromise = pinsTable && typeof pinsTable.select === 'function'
+        ? pinsTable.select('*', { count: 'exact', head: true }).eq('workspace_id', ws)
+        : Promise.resolve({ count: 0, error: null });
+
+      const [countRpcSettled, totalPinsSettled, sumsRpcSettled] = await Promise.allSettled([
+        typeof db.rpc === 'function'
+          ? db.rpc('pa_account_pin_counts', { p_workspace_id: ws })
+          : Promise.resolve({ data: [], error: null }),
+        countPromise,
+        typeof db.rpc === 'function'
+          ? db.rpc('pa_workspace_sums', { p_workspace_id: ws })
+          : Promise.resolve({ data: [], error: null })
+      ]);
+
+      const countRpc = countRpcSettled.status === 'fulfilled' ? countRpcSettled.value : null;
+      if (countRpc && !countRpc.error && Array.isArray(countRpc.data)) {
+        for (const row of countRpc.data) {
+          if (row.account_id) {
+            countMap.set(row.account_id, Number(row.pins || 0));
+            archivedMap.set(row.account_id, Number(row.archived ?? row.pins ?? 0));
+          }
+        }
+      }
+
+      const totalPinsRes = totalPinsSettled.status === 'fulfilled' ? totalPinsSettled.value : null;
+      totalPins = (totalPinsRes && !totalPinsRes.error && typeof totalPinsRes.count === 'number')
+        ? totalPinsRes.count
+        : 0;
+
+      const rpcRes = sumsRpcSettled.status === 'fulfilled' ? sumsRpcSettled.value : null;
+      if (rpcRes && !rpcRes.error && Array.isArray(rpcRes.data) && rpcRes.data.length > 0) {
+        sumSaves = Number(rpcRes.data[0].sum_saves || 0);
+        sumShares = Number(rpcRes.data[0].sum_shares || 0);
+      } else {
+        try {
+          if (pinsTable && typeof pinsTable.select === 'function') {
+            const query = pinsTable.select('saves, share_count').eq('workspace_id', ws);
+            const ordered = typeof query?.order === 'function' ? query.order('pin_id', { ascending: true }) : query;
+            const paged = typeof ordered?.range === 'function'
+              ? ordered.range(0, 999)
+              : typeof ordered?.limit === 'function'
+              ? ordered.limit(1000)
+              : ordered;
+            const { data: fallbackPins } = await paged;
+            for (const p of fallbackPins || []) {
+              sumSaves += Number(p.saves || 0);
+              sumShares += Number(p.share_count || 0);
+            }
+          }
+        } catch (sumErr) {
+          console.warn('[PinArchive Overview] Sums query fallback warning:', sumErr);
         }
       }
     }
@@ -242,39 +310,6 @@ export const GET: APIRoute = async ({ request, locals }) => {
         oldest_pin_at: combinedAges[a.username] ?? null,
       };
     });
-
-    // 5. Total pins count from exact count HEAD request
-    const totalPinsRes = totalPinsSettled.status === 'fulfilled' ? totalPinsSettled.value : null;
-    const totalPins = (totalPinsRes && !totalPinsRes.error && typeof totalPinsRes.count === 'number')
-      ? totalPinsRes.count
-      : 0;
-
-    // 6. Sums via SQL RPC; bounded single-page fallback to protect latency (no un-capped while(true))
-    let sumSaves = 0, sumShares = 0;
-    const rpcRes = sumsRpcSettled.status === 'fulfilled' ? sumsRpcSettled.value : null;
-    if (rpcRes && !rpcRes.error && Array.isArray(rpcRes.data) && rpcRes.data.length > 0) {
-      sumSaves = Number(rpcRes.data[0].sum_saves || 0);
-      sumShares = Number(rpcRes.data[0].sum_shares || 0);
-    } else {
-      try {
-        if (pinsTable && typeof pinsTable.select === 'function') {
-          const query = pinsTable.select('saves, share_count').eq('workspace_id', ws);
-          const ordered = typeof query?.order === 'function' ? query.order('pin_id', { ascending: true }) : query;
-          const paged = typeof ordered?.range === 'function'
-            ? ordered.range(0, 999)
-            : typeof ordered?.limit === 'function'
-            ? ordered.limit(1000)
-            : ordered;
-          const { data: fallbackPins } = await paged;
-          for (const p of fallbackPins || []) {
-            sumSaves += Number(p.saves || 0);
-            sumShares += Number(p.share_count || 0);
-          }
-        }
-      } catch (sumErr) {
-        console.warn('[PinArchive Overview] Sums query fallback warning:', sumErr);
-      }
-    }
 
     return json({
       success: true,
