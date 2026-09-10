@@ -296,14 +296,49 @@ import Layout from '../../layouts/Layout.astro';
           <p class="text-xs text-muted-foreground mt-0.5">Historical growth curve tracked during automated refresh cycles.</p>
         </div>
         
-        <div class="flex items-center gap-4 text-xs font-semibold">
-          <div class="flex items-center gap-1.5">
-            <span class="h-2.5 w-2.5 rounded-full bg-rose-500"></span>
-            <span class="text-foreground">Saves</span>
+        <div class="flex flex-wrap items-center gap-3 sm:gap-4">
+          <!-- Timeframe Slicer Pills -->
+          <div class="flex items-center gap-1 bg-muted/40 p-1 rounded-xl border border-border/60" id="trajectory-timeframe-controls">
+            <button
+              type="button"
+              data-timeframe="7d"
+              class="timeframe-pill px-2.5 py-1 rounded-lg text-xs font-bold bg-primary text-primary-foreground shadow-2xs transition-all cursor-pointer shrink-0"
+            >
+              7d
+            </button>
+            <button
+              type="button"
+              data-timeframe="14d"
+              class="timeframe-pill px-2.5 py-1 rounded-lg text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+            >
+              14d
+            </button>
+            <button
+              type="button"
+              data-timeframe="30d"
+              class="timeframe-pill px-2.5 py-1 rounded-lg text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+            >
+              30d
+            </button>
+            <button
+              type="button"
+              data-timeframe="all"
+              class="timeframe-pill px-2.5 py-1 rounded-lg text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0"
+            >
+              All
+            </button>
           </div>
-          <div class="flex items-center gap-1.5">
-            <span class="h-2.5 w-2.5 rounded-full bg-blue-500"></span>
-            <span class="text-foreground">Repins</span>
+
+          <!-- Legend -->
+          <div class="flex items-center gap-3 text-xs font-semibold sm:pl-1 sm:border-l sm:border-border/60">
+            <div class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full bg-rose-500"></span>
+              <span class="text-foreground">Saves</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full bg-blue-500"></span>
+              <span class="text-foreground">Repins</span>
+            </div>
           </div>
         </div>
       </div>
@@ -369,7 +404,11 @@ import Layout from '../../layouts/Layout.astro';
 </Layout>
 
 <script>
+  import { filterMetricsByDays } from '../../lib/metrics-timeframe';
+
   let currentPin: any = null;
+  let allMetrics: any[] = [];
+  let activeRange: string = '7d';
 
   function escapeHtml(str?: string | null): string {
     if (!str) return '';
@@ -655,6 +694,32 @@ import Layout from '../../layouts/Layout.astro';
         <text x="${width - padX}" y="${height - 6}" text-anchor="end" class="fill-muted-foreground text-[10px] font-medium">${fmtDate(metrics[metrics.length - 1]?.recorded_at)}</text>
       </svg>
     `;
+  }
+
+  function updateTimeframeButtonsUI() {
+    document.querySelectorAll<HTMLButtonElement>('#trajectory-timeframe-controls [data-timeframe]').forEach((btn) => {
+      const tf = btn.getAttribute('data-timeframe');
+      if (tf === activeRange) {
+        btn.className = 'timeframe-pill px-2.5 py-1 rounded-lg text-xs font-bold bg-primary text-primary-foreground shadow-2xs transition-all cursor-pointer shrink-0';
+      } else {
+        btn.className = 'timeframe-pill px-2.5 py-1 rounded-lg text-xs font-semibold bg-background border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0';
+      }
+    });
+  }
+
+  function applyRange() {
+    updateTimeframeButtonsUI();
+    const filtered = filterMetricsByDays(allMetrics, activeRange);
+    const metricsBadge = document.getElementById('metrics-count-badge');
+    if (metricsBadge) {
+      if (activeRange === 'all' || filtered.length === allMetrics.length) {
+        metricsBadge.textContent = `${filtered.length} Snapshot${filtered.length === 1 ? '' : 's'}`;
+      } else {
+        metricsBadge.textContent = `${filtered.length} of ${allMetrics.length} Snapshots (${activeRange})`;
+      }
+    }
+    renderSvgChart(filtered);
+    renderMetricsTable(filtered);
   }
 
   function setupCopyButton(id: string, textFn: () => string) {
@@ -1035,10 +1100,8 @@ import Layout from '../../layouts/Layout.astro';
       }
 
       // 3. SVG Trajectory Chart
-      const metricsBadge = document.getElementById('metrics-count-badge');
-      if (metricsBadge) metricsBadge.textContent = `${metrics.length} Snapshot${metrics.length === 1 ? '' : 's'}`;
-      renderSvgChart(metrics);
-      renderMetricsTable(metrics);
+      allMetrics = metrics;
+      applyRange();
 
       // 4. Canonical Asset Consolidation Card
       const consSection = document.getElementById('canonical-consolidation-section');
@@ -1131,6 +1194,17 @@ import Layout from '../../layouts/Layout.astro';
 
   function init() {
     loadPinDetail();
+
+    // Trajectory Timeframe Slicer Event Listeners (7d / 14d / 30d / all)
+    document.querySelectorAll<HTMLButtonElement>('#trajectory-timeframe-controls [data-timeframe]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tf = btn.getAttribute('data-timeframe');
+        if (tf && tf !== activeRange) {
+          activeRange = tf;
+          applyRange();
+        }
+      });
+    });
 
     const refreshBtn = document.getElementById('refresh-pin-btn');
     if (refreshBtn) {
