@@ -7,6 +7,7 @@
 | 11 | 20260910010000_add_pa_pins_annotations_gin_idx.sql | GIN index on pa_pins (annotations) for JSON containment | 20260910000000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
 | 12 | 20260910040000_update_pa_topic_pins_limit.sql | Add pagination, total_count, and dual-indexed @> to pa_topic_pins | 20260910010000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
 | 13 | 20260910020000_add_pg_trgm_pa_pins_title_idx.sql | Enable pg_trgm in extensions and create GIN trigram index on pa_pins (title) | 20260910040000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
+| 14 | 20260910030000_create_pa_account_stats_delta.sql | Summary table pa_account_stats with O(1) delta trigger, init trigger, and fast sums RPC | 20260910020000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
 
 
 
