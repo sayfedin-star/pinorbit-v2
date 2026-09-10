@@ -4,5 +4,7 @@
 | 8 | 20260901000000_pa_overview_sums_rpc.sql | pa_workspace_sums RPC for overview KPI sums | 20260831120000 | Apply via Supabase MCP (Project kuuugffvyokywtgmdrfk) |
 | 9 | 20260909000000_pa_accounts_oldest_pin_at.sql | oldest_pin_at on pa_accounts (monotonic, discovery-written) | 20260901000000 | Apply manually via Supabase SQL Editor (Project kuuugffvyokywtgmdrfk) |
 | 10 | 20260910000000_add_pa_pins_ws_acc_saves_idx.sql | Composite index on pa_pins (workspace_id, account_id, saves DESC) | 20260909010000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
+| 11 | 20260910010000_add_pa_pins_annotations_gin_idx.sql | GIN index on pa_pins (annotations) for JSON containment | 20260910000000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
+
 
 
