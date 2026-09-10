@@ -357,7 +357,8 @@ export async function executeRepurposeDispatch(
       await paAdmin
         .from('pa_repurpose_batches')
         .update({ status: 'completed', result_summary: emptySummary, updated_at: new Date().toISOString() })
-        .eq('id', batchUuid);
+        .eq('id', batchUuid)
+        .eq('workspace_id', workspaceId);
 
       return { success: true, summary: emptySummary };
     }
@@ -372,6 +373,7 @@ export async function executeRepurposeDispatch(
         .from('pa_repurpose_batches')
         .select('status')
         .eq('id', batchUuid)
+        .eq('workspace_id', workspaceId)
         .maybeSingle();
 
       if (!currentBatchState || currentBatchState.status !== 'in_progress') {
@@ -389,11 +391,15 @@ export async function executeRepurposeDispatch(
         });
       }
 
-      // Heartbeat pulse before inserting chunk
-      await paAdmin
-        .from('pa_repurpose_batches')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', batchUuid);
+      // Heartbeat pulse every 5 chunks with workspace & in_progress status scoping
+      if (Math.floor(i / CHUNK_SIZE) % 5 === 0) {
+        await paAdmin
+          .from('pa_repurpose_batches')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', batchUuid)
+          .eq('workspace_id', workspaceId)
+          .eq('status', 'in_progress');
+      }
 
       // Insert into P1
       const { error: p1InsertErr } = await p1Admin.from('pins').insert(p1Chunk);
@@ -401,8 +407,10 @@ export async function executeRepurposeDispatch(
         throw new Error(`P1 pin insert failed on chunk ${Math.floor(i / CHUNK_SIZE) + 1}: ${p1InsertErr.message}`);
       }
 
-      // Insert stamps into P4
-      const { error: stampInsertErr } = await paAdmin.from('pa_pin_dispatches').insert(stampChunk);
+      // Insert stamps into P4 with onConflict: ignoreDuplicates to prevent 23505 batch failure on replay
+      const { error: stampInsertErr } = await paAdmin
+        .from('pa_pin_dispatches')
+        .insert(stampChunk, { onConflict: 'batch_id,pa_pin_id,target_account_id', ignoreDuplicates: true });
       if (stampInsertErr) {
         throw new Error(`P4 stamp insert failed on chunk ${Math.floor(i / CHUNK_SIZE) + 1}: ${stampInsertErr.message}`);
       }
@@ -429,7 +437,9 @@ export async function executeRepurposeDispatch(
         result_summary: summary,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', batchUuid);
+      .eq('id', batchUuid)
+      .eq('workspace_id', workspaceId)
+      .eq('status', 'in_progress');
 
     return { success: true, summary };
   } catch (err: any) {

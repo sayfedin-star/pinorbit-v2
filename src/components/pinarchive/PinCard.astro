@@ -1,0 +1,130 @@
+---
+/**
+ * PinCard Component
+ * Reusable visual card for PinArchive winning pins & topic clusters
+ */
+export interface Props {
+  pin: {
+    id: string;
+    pin_id: string;
+    title?: string;
+    image_url?: string;
+    link?: string;
+    saves?: number;
+    repins?: number;
+    comments?: number;
+    velocity?: number;
+    delta_saves_24h?: number;
+    delta_saves_3d?: number;
+    delta_saves_7d?: number;
+    account_username?: string;
+    board_name?: string;
+    annotations?: any[];
+    created_at_pinterest?: string;
+    is_video?: boolean;
+  };
+  index?: number;
+  activeTimeframe?: string;
+  isSelected?: boolean;
+}
+
+const { pin, index = 0, activeTimeframe = '24h', isSelected = false } = Astro.props;
+
+const saves = Number(pin.saves || 0);
+const repins = Number(pin.repins || 0);
+const velocity = Number(pin.velocity || 0);
+const annotations = Array.isArray(pin.annotations) ? pin.annotations : [];
+const pinterestUrl = `https://www.pinterest.com/pin/${pin.pin_id}/`;
+const destinationUrl = pin.link || null;
+const imageUrl = pin.image_url || '';
+const pinId = pin.id || '';
+const accountDisplay = pin.account_username ? `@${pin.account_username}` : pin.board_name ? `@${pin.board_name}` : 'account';
+---
+
+<div class="group rounded-2xl border border-border bg-card overflow-hidden shadow-xs hover:shadow-md hover:border-primary/40 transition-all flex flex-col justify-between relative" data-pin-id={pinId}>
+  <!-- Top Overlays: Rank Badge + Compare Checkbox -->
+  <div class="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5">
+    <span class="inline-flex items-center justify-center rounded-lg bg-card/90 px-2 py-0.5 text-[10px] font-bold text-foreground border border-border/80 shadow-2xs font-mono">
+      #{index + 1}
+    </span>
+  </div>
+
+  <div class="absolute top-2.5 right-2.5 z-20 bg-background/90 backdrop-blur-xs rounded-xl px-2 py-1 border border-border/80 shadow-2xs flex items-center gap-1.5">
+    <input
+      type="checkbox"
+      data-pin-compare={pinId}
+      checked={isSelected}
+      class="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer"
+      id={`compare-${pinId}`}
+    />
+    <label for={`compare-${pinId}`} class="text-[10px] font-bold text-muted-foreground cursor-pointer select-none">Select</label>
+  </div>
+
+  <!-- Image Header -->
+  <div class="relative w-full aspect-2/3 bg-muted/40 overflow-hidden">
+    {imageUrl ? (
+      <img
+        src={imageUrl}
+        alt={pin.title || 'Pinterest Pin'}
+        loading="lazy"
+        decoding="async"
+        class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+      />
+    ) : (
+      <div class="w-full h-full flex items-center justify-center text-muted-foreground text-xs">No Image</div>
+    )}
+  </div>
+
+  <!-- Pin Body Details -->
+  <div class="p-3 space-y-2 flex-1 flex flex-col justify-between">
+    <div>
+      <div class="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
+        <span class="truncate font-semibold text-foreground">{accountDisplay}</span>
+        {pin.board_name && <span class="truncate max-w-[120px]">📌 {pin.board_name}</span>}
+      </div>
+      <h3 class="text-xs font-bold text-foreground line-clamp-2" title={pin.title || ''}>
+        {pin.title || `Pin ${pin.pin_id}`}
+      </h3>
+    </div>
+
+    <!-- Engagement Stats Grid -->
+    <div class="grid grid-cols-3 gap-1 pt-2 border-t border-border/60 text-center font-mono">
+      <div class="bg-muted/30 p-1.5 rounded-lg">
+        <span class="text-[9px] text-muted-foreground block font-sans">Saves</span>
+        <span class="text-xs font-extrabold text-rose-500">{saves.toLocaleString()}</span>
+      </div>
+      <div class="bg-muted/30 p-1.5 rounded-lg">
+        <span class="text-[9px] text-muted-foreground block font-sans">Repins</span>
+        <span class="text-xs font-extrabold text-foreground">{repins.toLocaleString()}</span>
+      </div>
+      <div class="bg-muted/30 p-1.5 rounded-lg">
+        <span class="text-[9px] text-muted-foreground block font-sans">Velocity</span>
+        <span class="text-xs font-extrabold text-emerald-500">{velocity.toFixed(1)}/d</span>
+      </div>
+    </div>
+
+    <!-- Actions Strip -->
+    <div class="flex items-center justify-between pt-2 border-t border-border/60 text-xs">
+      <a
+        href={pinterestUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-[11px] font-semibold text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
+      >
+        <span>View on Pinterest</span>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </a>
+      {destinationUrl && (
+        <a
+          href={destinationUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-[11px] font-semibold text-primary hover:underline truncate max-w-[120px]"
+          title={destinationUrl}
+        >
+          Target Link ↗
+        </a>
+      )}
+    </div>
+  </div>
+</div>

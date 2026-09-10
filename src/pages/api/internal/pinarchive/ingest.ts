@@ -111,7 +111,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
     // Gating 1: Load pa_workspace_settings (defaults when absent)
     const { data: wsSettings } = await pinArchive
       .from('pa_workspace_settings')
-      .select('*')
+      .select('ingest_enabled, paused_account_policy, max_batch_pins')
       .eq('workspace_id', workspaceId)
       .maybeSingle();
 
@@ -184,16 +184,16 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
     // Account ingest_enabled = false -> write NOTHING
     if (existingAccount && existingAccount.ingest_enabled === false) {
       return new Response(
-        JSON.stringify({ success: true, skipped: 'account_ingest_disabled' }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: 'account_ingest_disabled', skipped: 'account_ingest_disabled', retryable: false }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
     // Account status = 'paused' and policy = 'reject' -> write NOTHING
     if (existingAccount && ['paused', 'cookie_expired', 'error'].includes(existingAccount.status) && pausedAccountPolicy === 'reject') {
       return new Response(
-        JSON.stringify({ success: true, skipped: 'account_paused' }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: 'account_paused', skipped: 'account_paused', retryable: false }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } }
       );
     }
 

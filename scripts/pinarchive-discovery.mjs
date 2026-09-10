@@ -356,17 +356,34 @@ async function pushToIngest(workspaceId, username, pins, followerCount, accountM
     body: JSON.stringify(body),
   });
 
-  if (res.status >= 200 && res.status < 300) return { ok: true, pushed: pins.length };
   let error = '';
+  let json = null;
   try {
-    const json = await res.json();
-    error = json.error || '';
-    if (res.status === 409 && error === 'ingest_disabled') {
+    json = await res.json();
+    error = json?.error || '';
+  } catch (e) {
+    try {
+      error = await res.text();
+    } catch (_) {}
+  }
+
+  if (res.status >= 200 && res.status < 300) {
+    if (json && json.skipped) {
+      return { ok: false, skipped: json.skipped, terminal: false, error: String(json.skipped) };
+    }
+    return { ok: true, pushed: pins.length };
+  }
+
+  if (res.status === 409) {
+    if (error === 'ingest_disabled') {
       return { ok: false, code: 409, terminal: true, error: 'ingest_disabled (terminal)' };
     }
-  } catch (e) {
-    error = await res.text();
+    if (error.indexOf('account_') === 0 || (json && json.skipped)) {
+      const skippedReason = (json && json.skipped) || error;
+      return { ok: false, code: 409, terminal: false, skipped: skippedReason, error: `${skippedReason} (account skipped)` };
+    }
   }
+
   return { ok: false, code: res.status, error: error || `http ${res.status}` };
 }
 

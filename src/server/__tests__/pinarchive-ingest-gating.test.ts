@@ -168,10 +168,12 @@ describe('PinArchive Ingest Gating & Safety Guardrails Suite', () => {
     });
 
     const res = await ingestHandler({ request: req, locals: { runtime: { env: mockRuntimeEnv } } } as any);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.success).toBe(true);
+    expect(json.success).toBe(false);
+    expect(json.error).toBe('account_ingest_disabled');
     expect(json.skipped).toBe('account_ingest_disabled');
+    expect(json.retryable).toBe(false);
     expect(pinArchiveWrites).toBe(0);
   });
 
@@ -248,10 +250,12 @@ describe('PinArchive Ingest Gating & Safety Guardrails Suite', () => {
     });
 
     const res = await ingestHandler({ request: req, locals: { runtime: { env: mockRuntimeEnv } } } as any);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.success).toBe(true);
+    expect(json.success).toBe(false);
+    expect(json.error).toBe('account_paused');
     expect(json.skipped).toBe('account_paused');
+    expect(json.retryable).toBe(false);
     expect(pinArchiveWrites).toBe(0);
   });
 

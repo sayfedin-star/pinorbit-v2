@@ -1,0 +1,239 @@
+---
+/**
+ * AccountsTable Component
+ * Preserves 100% byte-for-byte identical markup, IDs, CSS classes, and data-* attributes
+ */
+---
+
+<section class="mb-8 rounded-2xl border border-border bg-card shadow-xs relative" aria-labelledby="accounts-section-heading">
+  
+  <!-- Tier 1: View Navigation & Display Controls -->
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border px-5 py-3 bg-muted/20 rounded-t-2xl">
+    
+    <!-- Left: Status Tabs -->
+    <div class="flex items-center gap-1 bg-muted/70 p-1 rounded-xl border border-border/60 overflow-x-auto">
+      <button data-status-tab="all" class="pa-status-tab-btn rounded-lg px-3 py-1.5 text-xs font-semibold bg-background text-foreground shadow-2xs transition-all whitespace-nowrap">All Accounts</button>
+      <button data-status-tab="active" class="pa-status-tab-btn rounded-lg px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-all whitespace-nowrap">🟢 Active</button>
+      <button data-status-tab="paused" class="pa-status-tab-btn rounded-lg px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-all whitespace-nowrap">⏸ Paused</button>
+    </div>
+
+    <!-- Right: Display Controls Group -->
+    <div class="flex items-center gap-2.5 flex-wrap self-start sm:self-auto">
+      <!-- Segmented Display Toolbar -->
+      <div class="flex items-center rounded-xl border border-border bg-background p-0.5 shadow-2xs">
+        <!-- Number Format Toggle -->
+        <button id="pa-num-format-toggle-btn" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-all" title="Toggle Compact / Full number format">
+          <span class="text-[10px] font-mono">#</span>
+          <span id="pa-num-format-label">Full</span>
+        </button>
+
+        <div class="h-3.5 w-px bg-border my-auto"></div>
+
+        <!-- Density Toggle -->
+        <button id="pa-density-toggle-btn" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-all" title="Toggle Table Density (Comfortable / Compact)">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          <span id="pa-density-label">Comfortable</span>
+        </button>
+
+        <div class="h-3.5 w-px bg-border my-auto"></div>
+
+        <!-- Columns Dropdown -->
+        <div class="relative" id="pa-col-visibility-wrapper">
+          <button id="pa-col-visibility-btn" type="button" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>Columns</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div id="pa-col-visibility-menu" class="hidden absolute right-0 top-full mt-1.5 z-50 w-56 rounded-2xl border border-border bg-card shadow-xl p-2.5 space-y-1"></div>
+        </div>
+      </div>
+
+      <!-- Counter Pill -->
+      <span class="inline-flex items-center rounded-xl bg-primary/10 px-3 py-1 text-xs font-bold text-primary border border-primary/20" id="accounts-strip-count">
+        0 Accounts
+      </span>
+    </div>
+  </div>
+
+  <!-- Tier 2: Unified Search & Filter Bar -->
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 border-b border-border px-5 py-2.5 bg-background">
+    <!-- Search Input -->
+    <div class="relative flex-1 max-w-md">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input
+        id="account-search-input"
+        type="text"
+        placeholder="Search creator handle, status…"
+        class="w-full h-8.5 rounded-xl border border-border bg-muted/20 py-1.5 pl-8 pr-12 text-xs text-foreground placeholder:text-muted-foreground focus:bg-background focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary transition-all shadow-2xs"
+      />
+      <button id="pa-search-clear-btn" class="hidden absolute right-6 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs p-0.5" title="Clear search">✕</button>
+      <kbd class="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-card px-1 text-[9px] font-bold text-muted-foreground pointer-events-none">/</kbd>
+    </div>
+
+    <!-- Interval Filter Dropdown -->
+    <div class="flex items-center gap-2">
+      <select id="pa-interval-filter" class="h-8.5 rounded-xl border border-border bg-muted/20 hover:bg-background px-3 py-1 text-xs font-medium text-foreground focus:border-primary focus:outline-none transition-colors shadow-2xs">
+        <option value="all">⚡ All Intervals</option>
+        <option value="1">1 Day</option>
+        <option value="3">3 Days</option>
+        <option value="7">7 Days</option>
+        <option value="14">14 Days</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Account Selection Action Bar -->
+  <div id="accounts-action-bar" class="hidden items-center justify-between gap-3 border-b border-border bg-primary/10 px-5 py-2.5 flex-wrap animate-in fade-in duration-150">
+    <div class="flex items-center gap-3">
+      <span id="accounts-selected-label" class="text-xs font-bold text-primary">0 selected</span>
+    </div>
+    
+    <div class="flex items-center gap-2 flex-wrap">
+      <button
+        id="refresh-selected-accounts-btn"
+        type="button"
+        class="h-8 inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground shadow-xs hover:bg-primary/90 transition-all cursor-pointer"
+        title="⚡ Fast Metrics Sync: Refreshes engagement metrics (saves, repins, reach) for selected accounts (~1-2 min)"
+      >
+        <svg id="refresh-selected-icon" xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
+        <span id="refresh-selected-btn-text">⚡ Fast Refresh</span>
+      </button>
+
+      <button
+        id="gas-bulk-run-btn"
+        type="button"
+        class="h-8 inline-flex items-center gap-1.5 rounded-xl border border-border bg-background hover:bg-muted px-2.5 text-xs font-semibold text-foreground shadow-2xs transition-colors cursor-pointer"
+        title="🧠 Full Discovery Pipeline: Searches Pinterest for newly published pins and archives them"
+      >
+        <span>🧠 Discover Pins</span>
+      </button>
+
+      <button
+        id="audit-sweep-selected-btn"
+        type="button"
+        class="h-8 inline-flex items-center gap-1.5 rounded-xl border border-border bg-background hover:bg-muted px-2.5 text-xs font-semibold text-foreground shadow-2xs transition-colors cursor-pointer"
+        title="🗓️ Run the deep Monthly Audit Sweep now for the selected accounts only (bypasses schedule check)"
+      >
+        <span>🗓️ Audit Sweep Now</span>
+      </button>
+
+      <button
+        id="sync-sheet-ages-selected-btn"
+        type="button"
+        class="h-8 inline-flex items-center gap-1.5 rounded-xl border border-border bg-background hover:bg-muted px-2.5 text-xs font-semibold text-foreground shadow-2xs transition-colors cursor-pointer"
+        title="📊 Sync Account Age: Reads true oldest pin timestamps directly from Google Sheets into DB"
+      >
+        <span>📊 Sync Sheet Ages</span>
+      </button>
+
+      <!-- Bulk Interval Dropdown -->
+      <div class="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2 py-0.5 shadow-2xs">
+        <span class="text-[11px] font-semibold text-muted-foreground whitespace-nowrap">⏱ Set Interval:</span>
+        <select
+          id="bulk-interval-select"
+          class="bg-transparent text-xs font-bold text-foreground py-1 px-1 focus:outline-none cursor-pointer"
+          title="Change scrape interval for selected accounts"
+        >
+          <option value="" disabled selected>Select…</option>
+          <option value="1">1 day (Daily) - Default</option>
+          <option value="2">2 days</option>
+          <option value="3">3 days</option>
+          <option value="5">5 days</option>
+          <option value="7">7 days (Weekly)</option>
+          <option value="14">14 days (Bi-weekly)</option>
+          <option value="30">30 days (Monthly)</option>
+        </select>
+      </div>
+
+      <button
+        id="send-selected-to-competitors-btn"
+        type="button"
+        class="h-8 inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-3 text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+        title="Track Selected in Competitor Intelligence"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
+        <span>🎯 Send to Competitors</span>
+      </button>
+
+      <button
+        id="gas-bulk-pause-btn"
+        type="button"
+        class="h-8 inline-flex items-center gap-1.5 rounded-xl border border-border bg-background hover:bg-muted px-2.5 text-xs font-semibold text-foreground shadow-2xs transition-colors cursor-pointer"
+        title="Pause Ingestion: Temporarily pauses automated scraping for selected accounts"
+      >
+        <span>⏸ Pause Ingest</span>
+      </button>
+
+      <button
+        id="gas-bulk-resume-btn"
+        type="button"
+        class="h-8 inline-flex items-center gap-1.5 rounded-xl border border-border bg-background hover:bg-muted px-2.5 text-xs font-semibold text-foreground shadow-2xs transition-colors cursor-pointer"
+        title="Resume Ingestion: Re-enables automated scraping for selected accounts"
+      >
+        <span>▶ Resume Ingest</span>
+      </button>
+
+      <button
+        id="delete-selected-accounts-btn"
+        type="button"
+        class="h-8 inline-flex items-center gap-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white px-3 text-xs font-bold shadow-xs transition-colors cursor-pointer"
+        title="Delete Selected Accounts: Permanently removes selected accounts and their archived records"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        <span id="delete-accounts-btn-text">Delete Selected</span>
+      </button>
+
+      <button
+        id="clear-account-selection-btn"
+        type="button"
+        class="h-8 rounded-xl px-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+      >
+        Cancel
+      </button>
+    </div>
+  </div>
+
+  <!-- Data Table Container -->
+  <div class="overflow-x-auto min-w-full">
+    <table class="w-full text-left text-xs border-collapse" id="pinarchive-accounts-table">
+      <thead class="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur-sm text-foreground font-semibold"></thead>
+      <tbody id="accounts-table-body" class="divide-y divide-border/70 bg-card">
+        <tr>
+          <td colspan="11" class="p-8 text-center text-xs text-muted-foreground animate-pulse">Loading tracked accounts…</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Accounts Pagination Controls Bar -->
+  <div id="accounts-pagination-bar" class="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-border bg-card/50">
+    <div class="text-xs text-muted-foreground">
+      Showing <span id="accounts-page-start" class="font-bold text-foreground font-mono">0</span>–<span id="accounts-page-end" class="font-bold text-foreground font-mono">0</span> of <span id="accounts-total-count" class="font-bold text-foreground font-mono">0</span> accounts
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xs font-medium text-muted-foreground whitespace-nowrap">
+        Page <span id="accounts-current-page" class="font-bold text-foreground font-mono">1</span> of <span id="accounts-total-pages" class="font-bold text-foreground font-mono">1</span>
+      </span>
+      <div class="flex items-center gap-1">
+        <button
+          id="accounts-prev-page-btn"
+          type="button"
+          disabled
+          class="p-1.5 rounded-lg border border-border bg-card text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
+          title="Previous Page"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button
+          id="accounts-next-page-btn"
+          type="button"
+          disabled
+          class="p-1.5 rounded-lg border border-border bg-card text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
+          title="Next Page"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
