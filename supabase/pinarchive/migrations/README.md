@@ -6,6 +6,7 @@
 | 10 | 20260910000000_add_pa_pins_ws_acc_saves_idx.sql | Composite index on pa_pins (workspace_id, account_id, saves DESC) | 20260909010000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
 | 11 | 20260910010000_add_pa_pins_annotations_gin_idx.sql | GIN index on pa_pins (annotations) for JSON containment | 20260910000000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
 | 12 | 20260910040000_update_pa_topic_pins_limit.sql | Add pagination, total_count, and dual-indexed @> to pa_topic_pins | 20260910010000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
+| 13 | 20260910020000_add_pg_trgm_pa_pins_title_idx.sql | Enable pg_trgm in extensions and create GIN trigram index on pa_pins (title) | 20260910040000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
 
 
 
