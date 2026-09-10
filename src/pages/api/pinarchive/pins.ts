@@ -293,21 +293,34 @@ export const GET: APIRoute = async ({ request, locals }) => {
       const CHUNK_SIZE = 100;
 
       try {
-        const metricsTable = db.from('pa_pin_metrics');
-        if (metricsTable && typeof metricsTable.select === 'function') {
+        const getMetricsTable = () => (typeof db.from === 'function' ? db.from('pa_pin_metrics') : null);
+        const testTable = getMetricsTable();
+        if (testTable && typeof testTable.select === 'function') {
+          const chunks: string[][] = [];
           for (let i = 0; i < pinIds.length; i += CHUNK_SIZE) {
-            const chunk = pinIds.slice(i, i + CHUNK_SIZE);
-            const { data: metricsData } = await metricsTable
+            chunks.push(pinIds.slice(i, i + CHUNK_SIZE));
+          }
+
+          const chunkPromises = chunks.map((chunk) => {
+            const table = getMetricsTable() || testTable;
+            const query = table
               .select('pin_ref, recorded_at, saves, repins, comments, shares, reactions_total')
               .in('pin_ref', chunk)
-              .order('recorded_at', { ascending: false })
-              .limit(chunk.length * 20);
+              .order('recorded_at', { ascending: false });
+            return typeof query?.limit === 'function' ? query.limit(chunk.length * 20) : query;
+          });
 
-            if (Array.isArray(metricsData)) {
-              for (const m of metricsData) {
-                const list = metricsMap.get(m.pin_ref) || [];
-                list.push(m);
-                metricsMap.set(m.pin_ref, list);
+          const chunkResults = await Promise.allSettled(chunkPromises);
+
+          for (const settled of chunkResults) {
+            if (settled.status === 'fulfilled' && settled.value) {
+              const metricsData = settled.value.data;
+              if (Array.isArray(metricsData)) {
+                for (const m of metricsData) {
+                  const list = metricsMap.get(m.pin_ref) || [];
+                  list.push(m);
+                  metricsMap.set(m.pin_ref, list);
+                }
               }
             }
           }
