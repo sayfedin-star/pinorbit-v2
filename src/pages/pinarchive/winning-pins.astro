@@ -1947,12 +1947,25 @@ TASK:
     modal.classList.remove('hidden');
     content.innerHTML = '<div class="py-12 text-center text-xs text-muted-foreground animate-pulse">Fetching comparison datasets...</div>';
 
-    const ids = Array.from(selectedForCompare);
+    const ids = Array.from(selectedForCompare).slice(0, 50);
     try {
-      const pinPromises = ids.map((id) => fetch(`/api/pinarchive/pin?id=${encodeURIComponent(id)}`).then((r) => r.json()));
-      const results = await Promise.all(pinPromises);
+      const urlParams = new URLSearchParams(window.location.search);
+      const wsParam = urlParams.get('workspace_id');
+      const batchUrl = `/api/pinarchive/pins?ids=${encodeURIComponent(ids.join(','))}${wsParam ? `&workspace_id=${encodeURIComponent(wsParam)}` : ''}`;
+      const res = await fetch(batchUrl, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      if (!json.success || !Array.isArray(json.pins)) {
+        throw new Error(json.error || 'Could not fetch selected pins for comparison.');
+      }
 
-      const validPins = results.filter((r) => r.success && r.pin);
+      const validPins = json.pins.map((p: any) => {
+        const local = rawPins.find((rp) => rp.id === p.id) || {};
+        return {
+          pin: { ...local, ...p },
+          metrics: Array.isArray(p.metrics) ? p.metrics : (local.metrics || []),
+        };
+      });
       if (validPins.length < 2) throw new Error('Could not fetch selected pins for comparison.');
 
       const cols = validPins.length >= 3 ? (validPins.length === 4 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 md:grid-cols-3') : 'grid-cols-1 md:grid-cols-2';

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { HttpError } from '../lib/http-error';
 import { validateSafeUrl } from '../lib/ssrf-guard';
+import { runWithConcurrencyLimit } from '../lib/concurrency';
 import { executeRepurposeDispatch, type TargetDestination, type RepurposeSummary } from './repurpose-service';
 
 export interface StagedPinItem {
@@ -170,14 +171,21 @@ export async function deleteStagedPin(
   workspaceId: string,
   stagedPinId: string
 ): Promise<void> {
-  const { error } = await paAdmin
+  const { data, error } = await paAdmin
     .from('pa_staged_pins')
     .delete()
     .eq('id', stagedPinId)
-    .eq('workspace_id', workspaceId);
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'staged')
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     throw new HttpError(500, `Failed to delete staged pin: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new HttpError(409, 'Staged pin is no longer available in the queue (already dispatched or cancelled).');
   }
 }
 
@@ -324,6 +332,7 @@ export async function dispatchStagedPin(
       if (err instanceof HttpError) {
         throw err;
       }
+      console.warn('[StagedDispatch] Pre-CAS board validation skipped:', err?.message || err);
     }
   }
 
@@ -399,7 +408,8 @@ export async function dispatchStagedPin(
         .from('pa_staged_pins')
         .update({ status: 'staged', updated_at: new Date().toISOString() })
         .eq('id', stagedPinId)
-        .eq('workspace_id', workspaceId);
+        .eq('workspace_id', workspaceId)
+        .eq('status', 'dispatched');
     } catch (revertErr) {
       console.error(`[StagedDispatch] Failed to revert staged pin status: ${stagedPinId}`, revertErr);
     }
@@ -481,32 +491,33 @@ export async function dispatchBulkStagedPins(
       if (err instanceof HttpError) {
         throw err;
       }
+      console.warn('[BulkStagedDispatch] Pre-CAS board validation skipped:', err?.message || err);
     }
   }
 
   const succeeded: string[] = [];
   const failed: Array<{ id: string; error: string }> = [];
 
-  for (const pinId of stagedPinIds) {
+  await runWithConcurrencyLimit(stagedPinIds, 5, async (pinId) => {
     try {
-      // 1. Atomic CAS
+      // 1. Atomic CAS with narrow projection
       const { data: casWon, error: casErr } = await paAdmin
         .from('pa_staged_pins')
         .update({ status: 'dispatched', updated_at: new Date().toISOString() })
         .eq('id', pinId)
         .eq('workspace_id', workspaceId)
         .eq('status', 'staged')
-        .select('*')
+        .select('id, pa_pin_id, board_name, override_link, original_link')
         .maybeSingle();
 
       if (casErr) {
         failed.push({ id: pinId, error: casErr.message });
-        continue;
+        return;
       }
 
       if (!casWon) {
         failed.push({ id: pinId, error: 'Pin is no longer staged (conflict or already dispatched).' });
-        continue;
+        return;
       }
 
       // 2. Build target destinations with smart domain swap
@@ -534,7 +545,7 @@ export async function dispatchBulkStagedPins(
         });
       }
 
-      // 3. Dispatch to P1
+      // 3. Dispatch to P1: unique crypto.randomUUID() inside each task closure
       const batchUuid = crypto.randomUUID();
       try {
         await assertPublishableBoards(p1Admin, workspaceId, targets);
@@ -550,23 +561,24 @@ export async function dispatchBulkStagedPins(
 
         succeeded.push(pinId);
       } catch (dispErr: any) {
-        // Rollback on failure
+        // Rollback on failure with conditional status guard
         console.error(`[BulkStagedDispatch] Error dispatching pin ${pinId}. Rolling back to staged:`, dispErr.message);
         await paAdmin
           .from('pa_staged_pins')
           .update({ status: 'staged', updated_at: new Date().toISOString() })
           .eq('id', pinId)
-          .eq('workspace_id', workspaceId);
+          .eq('workspace_id', workspaceId)
+          .eq('status', 'dispatched');
 
         failed.push({ id: pinId, error: dispErr.message || 'Dispatch error' });
       }
     } catch (err: any) {
       failed.push({ id: pinId, error: err.message || 'Unexpected error' });
     }
-  }
+  });
 
   return {
-    success: true,
+    success: stagedPinIds.length === 0 || failed.length < stagedPinIds.length,
     succeeded,
     failed,
     total_requested: stagedPinIds.length,

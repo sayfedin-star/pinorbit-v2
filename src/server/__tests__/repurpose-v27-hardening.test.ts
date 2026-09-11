@@ -22,8 +22,19 @@ describe('v2.7 Hardening: Chunk Pre-Flight Abort & Self-Compensation', () => {
               return Promise.resolve({ data: { status: 'cancelled' } });
             }),
             insert: vi.fn().mockResolvedValue({ error: null }),
-            update: vi.fn().mockReturnValue({
-              eq: vi.fn().mockResolvedValue({ error: null }),
+            update: vi.fn(() => {
+              const chain: any = {
+                eq: vi.fn(() => chain),
+                then: vi.fn((resolve) => resolve({ error: null })),
+              };
+              return chain;
+            }),
+            delete: vi.fn(() => {
+              const chain: any = {
+                eq: vi.fn(() => chain),
+                then: vi.fn((resolve) => resolve({ error: null })),
+              };
+              return chain;
             }),
           };
         }

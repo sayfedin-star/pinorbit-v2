@@ -43,6 +43,41 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const db = g.ok!.db;
   const ws = g.ok!.ws;
 
+  // Batch query mode: /api/pinarchive/pins?ids=a,b,c (max 50, workspace-scoped)
+  const idsParam = searchParams.get('ids');
+  if (idsParam !== null) {
+    const rawIds = idsParam
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (rawIds.length === 0) {
+      return json({ success: true, pins: [], total: 0 });
+    }
+
+    if (rawIds.length > 50) {
+      return json({ success: false, error: 'Maximum 50 pin IDs allowed per batch request.' }, 400);
+    }
+
+    for (const id of rawIds) {
+      if (!UUID_REGEX.test(id)) {
+        return json({ success: false, error: `Invalid pin identifier format: ${id}` }, 400);
+      }
+    }
+
+    const { data: pinsData, error: pinsErr } = await db
+      .from('pa_pins')
+      .select('id, pin_id, account_id, title, image_url, link, saves, repins, comments, share_count, velocity, annotations, board_name, created_at_pinterest, archived_at, is_video, canonical_pin_id')
+      .eq('workspace_id', ws)
+      .in('id', rawIds);
+
+    if (pinsErr) {
+      return json({ success: false, error: pinsErr.message }, 500);
+    }
+
+    return json({ success: true, pins: pinsData || [], total: (pinsData || []).length });
+  }
+
   const rawSort = searchParams.get('sort') || 'saves';
   const sortCol = rawSort === 'velocity' ? 'velocity' : 'saves';
 
@@ -113,7 +148,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         // FALLBACK: Standard PostgREST range query on pa_pins
         let fallbackQuery = db
           .from('pa_pins')
-          .select('*', { count: 'exact' })
+          .select('id, pin_id, account_id, title, image_url, link, saves, repins, comments, share_count, velocity, annotations, board_name, created_at_pinterest, archived_at, is_video, canonical_pin_id', { count: 'exact' })
           .eq('workspace_id', ws)
           .eq('account_id', accountId);
 
