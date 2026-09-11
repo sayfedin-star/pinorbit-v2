@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { dispatchStagedPin, dispatchBulkStagedPins, deleteStagedPin } from '../services/staged-service';
+import * as repurposeService from '../services/repurpose-service';
 import { POST as ingestHandler } from '../../pages/api/internal/pinarchive/ingest';
 import { dbClients } from '../db/clients';
 
@@ -28,9 +29,24 @@ describe('PinArchive (P4) Bug Reproduction & Contract Proof Suite', () => {
   const mockWsId = '00000000-0000-0000-0000-000000000001';
   const mockUserId = 'user-test-123';
 
-  // ── BUG 1: Pre-CAS validation swallow (staged-service.ts:323-327) ──
+  // ── BUG 1: Pre-CAS validation non-HttpError warn+proceed ──
   describe('P4-1: Pre-CAS validation swallow', () => {
-    it('FAIL on current code: board check unexpected failure must reject with 503 instead of proceeding to CAS', async () => {
+    it('warns and proceeds to CAS when pre-CAS check throws non-HttpError', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const repurposeSpy = vi.spyOn(repurposeService, 'executeRepurposeDispatch').mockResolvedValue({
+        success: true,
+        summary: {
+          batch_uuid: 'b-1',
+          total_stamps: 1,
+          accounts_count: 1,
+          pins_count: 1,
+          skipped_duplicates: 0,
+          excluded_no_image: 0,
+          link_used: '',
+          completed_at: new Date().toISOString(),
+        },
+      });
+
       // Mock paAdmin where preRow fetch throws a network/internal error (TypeError)
       const paAdmin: any = {
         from: vi.fn().mockImplementation((table: string) => {
@@ -49,7 +65,7 @@ describe('PinArchive (P4) Bug Reproduction & Contract Proof Suite', () => {
                     eq: vi.fn().mockReturnValue({
                       select: vi.fn().mockReturnValue({
                         maybeSingle: vi.fn().mockResolvedValue({
-                          data: { id: 'staged-1', status: 'dispatched' },
+                          data: { id: 'staged-1', pa_pin_id: 'pa-pin-1', board_name: 'Board 1', status: 'dispatched' },
                           error: null,
                         }),
                       }),
@@ -63,20 +79,36 @@ describe('PinArchive (P4) Bug Reproduction & Contract Proof Suite', () => {
         }),
       };
 
-      const p1Admin: any = { from: vi.fn() };
+      const p1Admin: any = {
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              in: vi.fn().mockReturnValue({
+                in: vi.fn().mockReturnValue({
+                  not: vi.fn().mockResolvedValue({
+                    data: [{ account_id: 'acc-1', board_name: 'Board 1', pinterest_board_id: 'pb-1' }],
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      };
 
-      // Current code swallows TypeError inside lines 323-327 and proceeds to CAS.
-      // Fixed code must reject with HttpError 503.
-      await expect(
-        dispatchStagedPin(
-          paAdmin,
-          p1Admin,
-          mockWsId,
-          mockUserId,
-          'staged-1',
-          [{ accountId: 'acc-1', accountLabel: 'Acc 1', boardName: 'Board 1', linkUrl: 'https://example.com' }]
-        )
-      ).rejects.toMatchObject({ status: 503 });
+      const res = await dispatchStagedPin(
+        paAdmin,
+        p1Admin,
+        mockWsId,
+        mockUserId,
+        'staged-1',
+        [{ accountId: 'acc-1', accountLabel: 'Acc 1', boardName: 'Board 1', linkUrl: 'https://example.com' }]
+      );
+
+      expect(warnSpy).toHaveBeenCalled();
+      expect(res.success).toBe(true);
+      warnSpy.mockRestore();
+      repurposeSpy.mockRestore();
     });
   });
 

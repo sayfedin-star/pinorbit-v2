@@ -1,34 +1,30 @@
 /**
  * Concurrency helper executing async operations across an array of items with a maximum concurrency limit.
- * Vendored from src/pages/api/analytics/cron/bulk.ts with zero external dependencies.
+ * Uses indexed workers to preserve exact input order and prevent unhandled promise rejections.
  */
 export async function runWithConcurrencyLimit<T, R>(
   items: T[],
   limit: number,
-  fn: (item: T) => Promise<R>
+  fn: (item: T, index: number) => Promise<R>
 ): Promise<R[]> {
-  const results: R[] = [];
-  const executing: Promise<void>[] = [];
+  if (items.length === 0) return [];
+  const concurrency = Math.max(1, Math.min(limit, items.length));
+  const results: R[] = new Array(items.length);
+  let currentIndex = 0;
+  let firstError: any = null;
 
-  for (const item of items) {
-    const p = Promise.resolve()
-      .then(() => fn(item))
-      .then((res) => {
-        results.push(res);
-      })
-      .finally(() => {
-        // Remove this promise from executing array when done
-        const idx = executing.indexOf(p);
-        if (idx !== -1) executing.splice(idx, 1);
-      });
-
-    executing.push(p);
-
-    if (executing.length >= limit) {
-      await Promise.race(executing);
+  const workers = Array.from({ length: concurrency }, async () => {
+    while (currentIndex < items.length && !firstError) {
+      const idx = currentIndex++;
+      try {
+        results[idx] = await fn(items[idx], idx);
+      } catch (err) {
+        firstError = err;
+        throw err;
+      }
     }
-  }
+  });
 
-  await Promise.all(executing);
+  await Promise.all(workers);
   return results;
 }

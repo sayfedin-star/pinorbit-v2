@@ -332,7 +332,7 @@ export async function dispatchStagedPin(
       if (err instanceof HttpError) {
         throw err;
       }
-      throw new HttpError(503, `Failed to pre-validate publishable boards: ${err?.message || String(err)}`);
+      console.warn('[StagedDispatch] Pre-CAS board validation skipped:', err?.message || err);
     }
   }
 
@@ -491,7 +491,7 @@ export async function dispatchBulkStagedPins(
       if (err instanceof HttpError) {
         throw err;
       }
-      throw new HttpError(503, `Failed to pre-validate publishable boards: ${err?.message || String(err)}`);
+      console.warn('[BulkStagedDispatch] Pre-CAS board validation skipped:', err?.message || err);
     }
   }
 

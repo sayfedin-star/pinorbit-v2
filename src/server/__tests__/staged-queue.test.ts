@@ -190,19 +190,21 @@ describe('Staged Queue Service Suite (v2.8)', () => {
 
   describe('deleteStagedPin', () => {
     it('deletes the staged pin scoped to workspace', async () => {
-      const deleteEq = vi.fn().mockResolvedValue({ error: null });
+      const deleteChain: any = {
+        eq: vi.fn(() => deleteChain),
+        select: vi.fn(() => deleteChain),
+        maybeSingle: vi.fn(async () => ({ data: { id: 'staged-1' }, error: null })),
+      };
       const mockPaAdmin = {
         from: vi.fn().mockReturnValue({
-          delete: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              eq: deleteEq,
-            }),
-          }),
+          delete: vi.fn().mockReturnValue(deleteChain),
         }),
       } as any;
 
       await deleteStagedPin(mockPaAdmin, workspaceId, 'staged-1');
-      expect(deleteEq).toHaveBeenCalled();
+      expect(deleteChain.eq).toHaveBeenCalledWith('id', 'staged-1');
+      expect(deleteChain.eq).toHaveBeenCalledWith('workspace_id', workspaceId);
+      expect(deleteChain.eq).toHaveBeenCalledWith('status', 'staged');
     });
   });
 
