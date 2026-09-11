@@ -62,16 +62,28 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
       const { data: settings } = await db
         .from('pa_workspace_settings')
-        .select('*')
+        .select('workspace_id, ingest_enabled, paused_account_policy, default_interval_days, max_batch_pins, pin_filter_min_saves, refresh_max_pins, discovery_stop_pages, discovery_max_pages, audit_sweep_enabled, daily_sheet_sync_enabled, github_schedule_enabled, updated_at')
         .eq('workspace_id', wsCtx.workspaceId)
         .maybeSingle();
 
+      if (accErr) {
+        return json(
+          {
+            success: false,
+            ok: false,
+            accounts: [],
+            settings: null,
+            error: accErr.message,
+          },
+          500
+        );
+      }
+
       return json({
         success: true,
-        ok: !accErr,
+        ok: true,
         accounts: accounts || [],
         settings: settings || null,
-        error: accErr?.message,
       });
     }
 

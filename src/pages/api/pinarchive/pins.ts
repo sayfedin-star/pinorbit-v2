@@ -527,7 +527,7 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
     if (accountId) {
       const { count } = await db
         .from('pa_pins')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('workspace_id', wsCtx.workspaceId)
         .eq('account_id', accountId);
 

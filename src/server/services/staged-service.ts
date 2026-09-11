@@ -343,7 +343,7 @@ export async function dispatchStagedPin(
     .eq('id', stagedPinId)
     .eq('workspace_id', workspaceId)
     .eq('status', 'staged')
-    .select('*')
+    .select('id, pa_pin_id, board_name, override_link, original_link')
     .maybeSingle();
 
   if (casErr) {

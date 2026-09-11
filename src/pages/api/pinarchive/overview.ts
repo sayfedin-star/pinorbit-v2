@@ -121,7 +121,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       // Defensive fallback: run legacy queries if summary table or fast RPC is unavailable/errored
       const pinsTable = typeof db.from === 'function' ? db.from('pa_pins') : null;
       const countPromise = pinsTable && typeof pinsTable.select === 'function'
-        ? pinsTable.select('*', { count: 'exact', head: true }).eq('workspace_id', ws)
+        ? pinsTable.select('id', { count: 'exact', head: true }).eq('workspace_id', ws)
         : Promise.resolve({ count: 0, error: null });
 
       const [countRpcSettled, totalPinsSettled, sumsRpcSettled] = await Promise.allSettled([

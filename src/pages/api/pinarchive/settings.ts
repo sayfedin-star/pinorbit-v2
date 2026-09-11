@@ -48,6 +48,9 @@ const ALLOWED_PATCH_KEYS = new Set([
   'github_schedule_enabled',
 ]);
 
+const SETTINGS_PROJECTION =
+  'workspace_id, ingest_enabled, paused_account_policy, max_batch_pins, pin_filter_min_saves, pin_filter_min_repins, pin_filter_rising_age_days, pin_filter_rising_saves, refresh_max_pins, refresh_min_saves, discovery_stop_pages, discovery_max_pages, audit_sweep_enabled, daily_sheet_sync_enabled, github_schedule_enabled, updated_at';
+
 export const GET: APIRoute = async ({ request, locals }) => {
   const user = locals.user;
   const schedulingClient = locals.supabase;
@@ -75,7 +78,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const db = dbClients.getPinArchive(locals.runtime?.env);
     const { data: settings, error } = await db
       .from('pa_workspace_settings')
-      .select('*')
+      .select(SETTINGS_PROJECTION)
       .eq('workspace_id', wsCtx.workspaceId)
       .maybeSingle();
 
@@ -269,7 +272,7 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
     // Fetch existing row if present
     const { data: existing } = await db
       .from('pa_workspace_settings')
-      .select('*')
+      .select(SETTINGS_PROJECTION)
       .eq('workspace_id', wsCtx.workspaceId)
       .maybeSingle();
 
@@ -337,7 +340,7 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
     const { data: saved, error: upsertErr } = await db
       .from('pa_workspace_settings')
       .upsert(payload, { onConflict: 'workspace_id' })
-      .select('*')
+      .select(SETTINGS_PROJECTION)
       .single();
 
     if (upsertErr || !saved) {

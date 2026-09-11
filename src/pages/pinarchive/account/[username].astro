@@ -3,7 +3,7 @@ export const prerender = false;
 import Layout from '../../../layouts/Layout.astro';
 import SectionHeader from '../../../components/ui/SectionHeader.astro';
 import RepurposeModal from '../../../components/pinarchive/RepurposeModal.astro';
-import { dbClients } from '../../../server/db/clients';
+import { getAccountByUsername } from '../../../server/services/pinarchive-account-service';
 
 const { username } = Astro.params;
 const USERNAME_REGEX = /^[a-zA-Z0-9_]{1,30}$/;
@@ -20,15 +20,9 @@ if (!user || !workspaceId || !UUID_REGEX.test(workspaceId)) {
   return Astro.redirect('/login?redirect=' + encodeURIComponent(Astro.url.pathname));
 }
 
-const db = dbClients.getPinArchive(Astro.locals.runtime?.env);
-const { data: account, error } = await db
-  .from('pa_accounts')
-  .select('*')
-  .eq('workspace_id', workspaceId)
-  .eq('username', username)
-  .maybeSingle();
+const account = await getAccountByUsername(workspaceId, username, Astro.locals.runtime?.env);
 
-if (!account || error) {
+if (!account) {
   return Astro.redirect('/pinarchive');
 }
 

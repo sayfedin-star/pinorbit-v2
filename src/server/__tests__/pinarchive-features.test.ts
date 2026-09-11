@@ -385,5 +385,105 @@ describe('PinArchive Features & RPCs Suite', () => {
       ]);
       expect(updateMock).toHaveBeenCalledWith({ oldest_pin_at: '2026-06-03T03:20:10.000Z' });
     });
+
+    it('returns 200 with accounts and settings when action is status', async () => {
+      mockPinArchiveClient.from.mockImplementation((table: string) => {
+        if (table === 'pa_accounts') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockResolvedValue({
+                  data: [{ id: mockAccId, username: 'foodblogger', status: 'active', pins_count: 42 }],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'pa_workspace_settings') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: { workspace_id: mockWsId, ingest_enabled: true },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        return { select: vi.fn() };
+      });
+
+      const req = new Request('http://localhost:4321/api/pinarchive/accounts-gas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: mockWsId,
+          action: 'status',
+        }),
+      });
+
+      const res = await accountsGasHandler({
+        request: req,
+        locals: { user: mockUser, supabase: {}, activeWorkspaceId: mockWsId },
+      } as any);
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+      expect(json.ok).toBe(true);
+      expect(json.accounts.length).toBe(1);
+      expect(json.settings).toEqual({ workspace_id: mockWsId, ingest_enabled: true });
+    });
+
+    it('returns 500 with success: false when accounts query fails during status action', async () => {
+      mockPinArchiveClient.from.mockImplementation((table: string) => {
+        if (table === 'pa_accounts') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockResolvedValue({
+                  data: null,
+                  error: { message: 'DB accounts query failed' },
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'pa_workspace_settings') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+              }),
+            }),
+          };
+        }
+        return { select: vi.fn() };
+      });
+
+      const req = new Request('http://localhost:4321/api/pinarchive/accounts-gas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: mockWsId,
+          action: 'status',
+        }),
+      });
+
+      const res = await accountsGasHandler({
+        request: req,
+        locals: { user: mockUser, supabase: {}, activeWorkspaceId: mockWsId },
+      } as any);
+
+      expect(res.status).toBe(500);
+      const json = await res.json();
+      expect(json.success).toBe(false);
+      expect(json.ok).toBe(false);
+      expect(json.error).toBe('DB accounts query failed');
+      expect(json.accounts).toEqual([]);
+      expect(json.settings).toBeNull();
+    });
   });
 });
