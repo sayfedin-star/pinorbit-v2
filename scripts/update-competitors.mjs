@@ -4,33 +4,7 @@
 // Jobs: per-workspace tracking in competitor_ingestion_jobs.
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
-
-const enc = new TextEncoder(); const dec = new TextDecoder();
-const b64 = b => btoa(String.fromCharCode(...(b instanceof Uint8Array ? b : new Uint8Array(b))));
-const ub64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
-
-// ── AES-GCM (v1:iv:ct, SHA-256(kek)) — same format as token-crypto.ts ──
-async function aesKey(kek, usage) {
-  const raw = await crypto.subtle.digest('SHA-256', enc.encode(kek));
-  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, [usage]);
-}
-async function decryptCookieValue(stored, kek) {
-  if (!stored || typeof stored !== 'string') return null;
-  if (!stored.startsWith('v1:')) return stored;
-  const [, ivB64, ctB64] = stored.split(':');
-  if (!ivB64 || !ctB64) return null;
-  try {
-    return dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub64(ivB64) }, await aesKey(kek, 'decrypt'), ub64(ctB64)));
-  } catch { return null; }
-}
-async function resolveKek(db) {
-  const { data } = await db.from('competitor_kek').select('kek').limit(1).maybeSingle();
-  if (data?.kek) return data.kek;
-  const hex = crypto.randomBytes(32).toString('hex');
-  await db.from('competitor_kek').upsert({ id: true, kek: hex }, { onConflict: 'id', ignoreDuplicates: true });
-  const { data: d2 } = await db.from('competitor_kek').select('kek').limit(1).maybeSingle();
-  return d2?.kek || null;
-}
+import { aesKey, decryptCookieValue, resolveKek } from './lib/vault.mjs';
 
 // ── PROVEN headers (verbatim from working old script — Chrome 151) ──
 function getHeaders(username, activeCookie) {

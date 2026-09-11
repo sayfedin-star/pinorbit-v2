@@ -6,6 +6,11 @@
  * Google Apps Script (GAS) `account_ages` action across all creator tabs in Google Sheets,
  * and writes the true historical oldest pin timestamp into `pa_accounts.oldest_pin_at`.
  *
+ * Hardened in Phase 6d:
+ * - Keyset cursor pagination (order=id.asc & id=gt.lastId & limit=1000) carrying all filters.
+ * - Strictly monotonic LEAST(oldest_pin_at, sheetAge) protection via Date.parse.
+ * - Pure library extraction importing from scripts/lib/pa-client.mjs.
+ *
  * Usage:
  *   node --use-system-ca scripts/sync-oldest-pins-from-sheet.mjs [options]
  *
@@ -23,6 +28,9 @@
  */
 
 import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { supaQuery, supaPatch, callGasAccountAges } from './lib/pa-client.mjs';
 
 const DEFAULT_SUPABASE_URL = 'https://kuuugffvyokywtgmdrfk.supabase.co';
 const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwBFmyisJ59ejbOLimfgLHAfPcGx4E_WhIiSEI56BhFSJ6HkHrM2wfoPeO-v3nJa5CA/exec';
@@ -42,71 +50,70 @@ const SUPABASE_KEY = process.env.PINARCHIVE_SUPABASE_KEY || process.env.SUPABASE
 const GAS_URL = process.env.PINARCHIVE_GAS_URL || DEFAULT_GAS_URL;
 const INGEST_SECRET = process.env.PINARCHIVE_INGEST_SECRET || process.env.PINARCHIVE_SECRET || '';
 
-async function supaQuery(table, params = '') {
-  const url = `${SUPABASE_URL}/rest/v1/${table}${params ? '?' + params : ''}`;
-  const res = await fetch(url, {
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      Accept: 'application/json',
-    },
-  });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`Supabase query ${table} failed (HTTP ${res.status}): ${txt}`);
+/**
+ * Determine monotonic oldest pin timestamp (LEAST):
+ * Updates only when candidate is strictly older than existing baseline (or baseline is null).
+ * Preserves existing baseline if candidate is newer, identical, or invalid.
+ */
+export function resolveMonotonicOldestPin(baselineIso, candidateIso) {
+  if (!candidateIso || typeof candidateIso !== 'string') {
+    return baselineIso || null;
   }
-  return res.json();
+
+  const candidateMs = Date.parse(candidateIso);
+  if (!Number.isFinite(candidateMs)) {
+    return baselineIso || null;
+  }
+
+  if (!baselineIso || typeof baselineIso !== 'string') {
+    return new Date(candidateMs).toISOString();
+  }
+
+  const baselineMs = Date.parse(baselineIso);
+  if (!Number.isFinite(baselineMs)) {
+    return new Date(candidateMs).toISOString();
+  }
+
+  // Strictly monotonic: candidate must be strictly older (earlier in time) than baseline
+  if (candidateMs < baselineMs) {
+    return new Date(candidateMs).toISOString();
+  }
+
+  return baselineIso;
 }
 
-async function supaPatch(table, matchParams, body) {
-  const url = `${SUPABASE_URL}/rest/v1/${table}?${matchParams}`;
-  const res = await fetch(url, {
-    method: 'PATCH',
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=minimal',
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`Supabase PATCH ${table} failed (HTTP ${res.status}): ${txt}`);
-  }
-}
+/**
+ * Keyset cursor pagination over pa_accounts.
+ * Carries --workspace and --username filters across every page.
+ */
+export async function fetchAllAccounts(supaQueryFn, filters = {}, pageSize = 1000) {
+  const allAccounts = [];
+  let lastId = null;
 
-async function callGasAccountAges(gasUrl, secret, workspaceId, usernames) {
-  const body = {
-    v: 1,
-    cmd_id: crypto.randomUUID(),
-    secret,
-    action: 'account_ages',
-    workspace_id: workspaceId,
-    payload: {
-      usernames,
-    },
-  };
+  while (true) {
+    let params = `select=id,workspace_id,username,oldest_pin_at,pins_count&order=id.asc&limit=${pageSize}`;
+    if (filters.workspace) {
+      params += `&workspace_id=eq.${filters.workspace}`;
+    }
+    if (filters.username) {
+      params += `&username=eq.${filters.username.toLowerCase().replace(/^@/, '')}`;
+    }
+    if (lastId) {
+      params += `&id=gt.${lastId}`;
+    }
 
-  const res = await fetch(gasUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    redirect: 'follow',
-    signal: AbortSignal.timeout(30000),
-  });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`GAS HTTP ${res.status}: ${txt}`);
+    const batch = await supaQueryFn('pa_accounts', params);
+    if (!Array.isArray(batch) || batch.length === 0) {
+      break;
+    }
+    allAccounts.push(...batch);
+    if (batch.length < pageSize) {
+      break;
+    }
+    lastId = batch[batch.length - 1].id;
   }
 
-  const data = await res.json();
-  if (!data || data.ok === false) {
-    throw new Error(`GAS error: ${data?.error || 'Unknown GAS error'}`);
-  }
-
-  return data.ages || {};
+  return allAccounts;
 }
 
 async function main() {
@@ -132,13 +139,12 @@ async function main() {
   if (flags.username) console.log(`🔍 Username Filter: ${flags.username}`);
   console.log('');
 
-  // 1. Query accounts from pa_accounts
-  let queryParams = 'select=id,workspace_id,username,oldest_pin_at,pins_count&order=workspace_id.asc,username.asc';
-  if (flags.workspace) queryParams += `&workspace_id=eq.${flags.workspace}`;
-  if (flags.username) queryParams += `&username=eq.${flags.username.toLowerCase().replace(/^@/, '')}`;
+  const queryFn = (table, params) => supaQuery(SUPABASE_URL, SUPABASE_KEY, table, params);
+  const patchFn = (table, matchParams, body) => supaPatch(SUPABASE_URL, SUPABASE_KEY, table, matchParams, body);
 
-  console.log('⏳ Fetching accounts from pa_accounts...');
-  const accounts = await supaQuery('pa_accounts', queryParams);
+  // 1. Fetch accounts from pa_accounts using keyset pagination
+  console.log('⏳ Fetching accounts from pa_accounts via keyset cursor...');
+  const accounts = await fetchAllAccounts(queryFn, flags);
   console.log(`✅ Loaded ${accounts.length} account(s).\n`);
 
   if (accounts.length === 0) {
@@ -192,14 +198,16 @@ async function main() {
           continue;
         }
 
-        const isChanged = prevAge !== sheetAge;
+        const resolvedAge = resolveMonotonicOldestPin(prevAge, sheetAge);
+        const isChanged = resolvedAge && resolvedAge !== prevAge;
+
         if (isChanged) {
-          console.log(`   @${username.padEnd(24)}: ${prevAge || 'null'} -> \x1b[32m${sheetAge}\x1b[0m`);
+          console.log(`   @${username.padEnd(24)}: ${prevAge || 'null'} -> \x1b[32m${resolvedAge}\x1b[0m`);
 
           if (!flags['dry-run']) {
             try {
-              await supaPatch('pa_accounts', `workspace_id=eq.${wsId}&id=eq.${acc.id}`, {
-                oldest_pin_at: sheetAge,
+              await patchFn('pa_accounts', `workspace_id=eq.${wsId}&id=eq.${acc.id}`, {
+                oldest_pin_at: resolvedAge,
               });
               totalUpdated++;
             } catch (err) {
@@ -210,7 +218,11 @@ async function main() {
             totalUpdated++;
           }
         } else {
-          console.log(`   @${username.padEnd(24)}: \x1b[36m${sheetAge}\x1b[0m (already in sync)`);
+          if (prevAge && sheetAge && Date.parse(sheetAge) > Date.parse(prevAge)) {
+            console.log(`   @${username.padEnd(24)}: \x1b[33m${sheetAge}\x1b[0m (preserved older baseline: ${prevAge})`);
+          } else {
+            console.log(`   @${username.padEnd(24)}: \x1b[36m${sheetAge}\x1b[0m (already in sync)`);
+          }
           totalUnchanged++;
         }
       }
@@ -222,12 +234,16 @@ async function main() {
   console.log('===========================================================');
   console.log(`  Total Accounts Evaluated: ${accounts.length}`);
   console.log(`  Updated with Sheet Age:   \x1b[32m${totalUpdated}\x1b[0m`);
-  console.log(`  Already in Sync / Null:   ${totalUnchanged}`);
+  console.log(`  Already in Sync / Kept:   ${totalUnchanged}`);
   console.log(`  Errors:                   ${totalFailed > 0 ? `\x1b[31m${totalFailed}\x1b[0m` : '0'}`);
   console.log('===========================================================\n');
 }
 
-main().catch(err => {
-  console.error('\n💥 Fatal sync error:', err);
-  process.exit(1);
-});
+export { main };
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  main().catch(err => {
+    console.error('\n💥 Fatal sync error:', err);
+    process.exit(1);
+  });
+}

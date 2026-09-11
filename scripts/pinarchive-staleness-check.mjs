@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * PinArchive Staleness Check (Tier 5 Monitoring Safety Net)
  *
@@ -6,9 +7,13 @@
  *
  * If a workspace is stale (> 26h), it emits prominent warning logs and appends
  * an alert to GitHub Actions Step Summary (if available), alerting operators.
+ * Exits with status code 1 on stale detection or fatal query errors to alert cron monitors.
  */
 
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { supaQuery } from './lib/pa-client.mjs';
 
 const PINARCHIVE_SUPABASE_URL = process.env.PINARCHIVE_SUPABASE_URL;
 const PINARCHIVE_SUPABASE_KEY = process.env.PINARCHIVE_SUPABASE_KEY;
@@ -18,20 +23,6 @@ if (!PINARCHIVE_SUPABASE_URL || !PINARCHIVE_SUPABASE_KEY) {
   process.exit(0);
 }
 
-async function supaQuery(table, params = '') {
-  const url = `${PINARCHIVE_SUPABASE_URL}/rest/v1/${table}${params ? '?' + params : ''}`;
-  const res = await fetch(url, {
-    headers: {
-      apikey: PINARCHIVE_SUPABASE_KEY,
-      Authorization: `Bearer ${PINARCHIVE_SUPABASE_KEY}`,
-      Accept: 'application/json',
-    },
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) throw new Error(`Supabase ${table}: HTTP ${res.status}`);
-  return res.json();
-}
-
 async function main() {
   console.log('🔍 PinArchive Staleness Check running (threshold: 26 hours)...');
 
@@ -39,12 +30,14 @@ async function main() {
   let accounts;
   try {
     accounts = await supaQuery(
+      PINARCHIVE_SUPABASE_URL,
+      PINARCHIVE_SUPABASE_KEY,
       'pa_accounts',
       'select=id,workspace_id,username,status,ingest_enabled,interval_days,last_run_at&ingest_enabled=neq.false&status=eq.active'
     );
   } catch (err) {
-    console.warn(`⚠️ Could not query pa_accounts: ${err.message}`);
-    process.exit(0);
+    console.error(`❌ Could not query pa_accounts: ${err.message}`);
+    process.exit(1);
   }
 
   if (!Array.isArray(accounts) || accounts.length === 0) {
@@ -137,10 +130,20 @@ async function main() {
   }
 
   console.log(`\nStaleness check complete: ${staleList.length} stale, ${freshList.length} fresh.`);
+
+  if (staleList.length > 0) {
+    console.error(`🚨 Failure: ${staleList.length} daily workspace(s) are stale (> 26h since last ingestion)!`);
+    process.exit(1);
+  }
+
   process.exit(0);
 }
 
-main().catch(err => {
-  console.error('💥 Staleness check encountered an unexpected error:', err);
-  process.exit(0); // non-destructive fallback
-});
+export { main };
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  main().catch(err => {
+    console.error('💥 Staleness check encountered an unexpected error:', err);
+    process.exit(1);
+  });
+}
