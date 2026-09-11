@@ -321,6 +321,7 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
 </Layout>
 
 <script>
+  import { renderPinCardHtml } from '../../lib/pinarchive/pin-card-render';
   function escapeHtml(str?: string | null): string {
     if (!str) return '';
     return String(str)
@@ -373,144 +374,7 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
   }
 
   function renderSinglePinCard(p: any): string {
-    const saves = Number(p.saves || 0);
-    const repins = Number(p.repins || 0);
-    const velocity = Number(p.velocity || 0);
-    const shares = Number(p.share_count || 0);
-    const annotations = Array.isArray(p.annotations) ? p.annotations : [];
-    const category = p.seo_category || p.board_name || null;
-    const pinterestUrl = `https://www.pinterest.com/pin/${p.pin_id}/`;
-    const destinationUrl = p.link ? p.link : null;
-    const imageUrl = p.image_url || '';
-    const pinId = p.id || '';
-    const createdDate = fmtDate(p.created_at_pinterest);
-
-    const tagsHtml = annotations.slice(0, 3).map((a: any) => {
-      const name = typeof a === 'string' ? a : a?.name || '';
-      if (!name) return '';
-      let targetUrl = '';
-      if (typeof a === 'object' && a?.url) {
-        targetUrl = `https://www.pinterest.com${a.url.startsWith('/') ? a.url : '/' + a.url}`;
-      } else if (typeof a === 'object' && a?.idea_id) {
-        targetUrl = `https://www.pinterest.com/ideas/${encodeURIComponent(name)}/${a.idea_id}/`;
-      } else {
-        targetUrl = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(name)}`;
-      }
-
-      return `
-        <a
-          href="${escapeHtml(targetUrl)}"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-1 text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-0.5 rounded-md font-medium truncate max-w-[120px] transition-colors"
-          title="${escapeHtml(name)} (Pinterest Idea)"
-        >
-          <span class="truncate">${escapeHtml(name)}</span>
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        </a>
-      `;
-    }).join('');
-
-    const moreTagsCount = annotations.length > 3 ? annotations.length - 3 : 0;
-
-    return `
-      <div class="group rounded-2xl border border-border bg-card overflow-hidden shadow-xs hover:shadow-md hover:border-primary/40 transition-all flex flex-col justify-between relative">
-        <div>
-          <!-- Image preview -->
-          <a href="/pinarchive/details?id=${encodeURIComponent(pinId)}" class="relative w-full h-44 bg-muted/50 overflow-hidden flex items-center justify-center block">
-            ${imageUrl ? `
-              <img
-                src="${escapeHtml(imageUrl)}"
-                alt="${escapeHtml(p.title || 'Pinterest Pin')}"
-                loading="lazy"
-                decoding="async"
-                class="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
-                onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');"
-              />
-              <div class="hidden absolute inset-0 flex items-center justify-center text-muted-foreground">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-              </div>
-            ` : `
-              <div class="flex items-center justify-center text-muted-foreground">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-              </div>
-            `}
-            ${category ? `
-              <span class="absolute top-2.5 left-2.5 text-[10px] font-bold bg-background/90 backdrop-blur-xs text-foreground px-2 py-0.5 rounded-md shadow-xs max-w-[140px] truncate" title="${escapeHtml(category)}">
-                ${escapeHtml(category)}
-              </span>
-            ` : ''}
-          </a>
-
-          <!-- Content -->
-          <div class="p-4 space-y-2.5">
-            <div class="flex flex-wrap items-center gap-1.5">
-              ${renderStageBadge(p.stage)}
-              ${renderAnomalyBadge(p.anomaly)}
-            </div>
-
-            <div>
-              <a href="/pinarchive/details?id=${encodeURIComponent(pinId)}" class="block group/link">
-                <h3 class="text-xs font-bold text-foreground line-clamp-2 group-hover/link:text-primary transition-colors" title="${escapeHtml(p.title || 'Untitled Pin')}">
-                  ${escapeHtml(p.title || `Pin ${p.pin_id}`)}
-                </h3>
-              </a>
-              <div class="text-[10px] text-muted-foreground mt-1 flex items-center justify-between">
-                <span>Created: <strong class="font-medium text-foreground">${createdDate}</strong></span>
-                ${p.account_username ? `<span class="text-primary font-medium">@${escapeHtml(p.account_username)}</span>` : ''}
-              </div>
-            </div>
-
-            <!-- Metrics Row (Full Numbers) -->
-            <div class="grid grid-cols-3 gap-1.5 pt-1">
-              <div class="bg-muted/40 rounded-xl p-2 text-center border border-border/40">
-                <span class="text-[9px] text-muted-foreground uppercase block font-bold">Saves</span>
-                <span class="text-xs font-bold text-rose-500 tabular-nums">${fmtNumber(saves)}</span>
-              </div>
-              <div class="bg-muted/40 rounded-xl p-2 text-center border border-border/40">
-                <span class="text-[9px] text-muted-foreground uppercase block font-bold">Repins</span>
-                <span class="text-xs font-bold text-foreground tabular-nums">${fmtNumber(repins)}</span>
-              </div>
-              <div class="bg-muted/40 rounded-xl p-2 text-center border border-border/40">
-                <span class="text-[9px] text-muted-foreground uppercase block font-bold">Velocity</span>
-                <span class="text-xs font-bold text-emerald-500 tabular-nums">${velocity.toFixed(1)}/d</span>
-              </div>
-            </div>
-
-            <!-- Social & Tags -->
-            ${shares > 0 ? `
-              <div class="flex items-center gap-1 text-[10px] text-blue-500 font-medium">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                <span>${fmtNumber(shares)} shares</span>
-              </div>
-            ` : ''}
-
-            ${tagsHtml ? `
-              <div class="flex flex-wrap items-center gap-1 pt-1">
-                ${tagsHtml}
-                ${moreTagsCount > 0 ? `<span class="text-[9px] text-muted-foreground font-semibold">+${moreTagsCount}</span>` : ''}
-              </div>
-            ` : ''}
-          </div>
-        </div>
-
-        <!-- Footer link -->
-        <div class="px-4 py-2.5 bg-muted/20 border-t border-border/60 flex items-center justify-between text-[11px] gap-2">
-          <span class="text-muted-foreground text-[10px] truncate max-w-[110px]" title="${escapeHtml(p.board_name || '')}">${p.board_name ? escapeHtml(p.board_name) : ''}</span>
-          <div class="flex items-center gap-2 shrink-0">
-            ${destinationUrl ? `
-              <a href="${escapeHtml(destinationUrl)}" target="_blank" rel="noopener noreferrer nofollow" class="text-[10px] font-medium text-muted-foreground hover:text-foreground hover:underline">
-                Visit Site ↗
-              </a>
-            ` : ''}
-            <a href="${escapeHtml(pinterestUrl)}" target="_blank" rel="noopener noreferrer" class="font-semibold text-primary hover:underline inline-flex items-center gap-1">
-              <span>View</span>
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            </a>
-          </div>
-        </div>
-      </div>
-    `;
+    return renderPinCardHtml(p, { viewMode: 'topics' });
   }
 
   let clusterSearch = '';
