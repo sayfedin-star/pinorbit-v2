@@ -79,7 +79,7 @@ export async function stagePins(
   const { data: inserted, error: insertErr } = await paAdmin
     .from('pa_staged_pins')
     .insert(rows)
-    .select('*');
+    .select('id, status, pa_pin_id');
 
   if (insertErr) {
     throw new HttpError(500, `Failed to insert staged pins: ${insertErr.message}`);
@@ -87,7 +87,7 @@ export async function stagePins(
 
   return {
     count: (inserted || []).length,
-    stagedPins: (inserted || []) as StagedPinItem[],
+    stagedPins: (inserted || []) as unknown as StagedPinItem[],
   };
 }
 
@@ -100,16 +100,17 @@ export async function getStagedQueue(
 ): Promise<StagedPinItem[]> {
   const { data, error } = await paAdmin
     .from('pa_staged_pins')
-    .select('*')
+    .select('id, pa_pin_id, title, image_url, board_name, override_link, original_link, status, created_at, updated_at')
     .eq('workspace_id', workspaceId)
     .eq('status', 'staged')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(200);
 
   if (error) {
     throw new HttpError(500, `Failed to fetch staged pins queue: ${error.message}`);
   }
 
-  return (data || []) as StagedPinItem[];
+  return (data || []) as unknown as StagedPinItem[];
 }
 
 /**
@@ -149,7 +150,7 @@ export async function updateStagedPin(
     .eq('id', stagedPinId)
     .eq('workspace_id', workspaceId)
     .eq('status', 'staged')
-    .select('*')
+    .select('id, pa_pin_id, title, board_name, override_link, updated_at')
     .maybeSingle();
 
   if (error) {
@@ -160,7 +161,7 @@ export async function updateStagedPin(
     throw new HttpError(404, 'Staged pin not found or already dispatched/cancelled.');
   }
 
-  return data as StagedPinItem;
+  return data as unknown as StagedPinItem;
 }
 
 /**

@@ -123,7 +123,9 @@ describe('Staged Queue Service Suite (v2.8)', () => {
         from: vi.fn().mockReturnValue({
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockResolvedValue({ data: mockRows, error: null }),
+          order: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue({ data: mockRows, error: null }),
+          }),
         }),
       } as any;
 

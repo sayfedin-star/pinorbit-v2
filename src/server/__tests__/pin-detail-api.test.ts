@@ -125,7 +125,7 @@ describe('PinArchive Pin Detail API Suite (GET /api/pinarchive/pin)', () => {
       if (table === 'pa_pins') {
         return {
           select: vi.fn().mockImplementation((cols: string) => {
-            if (cols === '*') {
+            if (cols === '*' || cols !== 'id, pin_id, title, saves, archived_at, image_url') {
               return {
                 eq: vi.fn().mockReturnValue({
                   eq: vi.fn().mockReturnValue({

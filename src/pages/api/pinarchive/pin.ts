@@ -8,6 +8,9 @@ import { computePinStage, computePinAnomaly } from '../../../server/lib/pin-stag
 // Route: /api/pinarchive/pin (GET) - Single Pin Deep-Dive Details & Historical Metrics
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export const PIN_DETAIL_PROJECTION =
+  'id, workspace_id, account_id, pin_id, title, description, link, domain, board_name, created_at_pinterest, image_url, dominant_color, is_video, saves, repins, comments, reactions, velocity, promoted, first_seen_at, archived_at, annotations, seo_category, canonical_pin_id, seo_alt_text, share_count, notes';
+
 const json = (o: any, s = 200) =>
   new Response(JSON.stringify(o), {
     status: s,
@@ -48,7 +51,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     // a) Fetch primary pin record
     const { data: pin, error: pinErr } = await db
       .from('pa_pins')
-      .select('*')
+      .select(PIN_DETAIL_PROJECTION)
       .eq('id', id)
       .eq('workspace_id', wsCtx.workspaceId)
       .maybeSingle();
