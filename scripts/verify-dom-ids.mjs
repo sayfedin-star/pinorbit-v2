@@ -5,6 +5,9 @@ const filesToScan = [
   'src/pages/pinarchive.astro',
   'src/components/pinarchive/AccountsTable.astro',
   'src/lib/pinarchive/table-render.ts',
+  'src/lib/pinarchive/controllers/store-controller.ts',
+  'src/lib/pinarchive/controllers/overview-controller.ts',
+  'src/lib/pinarchive/controllers/accounts-controller.ts',
 ];
 const currentContent = filesToScan
   .filter((f) => fs.existsSync(f))
