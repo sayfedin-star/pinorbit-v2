@@ -103,6 +103,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
     let deltaSaves7d = 0;
     let deltaRepins24h = 0;
     let deltaRepins7d = 0;
+    let deltaReactions24h = 0;
+    let deltaComments24h = 0;
+    let deltaShares24h = 0;
     let daysBetween = 1;
 
     if (snapsDesc.length >= 2) {
@@ -136,6 +139,11 @@ export const GET: APIRoute = async ({ request, locals }) => {
       deltaRepins24h = Math.max(0, latestR - Number(snap24h.repins || 0));
       deltaRepins7d = Math.max(deltaRepins24h, latestR - Number(snap7d.repins || 0));
 
+      const latestReactions = Number(latestSnap.reactions_total ?? (pin.reactions as any)?.total ?? 0);
+      deltaReactions24h = Math.max(0, latestReactions - Number(snap24h.reactions_total || 0));
+      deltaComments24h = Math.max(0, Number(latestSnap.comments || pin.comments || 0) - Number(snap24h.comments || 0));
+      deltaShares24h = Math.max(0, Number(latestSnap.shares || pin.share_count || 0) - Number(snap24h.shares || 0));
+
       const t1 = new Date(snap24h.recorded_at).getTime();
       daysBetween = Math.max(0.01, (t0 - t1) / 86400000);
     }
@@ -162,9 +170,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
     pin.deltas = {
       saves: deltaSaves24h,
       repins: deltaRepins24h,
-      comments: 0,
-      shares: 0,
-      reactions: 0,
+      comments: deltaComments24h,
+      shares: deltaShares24h,
+      reactions: deltaReactions24h,
     };
 
     // c) Fetch canonical siblings and cluster consolidation if canonical_pin_id is present

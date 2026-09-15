@@ -371,12 +371,16 @@ async function main() {
 
           const oldShares = Number(p.share_count) || 0;
           const oldComments = Number(p.comments) || 0;
+          const oldReactionsTotal = Number(p.reactions?.total || 0);
+          const freshReactionsTotal = typeof fresh.reactions?.total === 'number' ? fresh.reactions.total : null;
+          const reactionsAdvanced = freshReactionsTotal !== null && freshReactionsTotal > oldReactionsTotal;
 
           if (
             fresh.saves !== oldSaves ||
             fresh.repins !== oldRepins ||
             (fresh.share_count !== undefined && fresh.share_count !== oldShares) ||
             (fresh.comments !== undefined && fresh.comments !== oldComments) ||
+            reactionsAdvanced ||
             newAnnotations.length > 0
           ) {
             const changedItem = {
@@ -388,7 +392,11 @@ async function main() {
               archived_at: p.archived_at ?? null,
               refreshed_at: new Date().toISOString(),
             };
-            if (fresh.reactions && Object.keys(fresh.reactions).length > 0) {
+            if (freshReactionsTotal !== null && freshReactionsTotal >= oldReactionsTotal && freshReactionsTotal > 0) {
+              changedItem.reactions = fresh.reactions;
+            } else if (oldReactionsTotal > 0) {
+              changedItem.reactions = p.reactions;
+            } else if (fresh.reactions && Object.keys(fresh.reactions).length > 0) {
               changedItem.reactions = fresh.reactions;
             }
             if (newAnnotations.length > 0) {
