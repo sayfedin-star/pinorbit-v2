@@ -287,7 +287,9 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
           if (p.board_id !== undefined) row.board_id = p.board_id;
           if (p.utm_link !== undefined) row.utm_link = p.utm_link;
           if (p.share_count !== undefined) row.share_count = Number(p.share_count || 0);
-          if (p.reactions !== undefined) row.reactions = p.reactions;
+          if (p.reactions !== undefined && p.reactions !== null && typeof p.reactions === 'object' && Object.keys(p.reactions).length > 0) {
+            row.reactions = p.reactions;
+          }
           if (p.annotations !== undefined) row.annotations = p.annotations;
           if (p.seo_category !== undefined) row.seo_category = p.seo_category;
           if (p.canonical_pin_id !== undefined) row.canonical_pin_id = p.canonical_pin_id;
@@ -464,9 +466,13 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
           saves: Math.max(Number(p.saves || 0), existing?.saves || 0),
           repins: Math.max(Number(p.repins || 0), existing?.repins || 0),
           comments: Math.max(Number(p.comments || 0), existing?.comments || 0),
-          reactions: (p.reactions && typeof (p.reactions as any)?.total === 'number' && (p.reactions as any)?.total > 0)
-            ? p.reactions
-            : (existing?.reactions && typeof (existing.reactions as any)?.total === 'number' && (existing.reactions as any)?.total > 0 ? existing.reactions : (p.reactions ?? existing?.reactions ?? {})),
+          reactions: (() => {
+            const pTot = typeof (p.reactions as any)?.total === 'number' ? Number((p.reactions as any).total) : 0;
+            const exTot = typeof (existing?.reactions as any)?.total === 'number' ? Number((existing?.reactions as any).total) : 0;
+            if (pTot >= exTot && pTot > 0) return p.reactions;
+            if (exTot > 0) return existing?.reactions;
+            return p.reactions ?? existing?.reactions ?? {};
+          })(),
           velocity: Number(p.velocity || 0),
           promoted: p.promoted !== undefined ? Boolean(p.promoted) : (existing?.promoted ?? false),
           last_updated_at: fetchedAt,
