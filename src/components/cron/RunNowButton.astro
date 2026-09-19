@@ -305,8 +305,20 @@ const variantClasses = {
         const rawPayload = btn.dataset.payload ? JSON.parse(btn.dataset.payload) : {};
         const successEvent = btn.dataset.successEvent || 'cron:run-completed';
 
+        // Detect inline manual override dates in parent article if present
+        const article = btn.closest('article');
+        let overrideDates: { from_date?: string; to_date?: string } = {};
+        if (article) {
+          const fromInput = article.querySelector('[data-field="override_from"]') as HTMLInputElement | null;
+          const toInput = article.querySelector('[data-field="override_to"]') as HTMLInputElement | null;
+          if (fromInput?.value && toInput?.value) {
+            overrideDates = { from_date: fromInput.value, to_date: toInput.value };
+          }
+        }
+
         const payload = {
           ...rawPayload,
+          ...overrideDates,
           force: force ? true : undefined,
           scope: customScope || rawPayload.scope || (btn.dataset.isMaster === 'true' ? 'all' : undefined),
         };

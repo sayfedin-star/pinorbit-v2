@@ -635,7 +635,7 @@ export const fastcronService = {
     channel: 'analytics' | 'top_pins',
     mode: 'ping' | 'sync',
     runtimeEnv: Record<string, any>,
-    overrides?: { from_date?: string; to_date?: string; start_date?: string; end_date?: string }
+    overrides?: { from_date?: string; to_date?: string; start_date?: string; end_date?: string; direct?: boolean }
   ): Promise<TriggerSyncResponse> {
     const connection = await analyticsDb.getWorkspaceConnection(workspaceId, connectionId);
     if (!connection) {
@@ -803,8 +803,8 @@ export const fastcronService = {
           sort_modes: effectiveSortModes,
         };
 
-    // If Job ID and Token exist -> Dispatches cron_run
-    if (jobId && token) {
+    // If Job ID and Token exist and direct dispatch is NOT requested -> Dispatches cron_run
+    if (jobId && token && !overrides?.direct) {
       const payload = JSON.stringify(payloadObj);
 
       const cronRunRes = await this.fastcronCall(

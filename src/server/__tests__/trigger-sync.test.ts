@@ -344,4 +344,52 @@ describe('Manual Trigger & Test Ping Sync Suite (V20.1 Per-Pipeline Date Offsets
 
     fetchSpy.mockRestore();
   });
+
+  it('direct: true bypasses FastCron cron_run and dispatches directly to webhookUrl', async () => {
+    (analyticsDb.getWorkspaceConnection as any).mockResolvedValue({
+      id: connectionId,
+      workspace_id: workspaceId,
+      display_name: 'hymumdotcom',
+      top_pins_webhook_url: 'https://hook.make.com/pipeline-b-direct',
+      top_pins_fastcron_job_id: 12345, // fastcron job exists!
+      top_pins_start_offset_days: 7,
+      top_pins_end_offset_days: 2,
+      top_pins_num_of_pins: 50,
+      top_pins_sort_modes: ['IMPRESSION'],
+    });
+    (analyticsDb.getWorkspaceAnalyticsSettings as any).mockResolvedValue({
+      fastcron_token: 'db_token_1234567890',
+    });
+
+    let calledUrl = '';
+    let sentPayload: any = null;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (url: string, init: any) => {
+      calledUrl = url;
+      sentPayload = JSON.parse(init.body);
+      return { ok: true, status: 200 } as any;
+    }) as any);
+
+    const result = await fastcronService.triggerManualSync(
+      workspaceId,
+      connectionId,
+      'top_pins',
+      'sync',
+      mockRuntimeEnv,
+      { from_date: '2026-03-24', to_date: '2026-03-24', direct: true }
+    );
+
+    expect(result.success).toBe(true);
+    // Verified: It called the Make.com webhook URL directly, NOT FastCron API (/cron_run)
+    expect(calledUrl).toBe('https://hook.make.com/pipeline-b-direct');
+    expect(calledUrl).not.toContain('/cron_run');
+    expect(sentPayload.job_type).toBe('manual_sync');
+    expect(sentPayload.channel).toBe('top_pins');
+    expect(sentPayload.start_date).toBe('2026-03-24');
+    expect(sentPayload.end_date).toBe('2026-03-24');
+    expect(sentPayload.num_of_pins).toBe(50);
+    expect(sentPayload.sort_modes).toEqual(['IMPRESSION']);
+
+    fetchSpy.mockRestore();
+  });
 });
+

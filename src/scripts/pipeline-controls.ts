@@ -1317,6 +1317,339 @@ if (pipeConnId) {
     });
   }
 
+  // Automated Day-by-Day Backfill Controller (V21)
+  function setupBackfillController() {
+    const modal = document.getElementById('backfill-modal');
+    if (!modal) return;
+
+    const btnCloseX = document.getElementById('backfill-btn-close-x');
+    const btnClose = document.getElementById('backfill-btn-close');
+    const btnPause = document.getElementById('backfill-btn-pause') as HTMLButtonElement | null;
+    const btnStop = document.getElementById('backfill-btn-stop') as HTMLButtonElement | null;
+    const pauseIcon = document.getElementById('backfill-pause-icon');
+    const pauseLabel = document.getElementById('backfill-pause-label');
+    const progressBar = document.getElementById('backfill-progress-bar');
+    const progressPercent = document.getElementById('backfill-progress-percent');
+    const statusEl = document.getElementById('backfill-current-status');
+    const subtitleEl = document.getElementById('backfill-modal-subtitle');
+    const statTotal = document.getElementById('backfill-stat-total');
+    const statCompleted = document.getElementById('backfill-stat-completed');
+    const statFailed = document.getElementById('backfill-stat-failed');
+    const statRemaining = document.getElementById('backfill-stat-remaining');
+    const logConsole = document.getElementById('backfill-log-console');
+    const clearLogsBtn = document.getElementById('backfill-clear-logs');
+    const pacingSelect = document.getElementById('backfill-pacing-select') as HTMLSelectElement | null;
+    const resumeBanner = document.getElementById('backfill-resume-banner');
+    const resumeText = document.getElementById('backfill-resume-text');
+    const resumeBtn = document.getElementById('backfill-btn-resume-checkpoint');
+
+    let isRunning = false;
+    let isPaused = false;
+    let isCancelled = false;
+    let currentDates: string[] = [];
+    let currentIndex = 0;
+    let completedCount = 0;
+    let failedCount = 0;
+
+    const storageKey = `pinorbit:backfill:${pipeConnId}:top_pins`;
+
+    function appendLog(msg: string, type: 'info' | 'success' | 'warn' | 'error' = 'info') {
+      if (!logConsole) return;
+      const time = new Date().toLocaleTimeString();
+      const line = document.createElement('div');
+      line.className = 'flex items-start gap-2 leading-relaxed';
+      let color = 'text-zinc-300';
+      if (type === 'success') color = 'text-emerald-400';
+      if (type === 'warn') color = 'text-amber-400';
+      if (type === 'error') color = 'text-red-400 font-semibold';
+
+      line.innerHTML = `<span class="text-zinc-500 shrink-0">[${time}]</span> <span class="${color}">${escapeHtml(msg)}</span>`;
+      logConsole.appendChild(line);
+      logConsole.scrollTop = logConsole.scrollHeight;
+    }
+
+    function clearLogs() {
+      if (logConsole) logConsole.innerHTML = '';
+    }
+    clearLogsBtn?.addEventListener('click', clearLogs);
+
+    function openModal() {
+      modal?.classList.remove('hidden');
+      modal?.classList.add('flex');
+      checkResumeState();
+    }
+
+    function closeModal() {
+      if (isRunning) {
+        if (!confirm('A backfill operation is currently running. Do you want to stop and close?')) {
+          return;
+        }
+        isCancelled = true;
+      }
+      modal?.classList.add('hidden');
+      modal?.classList.remove('flex');
+    }
+
+    btnCloseX?.addEventListener('click', closeModal);
+    btnClose?.addEventListener('click', closeModal);
+
+    function checkResumeState() {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw && resumeBanner && resumeText) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.lastCompletedDate) {
+            resumeText.innerHTML = `A previous run reached <strong>${escapeHtml(parsed.lastCompletedDate)}</strong>.`;
+            resumeBanner.classList.remove('hidden');
+            resumeBanner.classList.add('flex');
+            return;
+          }
+        }
+      } catch {}
+      resumeBanner?.classList.add('hidden');
+      resumeBanner?.classList.remove('flex');
+    }
+
+    resumeBtn?.addEventListener('click', () => {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.lastCompletedDate) {
+            const [y, m, d] = parsed.lastCompletedDate.split('-').map(Number);
+            const nextDay = new Date(Date.UTC(y, m - 1, d + 1, 12, 0, 0)).toISOString().split('T')[0];
+            const article = document.querySelector('[data-pipeline="top_pins"]');
+            const fromInput = article?.querySelector('[data-field="override_from"]') as HTMLInputElement | null;
+            if (fromInput) {
+              fromInput.value = nextDay;
+              showToast(`Start date updated to next day: ${nextDay}`);
+              resumeBanner?.classList.add('hidden');
+              resumeBanner?.classList.remove('flex');
+            }
+          }
+        }
+      } catch {}
+    });
+
+    // Timezone-safe inclusive date range generator
+    function generateDateRange(startStr: string, endStr: string): string[] {
+      const dates: string[] = [];
+      const [sY, sM, sD] = startStr.split('-').map(Number);
+      const [eY, eM, eD] = endStr.split('-').map(Number);
+      let cur = new Date(Date.UTC(sY, sM - 1, sD, 12, 0, 0));
+      const end = new Date(Date.UTC(eY, eM - 1, eD, 12, 0, 0));
+      if (isNaN(cur.getTime()) || isNaN(end.getTime())) return [];
+      while (cur <= end) {
+        dates.push(cur.toISOString().split('T')[0]);
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+      return dates;
+    }
+
+    function updateUI() {
+      const total = currentDates.length;
+      const processed = completedCount + failedCount;
+      const remaining = Math.max(0, total - processed);
+      const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+
+      if (progressBar) progressBar.style.width = `${pct}%`;
+      if (progressPercent) progressPercent.textContent = `${pct}%`;
+      if (statTotal) statTotal.textContent = String(total);
+      if (statCompleted) statCompleted.textContent = String(completedCount);
+      if (statFailed) statFailed.textContent = String(failedCount);
+      if (statRemaining) statRemaining.textContent = String(remaining);
+    }
+
+    // Hook button click: [data-action="backfill"]
+    document.querySelectorAll('button[data-action="backfill"]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        if (isRunning) {
+          openModal();
+          showToast('A backfill operation is already running in the background.');
+          return;
+        }
+        const target = (e.target as HTMLElement).closest('article');
+        if (!target) return;
+        const channel = target.getAttribute('data-pipeline') || 'top_pins';
+        const fromInput = target.querySelector('[data-field="override_from"]') as HTMLInputElement | null;
+        const toInput = target.querySelector('[data-field="override_to"]') as HTMLInputElement | null;
+        const fromDate = fromInput?.value?.trim();
+        const toDate = toInput?.value?.trim();
+
+        const errEl = target.querySelector('[data-err="override_dates"]') as HTMLElement | null;
+        if (errEl) errEl.classList.add('hidden');
+
+        if (!fromDate || !toDate) {
+          if (errEl) {
+            errEl.textContent = 'Please specify both Override From Date and Override To Date.';
+            errEl.classList.remove('hidden');
+          } else {
+            showToast('Please specify both Override From Date and Override To Date.', false);
+          }
+          return;
+        }
+
+        if (fromDate > toDate) {
+          if (errEl) {
+            errEl.textContent = 'From Date must be before or equal to To Date.';
+            errEl.classList.remove('hidden');
+          } else {
+            showToast('From Date must be before or equal to To Date.', false);
+          }
+          return;
+        }
+
+        currentDates = generateDateRange(fromDate, toDate);
+        if (currentDates.length === 0) {
+          showToast('Invalid date range.', false);
+          return;
+        }
+
+        openModal();
+        clearLogs();
+        if (subtitleEl) {
+          subtitleEl.textContent = `Range: ${fromDate} to ${toDate} (${currentDates.length} Days) · Channel: ${channel}`;
+        }
+
+        // Initialize run
+        isRunning = true;
+        isPaused = false;
+        isCancelled = false;
+        currentIndex = 0;
+        completedCount = 0;
+        failedCount = 0;
+        updateUI();
+
+        btnPause?.removeAttribute('disabled');
+        btnStop?.removeAttribute('disabled');
+        if (pauseLabel) pauseLabel.textContent = 'Pause';
+        if (pauseIcon) pauseIcon.textContent = '⏸️';
+
+        appendLog(`Starting automated day-by-day backfill for ${currentDates.length} days (${fromDate} → ${toDate})...`, 'info');
+
+        const beforeUnloadHandler = (ev: BeforeUnloadEvent) => {
+          if (isRunning) {
+            ev.preventDefault();
+            ev.returnValue = '';
+          }
+        };
+        window.addEventListener('beforeunload', beforeUnloadHandler);
+
+        try {
+          for (let i = 0; i < currentDates.length; i++) {
+            if (isCancelled) {
+              appendLog('Operation cancelled by user.', 'warn');
+              break;
+            }
+
+            while (isPaused && !isCancelled) {
+              await new Promise(r => setTimeout(r, 200));
+            }
+            if (isCancelled) {
+              appendLog('Operation cancelled by user.', 'warn');
+              break;
+            }
+
+            currentIndex = i;
+            const day = currentDates[i];
+            if (statusEl) {
+              statusEl.textContent = `Processing Day ${i + 1} of ${currentDates.length} (${day})...`;
+            }
+
+            try {
+              const body = {
+                connection_id: pipeConnId,
+                channel,
+                mode: 'sync',
+                direct: true, // Direct POST to Make.com!
+                from_date: day,
+                to_date: day,
+              };
+
+              const res = await fetch('/api/analytics/trigger-sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+              });
+
+              const data = await res.json().catch(() => ({}));
+
+              if (res.ok && data.success) {
+                completedCount++;
+                appendLog(`[Day ${i + 1}/${currentDates.length}] ${day} -> Dispatched to Make.com [Success]`, 'success');
+                try {
+                  localStorage.setItem(storageKey, JSON.stringify({
+                    lastCompletedDate: day,
+                    index: i,
+                    total: currentDates.length,
+                    timestamp: new Date().toISOString(),
+                  }));
+                } catch {}
+              } else {
+                failedCount++;
+                const errMsg = data.error || data.message || `HTTP ${res.status}`;
+                appendLog(`[Day ${i + 1}/${currentDates.length}] ${day} -> ${errMsg}`, 'error');
+              }
+            } catch (fetchErr: any) {
+              failedCount++;
+              appendLog(`[Day ${i + 1}/${currentDates.length}] ${day} -> Network failure: ${fetchErr.message || 'Unknown error'}`, 'error');
+            }
+
+            updateUI();
+
+            // Pacing delay before next day
+            const pacingMs = pacingSelect ? parseInt(pacingSelect.value, 10) || 2000 : 2000;
+            if (i < currentDates.length - 1 && !isCancelled) {
+              await new Promise(r => setTimeout(r, pacingMs));
+            }
+          }
+
+          if (!isCancelled) {
+            appendLog(`🎉 Backfill completed! (${completedCount} succeeded, ${failedCount} failed/skipped).`, 'success');
+            if (statusEl) statusEl.textContent = `Completed (${completedCount}/${currentDates.length} days)`;
+            showToast(`Backfill Complete: ${completedCount}/${currentDates.length} days processed.`);
+            loadPipelineSettings();
+            loadCronJobs();
+          } else {
+            if (statusEl) statusEl.textContent = 'Backfill Stopped';
+          }
+        } finally {
+          isRunning = false;
+          btnPause?.setAttribute('disabled', 'true');
+          btnStop?.setAttribute('disabled', 'true');
+          window.removeEventListener('beforeunload', beforeUnloadHandler);
+        }
+      });
+    });
+
+    // Pause / Resume handler
+    btnPause?.addEventListener('click', () => {
+      if (!isRunning) return;
+      isPaused = !isPaused;
+      if (isPaused) {
+        if (pauseLabel) pauseLabel.textContent = 'Resume';
+        if (pauseIcon) pauseIcon.textContent = '▶️';
+        if (statusEl) statusEl.textContent = `Paused at Day ${currentIndex + 1} of ${currentDates.length}`;
+        appendLog(`⏸️ Backfill paused by user. Click Resume to continue.`, 'warn');
+      } else {
+        if (pauseLabel) pauseLabel.textContent = 'Pause';
+        if (pauseIcon) pauseIcon.textContent = '⏸️';
+        if (statusEl) statusEl.textContent = `Resuming from Day ${currentIndex + 1}...`;
+        appendLog(`▶️ Resuming backfill...`, 'info');
+      }
+    });
+
+    // Stop handler
+    btnStop?.addEventListener('click', () => {
+      if (!isRunning) return;
+      if (confirm('Are you sure you want to stop the backfill? All days completed so far are saved.')) {
+        isCancelled = true;
+        isPaused = false;
+      }
+    });
+  }
+
+  setupBackfillController();
   loadPipelineSettings();
   loadCronJobs();
 
