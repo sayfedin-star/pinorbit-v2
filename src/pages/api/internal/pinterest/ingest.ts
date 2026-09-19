@@ -2,7 +2,7 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { dbClients, isKnownDefaultIngestSecret, isProductionEnv } from '../../../../server/db/clients';
-import { getEffectiveSecret } from '../../../../server/services/webhook-secrets';
+import { getEffectiveSecret, verifyIngestSecret } from '../../../../server/services/webhook-secrets';
 import { pinnerETL } from '../../../../server/services/pinner-etl';
 import { timingSafeEqual } from '../../../../server/lib/timing-safe';
 import { buildBoardCreateIdempotencyKey } from '../../../../server/services/scheduling-logic';

@@ -863,7 +863,7 @@ export const analyticsDb = {
     const analyticsClient = dbClients.getAnalytics();
     let qDaily: any = analyticsClient
       .from('account_analytics_daily')
-      .select('*')
+      .select('impressions, engagements, pin_clicks, outbound_clicks, saves, recorded_at, created_at')
       .eq('workspace_id', workspaceId)
       .eq('connection_id', connectionId)
       .eq('data_status', 'READY')
@@ -906,7 +906,7 @@ export const analyticsDb = {
     try {
       const { data: summaryRows } = await analyticsClient
         .from('account_analytics_summaries')
-        .select('*')
+        .select('summary_engagement_rate, summary_pin_click_rate, summary_outbound_click_rate, summary_save_rate')
         .eq('workspace_id', workspaceId)
         .eq('connection_id', connectionId)
         .order('window_end', { ascending: false })
@@ -1348,7 +1348,9 @@ export const analyticsDb = {
 
     let offset = 0;
     const batchSize = 1000;
-    while (true) {
+    const maxBatches = 10;
+    let batchCount = 0;
+    while (batchCount < maxBatches) {
       const { data, error } = await query.range(offset, offset + batchSize - 1);
       if (error) throw error;
       const rows = data || [];
@@ -1358,6 +1360,7 @@ export const analyticsDb = {
         total_saves += Number(row.total_saves || 0);
         total_clicks += Number(row.total_pin_clicks || 0);
       }
+      batchCount++;
       if (rows.length < batchSize) break;
       offset += batchSize;
     }

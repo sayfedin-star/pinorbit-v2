@@ -122,14 +122,26 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const q = p3Admin.from('workspace_analytics_settings');
       if (typeof q?.delete === 'function') {
         const del = q.delete();
-        if (del && typeof del.eq === 'function') cleanupTasks.push(Promise.resolve(del.eq('workspace_id', workspaceId)));
+        if (del && typeof del.eq === 'function') {
+          cleanupTasks.push((async () => {
+            const res = await del.eq('workspace_id', workspaceId);
+            if (res?.error) throw new Error(`Failed to delete workspace_analytics_settings: ${res.error.message}`);
+            return res;
+          })());
+        }
       }
     }
     if (typeof p1Admin?.from === 'function') {
       const q = p1Admin.from('workspace_retention_settings');
       if (typeof q?.delete === 'function') {
         const del = q.delete();
-        if (del && typeof del.eq === 'function') cleanupTasks.push(Promise.resolve(del.eq('workspace_id', workspaceId)));
+        if (del && typeof del.eq === 'function') {
+          cleanupTasks.push((async () => {
+            const res = await del.eq('workspace_id', workspaceId);
+            if (res?.error) throw new Error(`Failed to delete workspace_retention_settings: ${res.error.message}`);
+            return res;
+          })());
+        }
       }
     }
     if (hasP4) {
@@ -139,7 +151,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
           const q = p4Admin.from(tbl);
           if (typeof q?.delete === 'function') {
             const del = q.delete();
-            if (del && typeof del.eq === 'function') cleanupTasks.push(Promise.resolve(del.eq('workspace_id', workspaceId)));
+            if (del && typeof del.eq === 'function') {
+              cleanupTasks.push((async () => {
+                const res = await del.eq('workspace_id', workspaceId);
+                if (res?.error) throw new Error(`Failed to delete ${tbl}: ${res.error.message}`);
+                return res;
+              })());
+            }
           }
         }
       }

@@ -96,15 +96,37 @@ export async function executeBidirectionalCompensation(
   insertedP1PinIds: string[]
 ): Promise<void> {
   // Step 1: Clean up P1 pins
+  // Delete tracked IDs in safe chunks of 100 to prevent HTTP 414 URI Too Long errors
   if (insertedP1PinIds.length > 0) {
     try {
-      await p1Admin
-        .from('pins')
-        .delete()
-        .in('id', insertedP1PinIds)
-        .eq('workspace_id', workspaceId);
+      const CHUNK_SIZE = 100;
+      for (let i = 0; i < insertedP1PinIds.length; i += CHUNK_SIZE) {
+        const chunk = insertedP1PinIds.slice(i, i + CHUNK_SIZE);
+        await p1Admin
+          .from('pins')
+          .delete()
+          .in('id', chunk)
+          .eq('workspace_id', workspaceId);
+      }
     } catch (p1Err) {
       console.error(`[Repurpose Compensation] Failed to delete pins from P1 for batch ${batchUuid}:`, p1Err);
+    }
+  }
+
+  // Also clean up by indexed source_ref to guarantee atomicity for all pins in batch
+  if (batchUuid) {
+    try {
+      const q = p1Admin.from('pins').delete();
+      if (typeof q?.eq === 'function') {
+        const q1 = q.eq('source_ref', batchUuid);
+        if (q1 && typeof q1.eq === 'function') {
+          await q1.eq('workspace_id', workspaceId);
+        } else if (q1 && typeof q1.then === 'function') {
+          await q1;
+        }
+      }
+    } catch (p1Err) {
+      console.warn(`[Repurpose Compensation] Source_ref delete for batch ${batchUuid}:`, p1Err);
     }
   }
 
@@ -383,8 +405,21 @@ export async function executeRepurposeDispatch(
         console.warn(`[Repurpose] Batch ${batchUuid} lost ownership (status: ${currentBatchState?.status}). Aborting dispatch.`);
         if (insertedP1PinIds.length > 0) {
           try {
-            await p1Admin.from('pins').delete().in('id', insertedP1PinIds).eq('workspace_id', workspaceId);
-            await paAdmin.from('pa_pin_dispatches').delete().in('p1_pin_id', insertedP1PinIds).eq('workspace_id', workspaceId);
+            const CHUNK_SIZE = 100;
+            for (let j = 0; j < insertedP1PinIds.length; j += CHUNK_SIZE) {
+              const chunk = insertedP1PinIds.slice(j, j + CHUNK_SIZE);
+              await p1Admin.from('pins').delete().in('id', chunk).eq('workspace_id', workspaceId);
+            }
+            const q = p1Admin.from('pins').delete();
+            if (typeof q?.eq === 'function') {
+              const q1 = q.eq('source_ref', batchUuid);
+              if (q1 && typeof q1.eq === 'function') {
+                await q1.eq('workspace_id', workspaceId);
+              } else if (q1 && typeof q1.then === 'function') {
+                await q1;
+              }
+            }
+            await paAdmin.from('pa_pin_dispatches').delete().eq('batch_id', batchUuid).eq('workspace_id', workspaceId);
           } catch (compErr) {
             console.error(`[Repurpose] Compensation error for batch ${batchUuid}:`, compErr);
           }
