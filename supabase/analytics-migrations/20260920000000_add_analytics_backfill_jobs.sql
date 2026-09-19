@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS public.analytics_backfill_jobs (
     CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled')),
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
-  current_date DATE NOT NULL,
+  "current_date" DATE NOT NULL,
   total_days INTEGER NOT NULL CHECK (total_days > 0),
   completed_days INTEGER NOT NULL DEFAULT 0 CHECK (completed_days >= 0),
   failed_days INTEGER NOT NULL DEFAULT 0 CHECK (failed_days >= 0),
