@@ -31,10 +31,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const workspaceId = body.workspace_id || locals.activeWorkspaceId;
   const section = body.section;
 
-  if (!workspaceId || !section || !['p1', 'p2', 'p3'].includes(section)) {
+  if (!workspaceId || !section || !['p1', 'p2', 'p3', 'p4'].includes(section)) {
     return new Response(
       JSON.stringify({
-        error: 'Invalid request: workspace_id and section (p1, p2, or p3) are required',
+        error: 'Invalid request: workspace_id and section (p1, p2, p3, or p4) are required',
       }),
       {
         status: 400,

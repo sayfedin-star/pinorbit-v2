@@ -106,7 +106,7 @@ export async function runRetentionCleanup(
   const effectiveP1 = opts?.overrides?.p1 ?? Boolean(wsSettings?.auto_prune_enabled ?? false);
   const effectiveP2 = opts?.overrides?.p2 ?? Boolean(wsSettings?.p2_prune_enabled ?? false);
   const effectiveP3 = opts?.overrides?.p3 ?? Boolean(wsSettings?.p3_prune_enabled ?? false);
-  const effectiveP4 = opts?.overrides?.p4 ?? Boolean(wsSettings?.p4_prune_enabled ?? wsSettings?.auto_prune_enabled ?? false);
+  const effectiveP4 = opts?.overrides?.p4 ?? Boolean(wsSettings?.p4_prune_enabled ?? false);
 
   // 1. Unconditional Orphan Pin Sweep (outside gates)
   const sweepCutoff = new Date(Date.now() - processingTimeoutMinutes * 60000).toISOString();
@@ -300,7 +300,9 @@ export async function runRetentionCleanup(
   if (effectiveP4) {
     try {
       const pinArchiveClient = dbClients.getPinArchive(runtimeEnv);
-      const paRunsDays = typeof wsSettings?.pa_runs_days === 'number' ? wsSettings.pa_runs_days : 60;
+      const paRunsDays = typeof wsSettings?.pa_runs_retention_days === 'number'
+        ? wsSettings.pa_runs_retention_days
+        : (typeof wsSettings?.pa_runs_days === 'number' ? wsSettings.pa_runs_days : 60);
       const paRunsCutoff = new Date(Date.now() - paRunsDays * 86400000).toISOString();
 
       const resRuns = await batchedDelete(pinArchiveClient, 'pa_runs', {
@@ -313,7 +315,9 @@ export async function runRetentionCleanup(
       deletedPaRuns = resRuns.deleted;
       if (resRuns.hitCap) wasTruncated = true;
 
-      const paMetricsDays = typeof wsSettings?.pa_metrics_days === 'number' ? wsSettings.pa_metrics_days : 90;
+      const paMetricsDays = typeof wsSettings?.pa_metrics_retention_days === 'number'
+        ? wsSettings.pa_metrics_retention_days
+        : (typeof wsSettings?.pa_metrics_days === 'number' ? wsSettings.pa_metrics_days : 90);
       const paMetricsCutoff = new Date(Date.now() - paMetricsDays * 86400000).toISOString();
 
       const resMetrics = await batchedDelete(pinArchiveClient, 'pa_pin_metrics', {
@@ -376,8 +380,8 @@ export async function runRetentionCleanup(
       top_pins_downsample_enabled: wsSettings?.top_pins_downsample_enabled ?? false,
       analytics_daily_keep_days: wsSettings?.analytics_daily_keep_days ?? null,
       p4_prune_enabled: wsSettings?.p4_prune_enabled ?? false,
-      pa_runs_days: wsSettings?.pa_runs_days ?? 60,
-      pa_metrics_days: wsSettings?.pa_metrics_days ?? 90,
+      pa_runs_retention_days: wsSettings?.pa_runs_retention_days ?? wsSettings?.pa_runs_days ?? 60,
+      pa_metrics_retention_days: wsSettings?.pa_metrics_retention_days ?? wsSettings?.pa_metrics_days ?? 90,
       last_cleanup_at: new Date().toISOString(),
       last_cleanup_result: {
         at: new Date().toISOString(),

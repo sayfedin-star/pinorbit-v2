@@ -78,6 +78,9 @@ let retentionSettings: any = {
   top_pins_raw_days: 180,
   top_pins_downsample_enabled: false,
   analytics_daily_keep_days: null,
+  p4_prune_enabled: false,
+  pa_runs_retention_days: 60,
+  pa_metrics_retention_days: 90,
   is_default: true,
   last_cleanup_at: null,
   last_cleanup_result: null,
@@ -108,6 +111,9 @@ if (supabase && currentWorkspace) {
         top_pins_raw_days: retData.top_pins_raw_days ?? 180,
         top_pins_downsample_enabled: Boolean(retData.top_pins_downsample_enabled ?? false),
         analytics_daily_keep_days: retData.analytics_daily_keep_days ?? null,
+        p4_prune_enabled: Boolean(retData.p4_prune_enabled ?? false),
+        pa_runs_retention_days: retData.pa_runs_retention_days ?? 60,
+        pa_metrics_retention_days: retData.pa_metrics_retention_days ?? 90,
         is_default: false,
         last_cleanup_at: retData.last_cleanup_at ?? null,
         last_cleanup_result: retData.last_cleanup_result ?? null,
@@ -148,6 +154,16 @@ function formatLastRunP3(result: any) {
   const runs = p3.runs ?? 0;
   const snapshots = p3.snapshots ?? 0;
   return `Last run: ${d} · ${trigger} · deleted ${runs} ingestion runs, ${snapshots} snapshots`;
+}
+
+function formatLastRunP4(result: any) {
+  const p4 = result?.sections?.p4;
+  if (!result || !p4) return 'No cleanup runs recorded yet.';
+  const d = new Date(result.at).toLocaleString();
+  const trigger = result.trigger || 'api';
+  const runs = p4.runs ?? 0;
+  const metrics = p4.metrics ?? 0;
+  return `Last run: ${d} · ${trigger} · deleted ${runs} runs, ${metrics} metrics`;
 }
 ---
 
@@ -572,6 +588,79 @@ function formatLastRunP3(result: any) {
           </p>
         </div>
 
+        <!-- Section 4: P4 PinArchive Lifecycle Control -->
+        <div class="rounded-xl border border-border bg-card p-4 space-y-4">
+          <div class="flex items-center justify-between border-b border-border/60 pb-3">
+            <div>
+              <h4 class="text-xs font-bold uppercase tracking-wider text-foreground">Project 4: PinArchive Retention</h4>
+              <p class="text-[11px] text-muted-foreground mt-0.5">Control automatic purge of historical runs and raw metrics snapshots.</p>
+            </div>
+            <div class="flex items-center gap-3">
+              {(currentRole === 'admin' || currentRole === 'owner') && (
+                <button
+                  type="button"
+                  id="run-now-p4"
+                  data-section="p4"
+                  class="rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-[11px] font-bold text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                >
+                  ▶ Run Now
+                </button>
+              )}
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  id="p4-prune-enabled"
+                  name="p4_prune_enabled"
+                  checked={retentionSettings.p4_prune_enabled}
+                  class="sr-only peer"
+                />
+                <div class="w-9 h-5 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                <span class="ml-2 text-xs font-semibold text-foreground">Enable P4 Pruning</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="p4-gated" class={`grid grid-cols-1 sm:grid-cols-2 gap-4 transition-opacity ${retentionSettings.p4_prune_enabled ? '' : 'opacity-50 pointer-events-none'}`}>
+            <div class="space-y-1.5">
+              <label for="pa-runs-retention-days" class="block text-[11px] font-bold uppercase tracking-wider text-foreground">
+                Runs retention (days)
+              </label>
+              <input
+                type="number"
+                id="pa-runs-retention-days"
+                name="pa_runs_retention_days"
+                min="1"
+                max="365"
+                value={retentionSettings.pa_runs_retention_days}
+                class="w-full rounded-xl border border-border bg-background px-3.5 py-2 text-xs font-semibold text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                required
+              />
+              <p class="text-[10px] text-muted-foreground">Historical PinArchive crawl runs (default 60d).</p>
+            </div>
+
+            <div class="space-y-1.5">
+              <label for="pa-metrics-retention-days" class="block text-[11px] font-bold uppercase tracking-wider text-foreground">
+                Metrics retention (days)
+              </label>
+              <input
+                type="number"
+                id="pa-metrics-retention-days"
+                name="pa_metrics_retention_days"
+                min="1"
+                max="365"
+                value={retentionSettings.pa_metrics_retention_days}
+                class="w-full rounded-xl border border-border bg-background px-3.5 py-2 text-xs font-semibold text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                required
+              />
+              <p class="text-[10px] text-muted-foreground">PinArchive pin metrics snapshots (default 90d).</p>
+            </div>
+          </div>
+
+          <p id="last-run-p4" class="text-[10px] text-muted-foreground pt-1">
+            {formatLastRunP4(retentionSettings.last_cleanup_result)}
+          </p>
+        </div>
+
         <div id="retention-safety-note" class="rounded-xl p-3 text-xs font-medium bg-muted/40 border border-border text-muted-foreground">
           Checking pruning status...
         </div>
@@ -775,6 +864,7 @@ function formatLastRunP3(result: any) {
     ['auto-prune-enabled', 'p1-gated'],
     ['p2-prune-enabled', 'p2-gated'],
     ['p3-prune-enabled', 'p3-gated'],
+    ['p4-prune-enabled', 'p4-gated'],
   ];
 
   function applyGates() {
@@ -787,9 +877,10 @@ function formatLastRunP3(result: any) {
     const master = (document.getElementById('auto-prune-enabled') as HTMLInputElement | null)?.checked ?? false;
     const p2 = (document.getElementById('p2-prune-enabled') as HTMLInputElement | null)?.checked ?? false;
     const p3 = (document.getElementById('p3-prune-enabled') as HTMLInputElement | null)?.checked ?? false;
+    const p4 = (document.getElementById('p4-prune-enabled') as HTMLInputElement | null)?.checked ?? false;
     if (safetyNote) {
-      safetyNote.textContent = (master || p2 || p3)
-        ? '⚠️ Pruning ENABLED for: ' + [master && 'P1', p2 && 'P2', p3 && 'P3'].filter(Boolean).join(', ') + '. Deletions will run per thresholds.'
+      safetyNote.textContent = (master || p2 || p3 || p4)
+        ? '⚠️ Pruning ENABLED for: ' + [master && 'P1', p2 && 'P2', p3 && 'P3', p4 && 'P4'].filter(Boolean).join(', ') + '. Deletions will run per thresholds.'
         : '✅ All pruning DISABLED. Nothing is auto-deleted. Recovery sweep stays active.';
     }
   }
@@ -866,6 +957,12 @@ function formatLastRunP3(result: any) {
         confirmMsg = `Run P2 cleanup NOW (one-time, bypasses the toggle)?\nOld competitor snapshots and job logs will be DELETED.\nContinue?`;
       } else if (section === 'p3') {
         confirmMsg = `Run P3 cleanup NOW (one-time, bypasses the toggle)?\nAnalytics ingestion runs (>90d) and top pins snapshots (>180d) will be DELETED.\nContinue?`;
+      } else if (section === 'p4') {
+        const runsDaysInput = document.getElementById('pa-runs-retention-days') as HTMLInputElement | null;
+        const metricsDaysInput = document.getElementById('pa-metrics-retention-days') as HTMLInputElement | null;
+        const runsDays = runsDaysInput?.value || '60';
+        const metricsDays = metricsDaysInput?.value || '90';
+        confirmMsg = `Run P4 cleanup NOW (one-time, bypasses the toggle)?\nPinArchive runs (>${runsDays}d) and metrics snapshots (>${metricsDays}d) will be DELETED.\nContinue?`;
       }
 
       if (!confirm(confirmMsg)) return;
@@ -903,6 +1000,10 @@ function formatLastRunP3(result: any) {
             const runs = data.deleted_ingestion_runs ?? 0;
             const snaps = data.deleted_snapshots_count ?? 0;
             lastRunElem.textContent = `Last run: ${nowStr} · manual · deleted ${runs} ingestion runs, ${snaps} snapshots`;
+          } else if (section === 'p4') {
+            const runs = data.deleted_pa_runs ?? 0;
+            const metrics = data.deleted_pa_metrics ?? 0;
+            lastRunElem.textContent = `Last run: ${nowStr} · manual · deleted ${runs} runs, ${metrics} metrics`;
           }
         }
 
