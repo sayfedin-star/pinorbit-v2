@@ -594,6 +594,34 @@ export interface AnalyticsRunsResponse {
   error?: string;
 }
 
+export interface AnalyticsBackfillJob {
+  id: string;
+  workspace_id: string;
+  connection_id: string;
+  channel: 'account_analytics' | 'top_pins';
+  status: 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+  start_date: string;
+  end_date: string;
+  current_date: string;
+  total_days: number;
+  completed_days: number;
+  failed_days: number;
+  interval_minutes: number;
+  fastcron_job_id?: number | null;
+  last_run_at?: string | null;
+  completed_at?: string | null;
+  error_details?: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackfillJobResponse {
+  success: boolean;
+  data?: AnalyticsBackfillJob | null;
+  error?: string;
+  message?: string;
+}
+
 export interface AnalyticsConnectionSettingsResponse {
   id: string;
   display_name: string;

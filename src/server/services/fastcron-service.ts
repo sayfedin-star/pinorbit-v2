@@ -627,6 +627,111 @@ export const fastcronService = {
   },
 
   /**
+   * Creates a recurring FastCron job for automated background backfill.
+   * Runs every intervalMinutes (default 1 min: '* * * * *').
+   */
+  async createBackfillCronJob(
+    workspaceId: string,
+    connectionId: string,
+    backfillJobId: string,
+    intervalMinutes = 1,
+    runtimeEnv?: Record<string, any>
+  ): Promise<{ success: boolean; jobId?: number; error?: string }> {
+    const connection = await analyticsDb.getWorkspaceConnection(workspaceId, connectionId);
+    if (!connection) {
+      return { success: false, error: 'Connection not found.' };
+    }
+
+    const settings = await analyticsDb.getWorkspaceAnalyticsSettings(workspaceId);
+    const effectiveConnToken = connection.top_pins_fastcron_token || connection.fastcron_token;
+    const token = await this.resolveFastCronToken(effectiveConnToken, settings?.fastcron_token, runtimeEnv);
+    if (!token) {
+      return { success: false, error: 'FastCron API token not configured.' };
+    }
+
+    const effectiveSecretResult = await getEffectiveSecret(workspaceId, runtimeEnv);
+    const effectiveSecret = effectiveSecretResult?.value;
+    if (!effectiveSecret) {
+      return { success: false, error: 'Ingest secret not configured.' };
+    }
+
+    const base = (runtimeEnv?.DISPATCH_BASE_URL as string) ||
+      (typeof process !== 'undefined' ? process.env.DISPATCH_BASE_URL : '') ||
+      'https://pinorbit-v2.o-i.workers.dev';
+    const tickEndpointUrl = `${base.replace(/\/+$/, '')}/api/internal/pinterest/backfill-tick`;
+
+    const cronExpr = intervalMinutes > 1 ? `*/${intervalMinutes} * * * *` : '* * * * *';
+    const jobName = `PinOrbit Backfill — ${workspaceId.substring(0, 8)} — ${connection.display_name} — ${backfillJobId.substring(0, 8)}`;
+    const httpHeaders = `Content-Type: application/json\r\nx-ingest-secret: ${effectiveSecret}`;
+    const postData = JSON.stringify({
+      backfill_job_id: backfillJobId,
+      connection_id: connectionId,
+      channel: 'top_pins',
+    });
+
+    const jobParams: Record<string, any> = {
+      name: jobName,
+      expression: cronExpr,
+      timezone: settings?.timezone || 'UTC',
+      url: tickEndpointUrl,
+      httpMethod: 'POST',
+      http_method: 'POST',
+      httpHeaders: httpHeaders,
+      http_headers: httpHeaders,
+      postData: postData,
+      post_data: postData,
+      instances: 1, // Strictly 1 instance to prevent overlapping ticks
+      notify: false,
+      timeout: 45,
+    };
+
+    const addRes = await this.fastcronCall('cron_add', jobParams, token);
+    if (!addRes.success) {
+      return { success: false, error: addRes.error || 'Failed to create FastCron backfill job.' };
+    }
+
+    const createdId = addRes.data?.id || addRes.data?.data?.id;
+    const numId = createdId != null ? Number(createdId) : undefined;
+    return { success: true, jobId: numId };
+  },
+
+  /**
+   * Deletes a FastCron backfill job.
+   */
+  async deleteBackfillCronJob(
+    workspaceId: string,
+    jobId: number | null | undefined,
+    runtimeEnv?: Record<string, any>,
+    connectionId?: string
+  ): Promise<boolean> {
+    return this.deleteFastCronJob(workspaceId, jobId, runtimeEnv || {}, connectionId);
+  },
+
+  /**
+   * Pauses a FastCron backfill job.
+   */
+  async pauseBackfillCronJob(
+    workspaceId: string,
+    jobId: number | null | undefined,
+    runtimeEnv?: Record<string, any>,
+    connectionId?: string
+  ): Promise<boolean> {
+    return this.disableFastCronJob(workspaceId, jobId, runtimeEnv || {}, connectionId);
+  },
+
+  /**
+   * Resumes a FastCron backfill job.
+   */
+  async resumeBackfillCronJob(
+    workspaceId: string,
+    jobId: number | null | undefined,
+    runtimeEnv?: Record<string, any>,
+    connectionId?: string
+  ): Promise<boolean> {
+    return this.enableFastCronJob(workspaceId, jobId, runtimeEnv || {}, connectionId);
+  },
+
+  /**
    * Dispatches manual sync via cron_run (with legacy direct POST fallback) or test ping.
    */
   async triggerManualSync(

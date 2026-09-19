@@ -452,6 +452,21 @@ const accountName = connection.display_name || 'Account';
             </div>
             <input data-field="fastcron_token" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" placeholder="Leave empty for default" class="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs focus:border-primary focus:outline-none" />
           </div>
+
+          <!-- Cloud Background Backfill Active Banner -->
+          <div id="cloud-backfill-active-card-banner" class="hidden sm:col-span-2 rounded-xl border border-primary/30 bg-primary/10 p-3 text-xs flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span class="text-base animate-pulse">☁️</span>
+              <div>
+                <div class="font-bold text-foreground" id="cloud-backfill-card-title">Cloud Backfill Running</div>
+                <div class="text-[11px] text-muted-foreground" id="cloud-backfill-card-subtitle">Day 0 of 0 · Next run in ~1m</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button type="button" id="cloud-backfill-card-btn-pause" class="rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-foreground hover:bg-muted cursor-pointer">Pause</button>
+              <button type="button" id="cloud-backfill-card-btn-cancel" class="rounded-lg border border-red-500/30 bg-red-500/10 text-red-500 px-2.5 py-1 text-[11px] font-semibold hover:bg-red-500/20 cursor-pointer">Cancel</button>
+            </div>
+          </div>
         </div>
 
         <footer class="flex flex-wrap items-center gap-2 border-t border-border pt-3 mt-auto">
@@ -1131,6 +1146,27 @@ const accountName = connection.display_name || 'Account';
         </button>
       </div>
 
+      <!-- Execution Mode Selector -->
+      <div class="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
+        <div class="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Execution Mode</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+          <label class="flex items-start gap-2 rounded-lg border border-primary/40 bg-primary/5 p-2.5 cursor-pointer hover:border-primary transition-all has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+            <input type="radio" name="backfill_exec_mode" value="browser" checked class="mt-0.5 text-primary" />
+            <div>
+              <div class="font-bold text-foreground">⚡ Browser Interactive (15s)</div>
+              <div class="text-[11px] text-muted-foreground">Runs in open tab with live log console and instant pause/resume.</div>
+            </div>
+          </label>
+          <label class="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5 cursor-pointer hover:border-primary transition-all has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+            <input type="radio" name="backfill_exec_mode" value="cloud" class="mt-0.5 text-primary" />
+            <div>
+              <div class="font-bold text-foreground">☁️ Cloud Background (FastCron 1m)</div>
+              <div class="text-[11px] text-muted-foreground">Runs in cloud (1 day/min). You can close the tab or turn off device.</div>
+            </div>
+          </label>
+        </div>
+      </div>
+
       <!-- Progress Section -->
       <div class="space-y-2">
         <div class="flex justify-between items-center text-xs">
@@ -1187,8 +1223,8 @@ const accountName = connection.display_name || 'Account';
 
       <!-- Controls & Footer -->
       <div class="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-        <!-- Pacing delay selector -->
-        <div class="flex items-center gap-2 text-xs">
+        <!-- Pacing delay selector (shown for browser mode) -->
+        <div id="backfill-pacing-container" class="flex items-center gap-2 text-xs">
           <label for="backfill-pacing-select" class="text-muted-foreground font-semibold">Pacing Delay:</label>
           <select
             id="backfill-pacing-select"
@@ -1204,9 +1240,17 @@ const accountName = connection.display_name || 'Account';
         <div class="flex items-center gap-2">
           <button
             type="button"
+            id="backfill-btn-start"
+            class="rounded-xl bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-sm"
+          >
+            <span id="backfill-start-icon">⚡</span>
+            <span id="backfill-start-label">Start Backfill</span>
+          </button>
+          <button
+            type="button"
             id="backfill-btn-pause"
             disabled
-            class="rounded-xl border border-border bg-card px-3.5 py-1.5 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-40 transition-all cursor-pointer inline-flex items-center gap-1.5"
+            class="hidden rounded-xl border border-border bg-card px-3.5 py-1.5 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-40 transition-all cursor-pointer items-center gap-1.5"
           >
             <span id="backfill-pause-icon">⏸️</span>
             <span id="backfill-pause-label">Pause</span>
@@ -1215,14 +1259,14 @@ const accountName = connection.display_name || 'Account';
             type="button"
             id="backfill-btn-stop"
             disabled
-            class="rounded-xl border border-red-500/30 bg-red-500/10 text-red-500 px-3.5 py-1.5 text-xs font-semibold hover:bg-red-500/20 disabled:opacity-40 transition-all cursor-pointer"
+            class="hidden rounded-xl border border-red-500/30 bg-red-500/10 text-red-500 px-3.5 py-1.5 text-xs font-semibold hover:bg-red-500/20 disabled:opacity-40 transition-all cursor-pointer"
           >
             ⏹️ Stop
           </button>
           <button
             type="button"
             id="backfill-btn-close"
-            class="rounded-xl bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 transition-all cursor-pointer"
+            class="rounded-xl border border-border bg-card px-4 py-1.5 text-xs font-bold text-foreground hover:bg-muted transition-all cursor-pointer"
           >
             Close
           </button>
