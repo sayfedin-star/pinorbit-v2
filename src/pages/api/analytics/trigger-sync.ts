@@ -73,6 +73,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   const fromDate = body.from_date || body.start_date;
   const toDate = body.to_date || body.end_date;
+  const direct = Boolean(body.direct || body.mode === 'direct');
 
   if (fromDate && toDate && fromDate > toDate) {
     return new Response(
@@ -89,13 +90,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   try {
     await assertWorkspaceAccess(schedulingClient, workspaceId, user.id);
+    const overrides = (fromDate && toDate) || direct
+      ? {
+          from_date: fromDate,
+          to_date: toDate,
+          direct,
+        }
+      : undefined;
+
     const result = await fastcronService.triggerManualSync(
       workspaceId,
       connectionId,
       channel,
       mode,
       runtimeEnv,
-      fromDate && toDate ? { from_date: fromDate, to_date: toDate } : undefined
+      overrides
     );
 
     return new Response(JSON.stringify(result), {

@@ -39,6 +39,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     pathname.startsWith('/api/admin/bootstrap') ||
     pathname === '/api/internal/pinterest/ingest' ||
     pathname === '/api/internal/pinterest/daily-dispatch' ||
+    pathname === '/api/internal/pinterest/backfill-tick' ||
     pathname === '/api/internal/pinterest/cleanup-retention' ||
     pathname === '/api/internal/pinterest/dispatch-due-pin' ||
     pathname.startsWith('/api/auth') ||
