@@ -12,6 +12,13 @@ BEGIN
     NEW.repins := GREATEST(COALESCE(OLD.repins, 0), COALESCE(NEW.repins, 0));
     NEW.comments := GREATEST(COALESCE(OLD.comments, 0), COALESCE(NEW.comments, 0));
     NEW.share_count := GREATEST(COALESCE(OLD.share_count, 0), COALESCE(NEW.share_count, 0));
+
+    -- Enforce monotonicity on reactions JSONB if total is present
+    IF (OLD.reactions IS NOT NULL AND jsonb_typeof(OLD.reactions) = 'object' AND COALESCE((OLD.reactions->>'total')::numeric, 0) > 0) THEN
+      IF (NEW.reactions IS NULL OR jsonb_typeof(NEW.reactions) != 'object' OR COALESCE((NEW.reactions->>'total')::numeric, 0) < COALESCE((OLD.reactions->>'total')::numeric, 0)) THEN
+        NEW.reactions := OLD.reactions;
+      END IF;
+    END IF;
   END IF;
   RETURN NEW;
 END;

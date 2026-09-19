@@ -52,6 +52,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       p1Admin.from('boards').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId),
       p1Admin.from('pins').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId),
     ]);
+    if (accRes?.error) throw new Error(`P1 accounts count error: ${accRes.error.message}`);
+    if (boardRes?.error) throw new Error(`P1 boards count error: ${boardRes.error.message}`);
+    if (pinRes?.error) throw new Error(`P1 pins count error: ${pinRes.error.message}`);
 
     // Check P2 tables
     const p2Admin = dbClients.getCompetitorsAdmin(runtimeEnv);
@@ -59,6 +62,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
       p2Admin.from('competitors').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId),
       p2Admin.from('competitor_boards').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId),
     ]);
+    if (compRes?.error) throw new Error(`P2 competitors count error: ${compRes.error.message}`);
+    if (compBoardRes?.error) throw new Error(`P2 competitor_boards count error: ${compBoardRes.error.message}`);
 
     // Check P3 tables
     const p3Admin = dbClients.getAnalyticsAdmin(runtimeEnv);
@@ -66,6 +71,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .from('analytics_connections')
       .select('id', { count: 'exact', head: true })
       .eq('workspace_id', workspaceId);
+    if (connRes?.error) throw new Error(`P3 analytics_connections count error: ${connRes.error.message}`);
 
     // Check P4 tables (PinArchive)
     let paAccCount = 0;

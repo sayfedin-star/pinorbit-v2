@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { executeBidirectionalCompensation } from '../services/repurpose-service';
 import { POST as deleteWorkspaceHandler } from '../../pages/api/workspaces/delete';
+import { POST as ingestHandler } from '../../pages/api/internal/pinterest/ingest';
 import { verifyIngestSecret } from '../services/webhook-secrets';
+import { pinnerETL } from '../services/pinner-etl';
 import { gasCall } from '../lib/gas-bridge';
 import { createBoardViaWebhook } from '../../lib/boards';
 import { analyticsDb } from '../db/analytics';
@@ -165,22 +167,111 @@ describe('Level-2 Adversarial & Chaos Stress Test Suite', () => {
       // The workspace itself MUST NOT have been deleted
       expect(workspaceDeleteMock).not.toHaveBeenCalled();
     });
+
+    it('workspace delete fails fast and halts when a table count query fails with PostgREST error', async () => {
+      const workspaceId = '00000000-0000-0000-0000-000000000001';
+
+      vi.spyOn(workspaceGuard, 'assertWorkspaceAccess').mockResolvedValue({
+        isOwner: true,
+        isAdmin: true,
+        role: 'owner',
+        workspaceId,
+      } as any);
+
+      // Mock P1 pins count returning an error (e.g. timeout / network glitch)
+      const mockP1Admin: any = {
+        from: vi.fn((tbl: string) => {
+          if (tbl === 'pins') {
+            return {
+              select: vi.fn().mockReturnValue({
+                eq: vi.fn().mockResolvedValue({ count: null, error: { message: 'Connection pool timeout on pins table' } }),
+              }),
+            };
+          }
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({ count: 0, error: null }),
+            }),
+          };
+        }),
+      };
+
+      const mockP2Admin: any = {
+        from: vi.fn(() => ({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({ count: 0, error: null }),
+          }),
+        })),
+      };
+      const mockP3Admin: any = {
+        from: vi.fn(() => ({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({ count: 0, error: null }),
+          }),
+        })),
+      };
+
+      const workspaceDeleteMock = vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+      });
+
+      const mockSchedulingClient: any = {
+        from: vi.fn((tbl: string) => {
+          if (tbl === 'workspaces') return { delete: workspaceDeleteMock };
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({ count: 0, error: null }),
+            }),
+          };
+        }),
+      };
+
+      vi.spyOn(dbClients, 'getSchedulingAdmin').mockReturnValue(mockP1Admin);
+      vi.spyOn(dbClients, 'getCompetitorsAdmin').mockReturnValue(mockP2Admin);
+      vi.spyOn(dbClients, 'getAnalyticsAdmin').mockReturnValue(mockP3Admin);
+      vi.spyOn(dbClients, 'getConfig').mockReturnValue({ PINARCHIVE_SUPABASE_SECRET_KEY: '' } as any);
+
+      const req = new Request('http://localhost:4321/api/workspaces/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_id: workspaceId }),
+      });
+
+      const res = await deleteWorkspaceHandler({
+        request: req,
+        locals: { user: { id: 'owner-1' }, supabase: mockSchedulingClient },
+      } as any);
+
+      expect(res.status).toBe(500);
+      const json = await res.json();
+      expect(json.error).toContain('P1 pins count error: Connection pool timeout on pins table');
+      expect(workspaceDeleteMock).not.toHaveBeenCalled();
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Axis 2: Database-Enforced Monotonicity Simulation
   // ═══════════════════════════════════════════════════════════════════════════
   describe('Axis 2: Database-Enforced Monotonicity', () => {
-    it('simulates trg_pa_pins_enforce_monotonic_metrics: keeps higher values on concurrent/out-of-order writes', () => {
+    it('simulates trg_pa_pins_enforce_monotonic_metrics: keeps higher values on concurrent/out-of-order writes including reactions', () => {
       // Direct simulation of PostgreSQL trigger logic:
       // NEW.saves := GREATEST(COALESCE(OLD.saves, 0), COALESCE(NEW.saves, 0));
-      const applyMonotonicTrigger = (oldRow: any, newRow: any) => ({
-        ...newRow,
-        saves: Math.max(oldRow.saves ?? 0, newRow.saves ?? 0),
-        repins: Math.max(oldRow.repins ?? 0, newRow.repins ?? 0),
-        comments: Math.max(oldRow.comments ?? 0, newRow.comments ?? 0),
-        share_count: Math.max(oldRow.share_count ?? 0, newRow.share_count ?? 0),
-      });
+      const applyMonotonicTrigger = (oldRow: any, newRow: any) => {
+        let reactions = newRow.reactions;
+        if (oldRow.reactions && typeof oldRow.reactions === 'object' && Number(oldRow.reactions.total || 0) > 0) {
+          if (!newRow.reactions || typeof newRow.reactions !== 'object' || Number(newRow.reactions.total || 0) < Number(oldRow.reactions.total || 0)) {
+            reactions = oldRow.reactions;
+          }
+        }
+        return {
+          ...newRow,
+          saves: Math.max(oldRow.saves ?? 0, newRow.saves ?? 0),
+          repins: Math.max(oldRow.repins ?? 0, newRow.repins ?? 0),
+          comments: Math.max(oldRow.comments ?? 0, newRow.comments ?? 0),
+          share_count: Math.max(oldRow.share_count ?? 0, newRow.share_count ?? 0),
+          reactions,
+        };
+      };
 
       const committedState = {
         pin_id: 'pin-12345',
@@ -188,15 +279,17 @@ describe('Level-2 Adversarial & Chaos Stress Test Suite', () => {
         repins: 80,
         comments: 12,
         share_count: 45,
+        reactions: { total: 42, type_1: 40, type_7: 2 },
       };
 
-      // Stale write arrives with lower counts (race condition / delayed worker)
+      // Stale write arrives with lower counts and missing reactions (e.g. GAS collector)
       const staleIncomingWrite = {
         pin_id: 'pin-12345',
         saves: 120, // Stale!
         repins: 60,  // Stale!
         comments: 12,
         share_count: 30, // Stale!
+        reactions: null, // Partial payload without reactions!
       };
 
       const result = applyMonotonicTrigger(committedState, staleIncomingWrite);
@@ -204,14 +297,16 @@ describe('Level-2 Adversarial & Chaos Stress Test Suite', () => {
       expect(result.saves).toBe(150); // Did not regress to 120
       expect(result.repins).toBe(80);  // Did not regress to 60
       expect(result.share_count).toBe(45); // Did not regress to 30
+      expect(result.reactions).toEqual({ total: 42, type_1: 40, type_7: 2 }); // Preserved!
 
-      // Fresh write arrives with higher counts
+      // Fresh write arrives with higher counts and reactions
       const freshIncomingWrite = {
         pin_id: 'pin-12345',
         saves: 200,
         repins: 95,
         comments: 15,
         share_count: 50,
+        reactions: { total: 55, type_1: 50, type_7: 5 },
       };
 
       const advancedResult = applyMonotonicTrigger(result, freshIncomingWrite);
@@ -219,6 +314,7 @@ describe('Level-2 Adversarial & Chaos Stress Test Suite', () => {
       expect(advancedResult.repins).toBe(95);
       expect(advancedResult.comments).toBe(15);
       expect(advancedResult.share_count).toBe(50);
+      expect(advancedResult.reactions).toEqual({ total: 55, type_1: 50, type_7: 5 });
     });
   });
 
@@ -344,6 +440,76 @@ describe('Level-2 Adversarial & Chaos Stress Test Suite', () => {
       // Empty secret rejected
       const resEmpty = await verifyIngestSecret('', validWsId, runtimeEnv);
       expect(resEmpty.valid).toBe(false);
+    });
+
+    it('ingest endpoint accepts previous secret during 300s grace period and rejects global secret when workspace override exists', async () => {
+      const wsId = '00000000-0000-0000-0000-000000000001';
+      const connId = '00000000-0000-0000-0000-000000000099';
+
+      const mockKvStore = new Map<string, string>();
+      mockKvStore.set('ingest_secret:global', 'global_secret');
+      mockKvStore.set(`ingest_secret:ws:${wsId}`, 'new_ws_secret');
+      mockKvStore.set(`ingest_secret:ws:${wsId}:prev`, 'old_ws_secret_grace_period');
+
+      const runtimeEnv = {
+        INGEST_SECRETS_KV: {
+          get: vi.fn(async (key: string) => mockKvStore.get(key) || null),
+        },
+      };
+
+      const mockAnalyticsClient = {
+        from: vi.fn((table: string) => ({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          is: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: {
+              id: connId,
+              workspace_id: wsId,
+              analytics_enabled: true,
+              deleted_at: null,
+            },
+            error: null,
+          }),
+        })),
+      };
+
+      vi.spyOn(dbClients, 'getAnalytics').mockReturnValue(mockAnalyticsClient as any);
+      vi.spyOn(pinnerETL, 'processIngestionPayload').mockResolvedValue({ success: true, rows_processed: 1 } as any);
+
+      // 1. Previous secret in grace period is ACCEPTED
+      const graceReq = new Request('http://localhost:4321/api/internal/pinterest/ingest', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-ingest-secret': 'old_ws_secret_grace_period',
+        },
+        body: JSON.stringify({ connection_id: connId, workspace_id: wsId }),
+      });
+
+      const graceRes = await ingestHandler({
+        request: graceReq,
+        locals: { runtime: { env: runtimeEnv } },
+      } as any);
+
+      expect(graceRes.status).toBe(200);
+
+      // 2. Global secret is REJECTED because workspace override exists
+      const globalReq = new Request('http://localhost:4321/api/internal/pinterest/ingest', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-ingest-secret': 'global_secret',
+        },
+        body: JSON.stringify({ connection_id: connId, workspace_id: wsId }),
+      });
+
+      const globalRes = await ingestHandler({
+        request: globalReq,
+        locals: { runtime: { env: runtimeEnv } },
+      } as any);
+
+      expect(globalRes.status).toBe(401);
     });
   });
 
