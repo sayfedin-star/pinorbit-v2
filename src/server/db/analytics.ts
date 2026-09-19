@@ -1735,7 +1735,7 @@ export const analyticsDb = {
         total_days: params.totalDays,
         completed_days: 0,
         failed_days: 0,
-        interval_minutes: params.intervalMinutes || 1,
+        interval_minutes: params.intervalMinutes || 5,
         fastcron_job_id: params.fastcronJobId || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),

@@ -101,7 +101,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const channel = (body.channel || 'top_pins') as 'account_analytics' | 'top_pins';
       const fromDate = body.from_date || body.start_date;
       const toDate = body.to_date || body.end_date;
-      const intervalMinutes = Math.max(1, parseInt(body.interval_minutes, 10) || 1);
+      const intervalMinutes = Math.max(5, parseInt(body.interval_minutes, 10) || 5);
 
       if (!connectionId) {
         return new Response(

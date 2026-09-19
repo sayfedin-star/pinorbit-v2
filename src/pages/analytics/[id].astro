@@ -459,7 +459,7 @@ const accountName = connection.display_name || 'Account';
               <span class="text-base animate-pulse">☁️</span>
               <div>
                 <div class="font-bold text-foreground" id="cloud-backfill-card-title">Cloud Backfill Running</div>
-                <div class="text-[11px] text-muted-foreground" id="cloud-backfill-card-subtitle">Day 0 of 0 · Next run in ~1m</div>
+                <div class="text-[11px] text-muted-foreground" id="cloud-backfill-card-subtitle">Day 0 of 0 · Next run in ~5m</div>
               </div>
             </div>
             <div class="flex items-center gap-1.5">
@@ -1160,8 +1160,8 @@ const accountName = connection.display_name || 'Account';
           <label class="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5 cursor-pointer hover:border-primary transition-all has-[:checked]:border-primary has-[:checked]:bg-primary/10">
             <input type="radio" name="backfill_exec_mode" value="cloud" class="mt-0.5 text-primary" />
             <div>
-              <div class="font-bold text-foreground">☁️ Cloud Background (FastCron 1m)</div>
-              <div class="text-[11px] text-muted-foreground">Runs in cloud (1 day/min). You can close the tab or turn off device.</div>
+              <div class="font-bold text-foreground">☁️ Cloud Background (FastCron 5m)</div>
+              <div class="text-[11px] text-muted-foreground">Runs in cloud (1 day / 5 min). You can close the tab or turn off device.</div>
             </div>
           </label>
         </div>

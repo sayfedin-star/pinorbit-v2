@@ -45,7 +45,7 @@ describe('FastCron Recurring Loop Backfill System', () => {
       total_days: 3,
       completed_days: 0,
       failed_days: 0,
-      interval_minutes: 1,
+      interval_minutes: 5,
       fastcron_job_id: 9999,
       last_run_at: null,
       created_at: new Date().toISOString(),
@@ -241,7 +241,7 @@ describe('FastCron Recurring Loop Backfill System', () => {
           connection_id: mockConnectionId,
           from_date: '2026-09-10',
           to_date: '2026-09-15',
-          interval_minutes: 1,
+          interval_minutes: 5,
         }),
       });
 
@@ -262,7 +262,7 @@ describe('FastCron Recurring Loop Backfill System', () => {
         mockConnectionId,
         expect.any(String),
         'top_pins',
-        1,
+        5,
         expect.anything()
       );
     });

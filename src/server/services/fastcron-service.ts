@@ -628,14 +628,14 @@ export const fastcronService = {
 
   /**
    * Creates a recurring FastCron job for automated background backfill.
-   * Runs every intervalMinutes (default 1 min: '* * * * *').
+   * Runs every intervalMinutes (default 5 minutes).
    */
   async createBackfillCronJob(
     workspaceId: string,
     connectionId: string,
     backfillJobId: string,
     channel: 'account_analytics' | 'top_pins' = 'top_pins',
-    intervalMinutes = 1,
+    intervalMinutes = 5,
     runtimeEnv?: Record<string, any>
   ): Promise<{ success: boolean; jobId?: number; error?: string }> {
     const connection = await analyticsDb.getWorkspaceConnection(workspaceId, connectionId);

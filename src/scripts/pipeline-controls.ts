@@ -1674,7 +1674,7 @@ if (pipeConnId) {
       }
 
       // =========================================================================
-      // CLOUD BACKGROUND MODE (FastCron 1m)
+      // CLOUD BACKGROUND MODE (FastCron 5m)
       // =========================================================================
       if (mode === 'cloud') {
         btnStart.disabled = true;
@@ -1691,7 +1691,7 @@ if (pipeConnId) {
               channel,
               from_date: fromDate,
               to_date: toDate,
-              interval_minutes: 1,
+              interval_minutes: 5,
             }),
           });
 
@@ -1699,7 +1699,7 @@ if (pipeConnId) {
           if (res.ok && data.success) {
             activeCloudJob = data.data;
             appendLog(`☁️ Cloud Background Backfill launched! FastCron Job #${activeCloudJob.fastcron_job_id} is active.`, 'success');
-            appendLog(`ℹ️ FastCron will process 1 day/min in the cloud. You can safely close this browser tab!`, 'info');
+            appendLog(`ℹ️ FastCron will process 1 day every 5 minutes in the cloud. You can safely close this browser tab!`, 'info');
 
             btnStart.classList.add('hidden');
             btnPause?.classList.remove('hidden');
