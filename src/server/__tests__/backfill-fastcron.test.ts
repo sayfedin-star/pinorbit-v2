@@ -261,13 +261,38 @@ describe('FastCron Recurring Loop Backfill System', () => {
         mockWorkspaceId,
         mockConnectionId,
         expect.any(String),
+        'top_pins',
         1,
         expect.anything()
       );
     });
 
+    it('rejects future end date on start action', async () => {
+      const futureDate = '2099-01-01';
+      const req = new Request('http://localhost/api/analytics/backfill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'start',
+          connection_id: mockConnectionId,
+          from_date: '2026-09-01',
+          to_date: futureDate,
+        }),
+      });
+
+      const res = await postBackfillAdmin({
+        request: req,
+        locals: { user: { id: 'u1' }, supabase: {}, activeWorkspaceId: mockWorkspaceId },
+      } as any);
+
+      expect(res.status).toBe(422);
+      const json = await res.json();
+      expect(json.error).toContain('future');
+    });
+
     it('pauses and resumes backfill', async () => {
-      // Pause
+      // Pause (when running)
+      mockJob.status = 'running';
       const pauseReq = new Request('http://localhost/api/analytics/backfill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -283,7 +308,7 @@ describe('FastCron Recurring Loop Backfill System', () => {
       expect(mockJob.status).toBe('paused');
       expect(fastcronService.pauseBackfillCronJob).toHaveBeenCalled();
 
-      // Resume
+      // Resume (when paused)
       const resumeReq = new Request('http://localhost/api/analytics/backfill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -301,6 +326,7 @@ describe('FastCron Recurring Loop Backfill System', () => {
     });
 
     it('cancels backfill and deletes FastCron job', async () => {
+      mockJob.status = 'running';
       const cancelReq = new Request('http://localhost/api/analytics/backfill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

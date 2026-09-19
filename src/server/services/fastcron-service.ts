@@ -634,6 +634,7 @@ export const fastcronService = {
     workspaceId: string,
     connectionId: string,
     backfillJobId: string,
+    channel: 'account_analytics' | 'top_pins' = 'top_pins',
     intervalMinutes = 1,
     runtimeEnv?: Record<string, any>
   ): Promise<{ success: boolean; jobId?: number; error?: string }> {
@@ -643,7 +644,10 @@ export const fastcronService = {
     }
 
     const settings = await analyticsDb.getWorkspaceAnalyticsSettings(workspaceId);
-    const effectiveConnToken = connection.top_pins_fastcron_token || connection.fastcron_token;
+    const channelToken = channel === 'account_analytics'
+      ? connection.analytics_fastcron_token
+      : connection.top_pins_fastcron_token;
+    const effectiveConnToken = channelToken || connection.fastcron_token;
     const token = await this.resolveFastCronToken(effectiveConnToken, settings?.fastcron_token, runtimeEnv);
     if (!token) {
       return { success: false, error: 'FastCron API token not configured.' };
@@ -666,7 +670,7 @@ export const fastcronService = {
     const postData = JSON.stringify({
       backfill_job_id: backfillJobId,
       connection_id: connectionId,
-      channel: 'top_pins',
+      channel,
     });
 
     const jobParams: Record<string, any> = {

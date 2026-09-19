@@ -117,6 +117,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
         );
       }
 
+      const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+      if (!DATE_REGEX.test(fromDate) || !DATE_REGEX.test(toDate)) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Invalid date format. Expected YYYY-MM-DD.' }),
+          { status: 422, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
       if (fromDate > toDate) {
         return new Response(
           JSON.stringify({ success: false, error: 'from_date must be before or equal to to_date.' }),
@@ -124,8 +132,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
         );
       }
 
-      // 90-Day Lookback Guard for Pinterest API
       const now = new Date();
+      const todayStr = now.toISOString().split('T')[0];
+      if (toDate > todayStr) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `Validation Error: End date cannot be in the future (Latest allowed: ${todayStr}).`,
+          }),
+          { status: 422, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // 90-Day Lookback Guard for Pinterest API
       const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 90, 0, 0, 0));
       const cutoffStr = cutoff.toISOString().split('T')[0];
       if (fromDate < cutoffStr) {
@@ -156,6 +175,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const [eY, eM, eD] = toDate.split('-').map(Number);
       const sUtc = Date.UTC(sY, sM - 1, sD);
       const eUtc = Date.UTC(eY, eM - 1, eD);
+      if (isNaN(sUtc) || isNaN(eUtc)) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Invalid calendar date values.' }),
+          { status: 422, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
       const totalDays = Math.round((eUtc - sUtc) / (24 * 60 * 60 * 1000)) + 1;
 
       // 1. Create DB record
@@ -174,6 +199,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         workspaceId,
         connectionId,
         job.id,
+        channel,
         intervalMinutes,
         runtimeEnv
       );
@@ -225,6 +251,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
         );
       }
 
+      if (job.status === 'paused') {
+        return new Response(
+          JSON.stringify({ success: true, message: 'Backfill is already paused.', data: job }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (job.status !== 'running') {
+        return new Response(
+          JSON.stringify({ success: false, error: `Cannot pause backfill with status "${job.status}".` }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
       if (job.fastcron_job_id) {
         await fastcronService.pauseBackfillCronJob(workspaceId, job.fastcron_job_id, runtimeEnv, job.connection_id);
       }
@@ -253,6 +293,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
         );
       }
 
+      if (job.status === 'running') {
+        return new Response(
+          JSON.stringify({ success: true, message: 'Backfill is already running.', data: job }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (job.status !== 'paused') {
+        return new Response(
+          JSON.stringify({ success: false, error: `Cannot resume backfill with status "${job.status}".` }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
       if (job.fastcron_job_id) {
         await fastcronService.resumeBackfillCronJob(workspaceId, job.fastcron_job_id, runtimeEnv, job.connection_id);
       }
@@ -278,6 +332,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
         return new Response(
           JSON.stringify({ success: false, error: 'Job not found.' }),
           { status: 404, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (job.status === 'cancelled' || job.status === 'completed') {
+        return new Response(
+          JSON.stringify({ success: true, message: `Backfill is already ${job.status}.`, data: job }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
         );
       }
 

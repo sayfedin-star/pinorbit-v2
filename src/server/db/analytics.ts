@@ -1839,7 +1839,7 @@ export const analyticsDb = {
       })
       .eq('id', jobId)
       .eq('status', 'running')
-      .or(`last_run_at.is.null,last_run_at.lt.${staleThreshold}`)
+      .or(`last_run_at.is.null,last_run_at.lt."${staleThreshold}"`)
       .select()
       .maybeSingle();
 
