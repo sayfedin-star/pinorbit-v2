@@ -132,6 +132,32 @@ export const schedulingDb = {
   },
 
   /**
+   * Batch creates pins within an authorized workspace.
+   */
+  async createPinsBatch(
+    schedulingClient: SupabaseClient,
+    workspaceId: string,
+    userId: string,
+    pinsData: Array<Omit<PinRecord, 'id' | 'workspace_id' | 'created_at' | 'updated_at' | 'attempts' | 'last_error_code' | 'last_error_message' | 'processing_started_at' | 'posted_at'>>
+  ): Promise<PinRecord[]> {
+    if (pinsData.length === 0) return [];
+    await assertWorkspaceAccess(schedulingClient, workspaceId, userId);
+
+    const rows = pinsData.map(pin => ({
+      ...pin,
+      workspace_id: workspaceId,
+    }));
+
+    const { data, error } = await schedulingClient
+      .from('pins')
+      .insert(rows)
+      .select();
+
+    if (error) throw error;
+    return (data as PinRecord[]) || [];
+  },
+
+  /**
    * Updates pin status or rescheduling time.
    */
   async updatePinStatus(

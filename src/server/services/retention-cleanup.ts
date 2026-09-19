@@ -5,6 +5,7 @@ export interface CleanupOverrides {
   p1?: boolean;
   p2?: boolean;
   p3?: boolean;
+  p4?: boolean;
 }
 
 interface BatchedDeleteOptions {
@@ -105,6 +106,7 @@ export async function runRetentionCleanup(
   const effectiveP1 = opts?.overrides?.p1 ?? Boolean(wsSettings?.auto_prune_enabled ?? false);
   const effectiveP2 = opts?.overrides?.p2 ?? Boolean(wsSettings?.p2_prune_enabled ?? false);
   const effectiveP3 = opts?.overrides?.p3 ?? Boolean(wsSettings?.p3_prune_enabled ?? false);
+  const effectiveP4 = opts?.overrides?.p4 ?? Boolean(wsSettings?.p4_prune_enabled ?? wsSettings?.auto_prune_enabled ?? false);
 
   // 1. Unconditional Orphan Pin Sweep (outside gates)
   const sweepCutoff = new Date(Date.now() - processingTimeoutMinutes * 60000).toISOString();
@@ -292,6 +294,43 @@ export async function runRetentionCleanup(
     }
   }
 
+  // 5. Gate P4 (PinArchive runs and metrics)
+  let deletedPaRuns = 0;
+  let deletedPaMetrics = 0;
+  if (effectiveP4) {
+    try {
+      const pinArchiveClient = dbClients.getPinArchive(runtimeEnv);
+      const paRunsDays = typeof wsSettings?.pa_runs_days === 'number' ? wsSettings.pa_runs_days : 60;
+      const paRunsCutoff = new Date(Date.now() - paRunsDays * 86400000).toISOString();
+
+      const resRuns = await batchedDelete(pinArchiveClient, 'pa_runs', {
+        column: 'workspace_id',
+        value: workspaceId,
+        workspaceId,
+        dateColumn: 'started_at',
+        cutoff: paRunsCutoff,
+      });
+      deletedPaRuns = resRuns.deleted;
+      if (resRuns.hitCap) wasTruncated = true;
+
+      const paMetricsDays = typeof wsSettings?.pa_metrics_days === 'number' ? wsSettings.pa_metrics_days : 90;
+      const paMetricsCutoff = new Date(Date.now() - paMetricsDays * 86400000).toISOString();
+
+      const resMetrics = await batchedDelete(pinArchiveClient, 'pa_pin_metrics', {
+        column: 'workspace_id',
+        value: workspaceId,
+        workspaceId,
+        dateColumn: 'recorded_at',
+        cutoff: paMetricsCutoff,
+      });
+      deletedPaMetrics = resMetrics.deleted;
+      if (resMetrics.hitCap) wasTruncated = true;
+    } catch (p4Err: any) {
+      console.error('[Retention] P4 prune failed:', p4Err);
+      warnings.push(`P4 prune failed: ${p4Err.message || String(p4Err)}`);
+    }
+  }
+
   // Construct consolidated payload
   const payload: Record<string, any> = {
     success: true,
@@ -300,6 +339,7 @@ export async function runRetentionCleanup(
     auto_prune_enabled: Boolean(wsSettings?.auto_prune_enabled ?? false),
     p2_prune_enabled: Boolean(wsSettings?.p2_prune_enabled ?? false),
     p3_prune_enabled: Boolean(wsSettings?.p3_prune_enabled ?? false),
+    p4_prune_enabled: Boolean(wsSettings?.p4_prune_enabled ?? false),
     retention_posted_days: retentionPostedDays,
     processing_timeout_minutes: processingTimeoutMinutes,
     deleted_pins_count: deletedPinsCount,
@@ -310,6 +350,8 @@ export async function runRetentionCleanup(
     p2: p2Result,
     deleted_ingestion_runs: deletedIngestionRuns,
     deleted_snapshots_count: deletedSnapshotsCount,
+    deleted_pa_runs: deletedPaRuns,
+    deleted_pa_metrics: deletedPaMetrics,
     posted_cutoff: postedCutoff,
     warnings,
   };
@@ -333,6 +375,9 @@ export async function runRetentionCleanup(
       top_pins_raw_days: wsSettings?.top_pins_raw_days ?? 180,
       top_pins_downsample_enabled: wsSettings?.top_pins_downsample_enabled ?? false,
       analytics_daily_keep_days: wsSettings?.analytics_daily_keep_days ?? null,
+      p4_prune_enabled: wsSettings?.p4_prune_enabled ?? false,
+      pa_runs_days: wsSettings?.pa_runs_days ?? 60,
+      pa_metrics_days: wsSettings?.pa_metrics_days ?? 90,
       last_cleanup_at: new Date().toISOString(),
       last_cleanup_result: {
         at: new Date().toISOString(),
@@ -350,6 +395,10 @@ export async function runRetentionCleanup(
           p3: {
             runs: payload.deleted_ingestion_runs,
             snapshots: payload.deleted_snapshots_count,
+          },
+          p4: {
+            runs: payload.deleted_pa_runs,
+            metrics: payload.deleted_pa_metrics,
           },
         },
       },
