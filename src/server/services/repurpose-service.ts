@@ -145,6 +145,7 @@ export async function executeRepurposeDispatch(
     .from('pa_repurpose_batches')
     .select('*')
     .eq('id', batchUuid)
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
 
   if (existingBatch) {
@@ -166,6 +167,7 @@ export async function executeRepurposeDispatch(
         .from('pa_repurpose_batches')
         .update({ status: 'reconciling', updated_at: new Date().toISOString() })
         .eq('id', batchUuid)
+        .eq('workspace_id', workspaceId)
         .in('status', ['in_progress', 'reconciling'])
         .select('id')
         .maybeSingle();
@@ -201,7 +203,8 @@ export async function executeRepurposeDispatch(
         await paAdmin
           .from('pa_repurpose_batches')
           .update({ status: 'completed', result_summary: recoveredSummary, updated_at: new Date().toISOString() })
-          .eq('id', batchUuid);
+          .eq('id', batchUuid)
+          .eq('workspace_id', workspaceId);
 
         return { success: true, replayed: true, summary: recoveredSummary };
       } else {

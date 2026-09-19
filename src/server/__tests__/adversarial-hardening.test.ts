@@ -52,13 +52,26 @@ describe('Adversarial Hardening & Reliability Suite (Vectors 1 - 6)', () => {
       expect(isPrivateOrReservedIp('hidden.onion')).toBe(true);
     });
 
-    it('validateSafeUrl throws HttpError 400 on cloud metadata URLs', () => {
+    it('detects and blocks short-form and dotted IPv4 bypasses (127.1, 10.1, 127.0.1, 0x7f.1)', () => {
+      expect(isPrivateOrReservedIp('127.1')).toBe(true);
+      expect(isPrivateOrReservedIp('10.1')).toBe(true);
+      expect(isPrivateOrReservedIp('127.0.1')).toBe(true);
+      expect(isPrivateOrReservedIp('169.254.1')).toBe(true);
+      expect(isPrivateOrReservedIp('192.168.1')).toBe(true);
+      expect(isPrivateOrReservedIp('172.16.1')).toBe(true);
+      expect(isPrivateOrReservedIp('0x7f.1')).toBe(true);
+    });
+
+    it('validateSafeUrl throws HttpError 400 on cloud metadata and short-form IPv4 URLs', () => {
       expect(() => validateSafeUrl('http://metadata.google.internal/computeMetadata/v1/')).toThrow(HttpError);
       expect(() => validateSafeUrl('http://instance-data/latest/meta-data/')).toThrow(HttpError);
       expect(() => validateSafeUrl('http://secret.internal/api/keys')).toThrow(HttpError);
       expect(() => validateSafeUrl('http://my-service.local/admin')).toThrow(HttpError);
       expect(() => validateSafeUrl('http://database.lan/status')).toThrow(HttpError);
       expect(() => validateSafeUrl('http://internal.corp/vpn')).toThrow(HttpError);
+      expect(() => validateSafeUrl('http://127.1/secret')).toThrow(HttpError);
+      expect(() => validateSafeUrl('http://10.1/admin')).toThrow(HttpError);
+      expect(() => validateSafeUrl('http://127.0.1/')).toThrow(HttpError);
     });
 
     it('allows legitimate external public URLs', () => {
@@ -100,6 +113,63 @@ describe('Adversarial Hardening & Reliability Suite (Vectors 1 - 6)', () => {
       expect(eqMock).toHaveBeenCalledWith('workspace_id', '00000000-0000-0000-0000-000000000001');
       expect(eqMock).toHaveBeenCalledWith('account_id', '00000000-0000-0000-0000-000000000999');
       expect(res.length).toBe(1);
+    });
+
+    it('fetchDispatchesLedger enforces workspace_id boundary on pa_pins and pa_repurpose_batches', async () => {
+      const eqMock = vi.fn().mockReturnThis();
+      const inMock = vi.fn().mockReturnThis();
+      const selectMock = vi.fn().mockReturnValue({
+        eq: eqMock,
+        in: inMock,
+      });
+
+      // Chain: from('...').select('...').eq('workspace_id', ...).in('id', ...)
+      const builderMock: any = {
+        in: vi.fn().mockResolvedValue({ data: [], error: null }),
+        gte: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: 'disp-1',
+              batch_id: 'batch-1',
+              pa_pin_id: 'pa-pin-1',
+              target_account_id: 'acc-1',
+              target_account_label: 'Target',
+              target_board_name: 'Board',
+              link_used: 'https://example.com',
+              p1_pin_id: 'p1-pin-1',
+              sent_at: '2026-09-01T00:00:00Z',
+              sent_by: 'user-1',
+            },
+          ],
+          error: null,
+        }),
+      };
+      eqMock.mockReturnValue(builderMock);
+
+      const mockPaAdmin = {
+        from: vi.fn().mockReturnValue({ select: selectMock }),
+      };
+      const mockP1Admin = {
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              in: vi.fn().mockResolvedValue({ data: [], error: null }),
+            }),
+          }),
+        }),
+      };
+
+      const { fetchDispatchesLedger } = await import('../services/dispatched-service');
+      await fetchDispatchesLedger(mockPaAdmin as any, mockP1Admin as any, {
+        workspaceId: '00000000-0000-0000-0000-000000000001',
+      });
+
+      // Check that pa_pins and pa_repurpose_batches were queried with workspace_id
+      expect(mockPaAdmin.from).toHaveBeenCalledWith('pa_pins');
+      expect(mockPaAdmin.from).toHaveBeenCalledWith('pa_repurpose_batches');
+      expect(eqMock).toHaveBeenCalledWith('workspace_id', '00000000-0000-0000-0000-000000000001');
     });
   });
 
@@ -179,6 +249,52 @@ describe('Adversarial Hardening & Reliability Suite (Vectors 1 - 6)', () => {
       expect(upsertMock.mock.calls[1][0].length).toBe(500);
       expect(upsertMock.mock.calls[2][0].length).toBe(50);
       expect(results.length).toBe(1050);
+    });
+
+    it('upsertTopPinsSnapshots chunks payloads greater than 500 rows into multiple queries', async () => {
+      const upsertMock = vi.fn();
+      const mockAnalyticsClient = {
+        from: vi.fn().mockReturnValue({
+          upsert: upsertMock,
+        }),
+      };
+
+      upsertMock.mockImplementation((chunk: any[]) => ({
+        select: vi.fn(),
+        count: chunk.length,
+        error: null,
+      }));
+
+      const { dbClients } = await import('../db/clients');
+      vi.spyOn(dbClients, 'getAnalytics').mockReturnValue(mockAnalyticsClient as any);
+      const { analyticsDb } = await import('../db/analytics');
+
+      // Create 1,200 snapshot records
+      const dummySnapshots = Array.from({ length: 1200 }, (_, i) => ({
+        pin_id: `pin_${i}`,
+        window_start: '2026-09-01',
+        window_end: '2026-09-07',
+        sort_by: 'IMPRESSION' as const,
+        rank_position: i + 1,
+        impressions: 1000,
+        engagement: 50,
+        outbound_clicks: 10,
+        pin_clicks: 20,
+        saves: 5,
+      }));
+
+      const count = await analyticsDb.upsertTopPinsSnapshots(
+        '00000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000000002',
+        dummySnapshots as any
+      );
+
+      // 1,200 rows with CHUNK_SIZE = 500 => 3 chunks (500, 500, 200)
+      expect(upsertMock).toHaveBeenCalledTimes(3);
+      expect(upsertMock.mock.calls[0][0].length).toBe(500);
+      expect(upsertMock.mock.calls[1][0].length).toBe(500);
+      expect(upsertMock.mock.calls[2][0].length).toBe(200);
+      expect(count).toBe(1200);
     });
   });
 

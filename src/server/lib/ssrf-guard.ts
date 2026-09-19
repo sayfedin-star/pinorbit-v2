@@ -78,10 +78,11 @@ export function isPrivateOrReservedIp(rawHost: string): boolean {
   // Cloud metadata IMDS
   if (host === '169.254.169.254' || host.startsWith('169.254.')) return true;
 
-  // Dotted IPv4 notation (allowing decimal, hex 0x, octal 0)
+  // Dotted IPv4 notation: 2, 3, or 4 parts (e.g. 127.0.0.1, 127.0.1, 127.1, 0x7f.1)
   const parts = host.split('.');
-  if (parts.length === 4) {
-    const octets: number[] = [];
+  if (parts.length >= 2 && parts.length <= 4) {
+    const vals: number[] = [];
+    let allValid = true;
     for (const part of parts) {
       let val: number;
       if (/^0x[0-9a-f]+$/i.test(part)) {
@@ -91,12 +92,27 @@ export function isPrivateOrReservedIp(rawHost: string): boolean {
       } else if (/^\d+$/.test(part)) {
         val = parseInt(part, 10);
       } else {
-        return false;
+        allValid = false;
+        break;
       }
-      if (isNaN(val) || val < 0 || val > 255) return false;
-      octets.push(val);
+      if (isNaN(val) || val < 0) {
+        allValid = false;
+        break;
+      }
+      vals.push(val);
     }
-    return isPrivateIpv4Octets(octets[0], octets[1]);
+
+    if (allValid && vals.length === parts.length) {
+      if (parts.length === 4 && vals.every((v) => v <= 255)) {
+        return isPrivateIpv4Octets(vals[0], vals[1]);
+      }
+      if (parts.length === 3 && vals[0] <= 255 && vals[1] <= 255 && vals[2] <= 65535) {
+        return isPrivateIpv4Octets(vals[0], vals[1]);
+      }
+      if (parts.length === 2 && vals[0] <= 255 && vals[1] <= 16777215) {
+        return isPrivateIpv4Octets(vals[0], (vals[1] >>> 16) & 255);
+      }
+    }
   }
 
   return false;

@@ -97,7 +97,7 @@ export async function handleDispatch(body: any, locals: any) {
 
     // 2a) Stale recovery: reset timed-out processing pins with remaining retries back to pending
     try {
-      await admin
+      const { error: sweepErr } = await admin
         .from('pins')
         .update({
           status: 'pending',
@@ -111,13 +111,16 @@ export async function handleDispatch(body: any, locals: any) {
         .eq('status', 'processing')
         .or(`claimed_at.lt.${staleCut},and(claimed_at.is.null,processing_started_at.lt.${staleCut})`)
         .lt('attempts', 2);
-    } catch (sweepErr) {
-      console.warn('[Dispatch] Stale pin recovery warning:', sweepErr);
+      if (sweepErr) {
+        console.warn('[Dispatch] Stale pin recovery warning:', sweepErr.message);
+      }
+    } catch (sweepErr: any) {
+      console.warn('[Dispatch] Stale pin recovery warning:', sweepErr?.message || sweepErr);
     }
 
     // 2b) Terminal transition: mark timed-out processing pins that exhausted retries (attempts >= 2) as failed
     try {
-      await admin
+      const { error: termErr } = await admin
         .from('pins')
         .update({
           status: 'failed',
@@ -129,8 +132,11 @@ export async function handleDispatch(body: any, locals: any) {
         .eq('status', 'processing')
         .or(`claimed_at.lt.${staleCut},and(claimed_at.is.null,processing_started_at.lt.${staleCut})`)
         .gte('attempts', 2);
-    } catch (termErr) {
-      console.warn('[Dispatch] Terminal pin transition warning:', termErr);
+      if (termErr) {
+        console.warn('[Dispatch] Terminal pin transition warning:', termErr.message);
+      }
+    } catch (termErr: any) {
+      console.warn('[Dispatch] Terminal pin transition warning:', termErr?.message || termErr);
     }
 
     // 3) Account + daily cap
@@ -318,15 +324,19 @@ export async function handleDispatch(body: any, locals: any) {
         successfulExecutions++;
         dispatched++;
         // Update pin processing heartbeat to accurately maintain stuck-sweep telemetry
-        await admin.from('pins').update({
+        const { error: hbErr } = await admin.from('pins').update({
           processing_started_at: new Date().toISOString(),
           claimed_at: new Date().toISOString(),
           last_failure_reason: null,
           updated_at: new Date().toISOString(),
         }).eq('id', pin.id).eq('workspace_id', workspaceId).eq('account_id', accountId);
+        if (hbErr) {
+          console.warn(`[Dispatch] Heartbeat update warning for pin ${pin.id}:`, hbErr.message);
+        }
       } else {
-        // Push failed or timed out: back off and reset pin to pending so it is not abandoned in processing
-        await admin.from('pins').update({
+        // Push failed or timed out: back off and reset pin to pending ONLY if still 'processing' (CAS Guard)
+        // If an ingest callback already transitioned the pin to 'posted', it will NOT be reverted to 'pending'.
+        const { error: resetErr } = await admin.from('pins').update({
           status: 'pending',
           processing_started_at: null,
           claimed_at: null,
@@ -334,7 +344,15 @@ export async function handleDispatch(body: any, locals: any) {
           next_retry_at: new Date(Date.now() + 60000).toISOString(),
           last_failure_reason: pushRes ? `Webhook responded HTTP ${pushRes.status}` : 'Webhook push timed out or connection failed',
           updated_at: new Date().toISOString(),
-        }).eq('id', pin.id).eq('workspace_id', workspaceId).eq('account_id', accountId);
+        })
+        .eq('id', pin.id)
+        .eq('workspace_id', workspaceId)
+        .eq('account_id', accountId)
+        .eq('status', 'processing');
+
+        if (resetErr) {
+          console.warn(`[Dispatch] Failed to reset pin ${pin.id} to pending:`, resetErr.message);
+        }
         skipped++;
       }
     }
@@ -357,7 +375,7 @@ export async function handleDispatch(body: any, locals: any) {
               claimed_at: null,
               claimed_by_schedule_id: null,
               updated_at: new Date().toISOString(),
-            }).eq('id', c.id).eq('workspace_id', workspaceId).eq('account_id', accountId);
+            }).eq('id', c.id).eq('workspace_id', workspaceId).eq('account_id', accountId).eq('status', 'processing');
           }
           return json({ success: false, dispatched: 0, error: 'No active webhook with remaining capacity found.', reason: 'no_webhook_capacity' }, 503);
         }
@@ -377,7 +395,7 @@ export async function handleDispatch(body: any, locals: any) {
                 claimed_at: null,
                 claimed_by_schedule_id: null,
                 updated_at: new Date().toISOString(),
-              }).eq('id', c.id).eq('workspace_id', workspaceId).eq('account_id', accountId);
+              }).eq('id', c.id).eq('workspace_id', workspaceId).eq('account_id', accountId).eq('status', 'processing');
             }
             return json({ success: false, dispatched: 0, error: 'No active webhook with remaining capacity found.', reason: 'no_webhook_capacity' }, 503);
           }

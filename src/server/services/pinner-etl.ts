@@ -576,9 +576,11 @@ export const pinnerETL = {
       // Parse Pipeline B: Ranked Top Pins Snapshots (Allowlist filtered)
       // -------------------------------------------------------------------------
       const today = nowIso.split('T')[0];
-      const todayMs = Date.now();
-      const calcOffsetDate = (daysAgo: number) =>
-        new Date(todayMs - daysAgo * 86400000).toISOString().split('T')[0];
+      const calcOffsetDate = (daysAgo: number) => {
+        const d = new Date();
+        d.setUTCDate(d.getUTCDate() - daysAgo);
+        return d.toISOString().split('T')[0];
+      };
 
       const endOffset =
         typeof payload.top_pins_analytics?.end_offset_days === 'number'

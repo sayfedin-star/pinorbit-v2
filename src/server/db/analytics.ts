@@ -323,20 +323,26 @@ export const analyticsDb = {
       recorded_at: new Date().toISOString(),
     }));
 
-    const { error, count } = await analyticsClient
-      .from('account_analytics_daily')
-      .upsert(payload, {
-        onConflict: 'workspace_id,connection_id,metric_date',
-        ignoreDuplicates: false,
-        count: 'exact',
-      });
+    const CHUNK_SIZE = 500;
+    let totalCount = 0;
 
-    if (error) throw error;
-    if (count === null || count === undefined) {
-      console.warn('[AnalyticsDB] count was null on upsertAccountDailyMetrics, defaulting to 0');
-      return 0;
+    for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
+      const chunk = payload.slice(i, i + CHUNK_SIZE);
+      const { error, count } = await analyticsClient
+        .from('account_analytics_daily')
+        .upsert(chunk, {
+          onConflict: 'workspace_id,connection_id,metric_date',
+          ignoreDuplicates: false,
+          count: 'exact',
+        });
+
+      if (error) throw error;
+      if (count) {
+        totalCount += count;
+      }
     }
-    return count;
+
+    return totalCount;
   },
 
   /**
@@ -390,20 +396,26 @@ export const analyticsDb = {
       recorded_at: new Date().toISOString(),
     }));
 
-    const { error, count } = await analyticsClient
-      .from('top_pins_snapshots')
-      .upsert(payload, {
-        onConflict: 'workspace_id,connection_id,pin_id,window_start,window_end,sort_by',
-        ignoreDuplicates: false,
-        count: 'exact',
-      });
+    const CHUNK_SIZE = 500;
+    let totalCount = 0;
 
-    if (error) throw error;
-    if (count === null || count === undefined) {
-      console.warn('[AnalyticsDB] count was null on upsertTopPinsSnapshots, defaulting to 0');
-      return 0;
+    for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
+      const chunk = payload.slice(i, i + CHUNK_SIZE);
+      const { error, count } = await analyticsClient
+        .from('top_pins_snapshots')
+        .upsert(chunk, {
+          onConflict: 'workspace_id,connection_id,pin_id,window_start,window_end,sort_by',
+          ignoreDuplicates: false,
+          count: 'exact',
+        });
+
+      if (error) throw error;
+      if (count) {
+        totalCount += count;
+      }
     }
-    return count;
+
+    return totalCount;
   },
 
   /**
@@ -425,20 +437,26 @@ export const analyticsDb = {
       recorded_at: new Date().toISOString(),
     }));
 
-    const { error, count } = await analyticsClient
-      .from('daily_workspace_metrics')
-      .upsert(payload, {
-        onConflict: 'workspace_id,metric_date',
-        ignoreDuplicates: false,
-        count: 'exact',
-      });
+    const CHUNK_SIZE = 500;
+    let totalCount = 0;
 
-    if (error) throw error;
-    if (count === null || count === undefined) {
-      console.warn('[AnalyticsDB] count was null on upsertDailyWorkspaceMetrics, defaulting to 0');
-      return 0;
+    for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
+      const chunk = payload.slice(i, i + CHUNK_SIZE);
+      const { error, count } = await analyticsClient
+        .from('daily_workspace_metrics')
+        .upsert(chunk, {
+          onConflict: 'workspace_id,metric_date',
+          ignoreDuplicates: false,
+          count: 'exact',
+        });
+
+      if (error) throw error;
+      if (count) {
+        totalCount += count;
+      }
     }
-    return count;
+
+    return totalCount;
   },
 
   // ============================================================================

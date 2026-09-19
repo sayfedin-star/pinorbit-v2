@@ -93,6 +93,7 @@ export async function fetchDispatchesLedger(
   const { data: pinsData } = await paAdmin
     .from('pa_pins')
     .select('id, title, description, image_url')
+    .eq('workspace_id', workspaceId)
     .in('id', paPinIds);
 
   const pinsMap = new Map<string, any>();
@@ -105,6 +106,7 @@ export async function fetchDispatchesLedger(
   const { data: batchesData } = await paAdmin
     .from('pa_repurpose_batches')
     .select('id, status')
+    .eq('workspace_id', workspaceId)
     .in('id', batchIds);
 
   const batchesMap = new Map<string, string>();

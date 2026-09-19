@@ -186,7 +186,8 @@ export async function runRetentionCleanup(
         : q.lt('claimed_at', sweepCutoff);
 
       if (effectiveQ && typeof effectiveQ.gte === 'function') {
-        await effectiveQ.gte('attempts', 2);
+        const { error: termErr } = await effectiveQ.gte('attempts', 2);
+        if (termErr) throw termErr;
       }
     }
   } catch (err: any) {
