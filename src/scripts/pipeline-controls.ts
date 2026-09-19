@@ -1525,7 +1525,8 @@ if (pipeConnId) {
         if (pauseLabel) pauseLabel.textContent = 'Pause';
         if (pauseIcon) pauseIcon.textContent = '⏸️';
 
-        appendLog(`Starting automated day-by-day backfill for ${currentDates.length} days (${fromDate} → ${toDate})...`, 'info');
+        const initialDelaySec = pacingSelect ? Math.round((parseInt(pacingSelect.value, 10) || 15000) / 1000) : 15;
+        appendLog(`Starting automated day-by-day backfill for ${currentDates.length} days (${fromDate} → ${toDate}) [${initialDelaySec}s pacing delay]...`, 'info');
 
         const beforeUnloadHandler = (ev: BeforeUnloadEvent) => {
           if (isRunning) {
@@ -1597,8 +1598,8 @@ if (pipeConnId) {
 
             updateUI();
 
-            // Pacing delay before next day
-            const pacingMs = pacingSelect ? parseInt(pacingSelect.value, 10) || 2000 : 2000;
+            // Pacing delay before next day (matching scenario duration to prevent 429 rate limits)
+            const pacingMs = pacingSelect ? parseInt(pacingSelect.value, 10) || 15000 : 15000;
             if (i < currentDates.length - 1 && !isCancelled) {
               await new Promise(r => setTimeout(r, pacingMs));
             }
