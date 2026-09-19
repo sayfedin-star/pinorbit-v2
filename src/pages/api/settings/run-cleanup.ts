@@ -58,6 +58,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
       trigger: 'manual',
     });
 
+    const sectionWarn = payload.warnings?.find((w: string) =>
+      w.toLowerCase().includes(`${section} `) || w.toLowerCase().includes(section)
+    );
+    if (sectionWarn) {
+      return new Response(
+        JSON.stringify({
+          error: sectionWarn,
+          section,
+          ...payload,
+        }),
+        {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
     // T3: Return { section, ...payload } without duplicate success: true wrapper
     return new Response(
       JSON.stringify({

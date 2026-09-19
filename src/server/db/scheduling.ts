@@ -148,13 +148,23 @@ export const schedulingDb = {
       workspace_id: workspaceId,
     }));
 
-    const { data, error } = await schedulingClient
-      .from('pins')
-      .insert(rows)
-      .select();
+    const CHUNK_SIZE = 500;
+    const insertedPins: PinRecord[] = [];
 
-    if (error) throw error;
-    return (data as PinRecord[]) || [];
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const { data, error } = await schedulingClient
+        .from('pins')
+        .insert(chunk)
+        .select();
+
+      if (error) throw error;
+      if (data) {
+        insertedPins.push(...(data as PinRecord[]));
+      }
+    }
+
+    return insertedPins;
   },
 
   /**
@@ -195,6 +205,7 @@ export const schedulingDb = {
     const { data, error } = await schedulingClient
       .from('account_posting_windows')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .eq('account_id', accountId)
       .order('day_of_week', { ascending: true })
       .order('posting_time', { ascending: true });

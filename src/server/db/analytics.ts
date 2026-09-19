@@ -459,7 +459,7 @@ export const analyticsDb = {
 
     const clampedDays = Math.min(Math.max(windowDays || 30, 1), 365);
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - clampedDays);
+    startDate.setUTCDate(startDate.getUTCDate() - clampedDays);
     const startDateStr = startDate.toISOString().split('T')[0];
     const analyticsClient = dbClients.getAnalytics();
     let q: any = analyticsClient
@@ -839,7 +839,7 @@ export const analyticsDb = {
 
     const clampedDays = Math.min(Math.max(windowDays || 30, 1), 365);
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - clampedDays);
+    startDate.setUTCDate(startDate.getUTCDate() - clampedDays);
     const startDateStr = startDate.toISOString().split('T')[0];
 
     const analyticsClient = dbClients.getAnalytics();
@@ -958,7 +958,7 @@ export const analyticsDb = {
     if (connections.length === 0) return [];
 
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - windowDays);
+    startDate.setUTCDate(startDate.getUTCDate() - windowDays);
     const startDateStr = startDate.toISOString().split('T')[0];
 
     const analyticsClient = dbClients.getAnalytics();

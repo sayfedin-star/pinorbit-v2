@@ -138,6 +138,21 @@ vi.mock('../db/clients', () => {
           }),
         };
       }),
+      getPinArchive: vi.fn().mockImplementation(() => {
+        const q: any = {
+          select: vi.fn(() => q),
+          delete: vi.fn(() => q),
+          eq: vi.fn(() => q),
+          lt: vi.fn(() => q),
+          in: vi.fn(() => q),
+          limit: vi.fn().mockResolvedValue({ data: [{ id: 'pa-1' }, { id: 'pa-2' }, { id: 'pa-3' }], error: null }),
+          then: (resolve: any, reject: any) =>
+            Promise.resolve({ count: 3, error: null }).then(resolve, reject),
+        };
+        return {
+          from: vi.fn(() => q),
+        };
+      }),
     },
   };
 });
@@ -375,6 +390,120 @@ describe('Retention & Recovery Telemetry & Manual Run Suite', () => {
         analytics_daily_keep_days: null,
         ingestion_runs_days: 30,
         top_pins_raw_days: 180,
+      })
+    );
+  });
+
+  // Test 9: Manual P4 override executes even when toggle is false
+  it('run-cleanup section=p4 executes P4 deletes and records runs & metrics in telemetry', async () => {
+    mockMaybeSingleData.p4_prune_enabled = false;
+
+    const res = await postRunCleanup({
+      request: new Request('http://localhost/api/settings/run-cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_id: workspaceId, section: 'p4' }),
+      }),
+      locals: { user: { id: 'u1' }, supabase: {}, activeWorkspaceId: workspaceId },
+    } as any);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.section).toBe('p4');
+    expect(json.deleted_pa_runs).toBe(3);
+    expect(json.deleted_pa_metrics).toBe(3);
+    expect(mockUpsertFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace_id: workspaceId,
+        last_cleanup_result: expect.objectContaining({
+          trigger: 'manual',
+          sections: expect.objectContaining({
+            p4: { runs: 3, metrics: 3 },
+          }),
+        }),
+      })
+    );
+  });
+
+  // Test 10: Section P4 when p4_prune_enabled is false skips deletes without override
+  it('runRetentionCleanup without override when p4_prune_enabled is false skips P4 deletes', async () => {
+    mockMaybeSingleData.p4_prune_enabled = false;
+
+    const payload = await runRetentionCleanup(workspaceId, {}, { trigger: 'api' });
+
+    expect(payload.deleted_pa_runs).toBe(0);
+    expect(payload.deleted_pa_metrics).toBe(0);
+    expect(payload.warnings).toEqual([]);
+  });
+
+  // Test 11: Fault isolation - P4 failure does not abort P1 execution
+  it('fault isolation: P4 failure records warning but allows P1 to succeed', async () => {
+    const origGetPinArchive = dbClients.getPinArchive;
+    (dbClients as any).getPinArchive = vi.fn().mockImplementation(() => {
+      throw new Error('PinArchive connection timeout');
+    });
+
+    const payload = await runRetentionCleanup(
+      workspaceId,
+      {},
+      { overrides: { p1: true, p4: true }, trigger: 'manual' }
+    );
+
+    expect(payload.deleted_pins_count).toBe(5);
+    expect(payload.deleted_pa_runs).toBe(0);
+    expect(payload.warnings).toContain('P4 prune failed: PinArchive connection timeout');
+    expect(payload.success).toBe(true); // P1 succeeded, so overall not completely failed
+
+    (dbClients as any).getPinArchive = origGetPinArchive;
+  });
+
+  // Test 12: Manual run error reporting - section failure returns 500 with exact error
+  it('run-cleanup returns 500 when requested section fails', async () => {
+    const origGetPinArchive = dbClients.getPinArchive;
+    (dbClients as any).getPinArchive = vi.fn().mockImplementation(() => {
+      throw new Error('PinArchive database unavailable');
+    });
+
+    const res = await postRunCleanup({
+      request: new Request('http://localhost/api/settings/run-cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_id: workspaceId, section: 'p4' }),
+      }),
+      locals: { user: { id: 'u1' }, supabase: {}, activeWorkspaceId: workspaceId },
+    } as any);
+
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(json.error).toContain('P4 prune failed: PinArchive database unavailable');
+
+    (dbClients as any).getPinArchive = origGetPinArchive;
+  });
+
+  // Test 13: Workspace scoping & invalid UUID rejection
+  it('throws CRITICAL error when workspaceId is invalid or not a UUID', async () => {
+    await expect(runRetentionCleanup('', {}, {})).rejects.toThrow('CRITICAL: Invalid or missing workspace_id');
+    await expect(runRetentionCleanup('not-a-uuid', {}, {})).rejects.toThrow('CRITICAL: Invalid or missing workspace_id');
+    await expect(runRetentionCleanup(null as any, {}, {})).rejects.toThrow('CRITICAL: Invalid or missing workspace_id');
+  });
+
+  // Test 14: Accidental zero-wipe protection with clamped retention days
+  it('clamps 0 or negative days in wsSettings to safe minimums', async () => {
+    mockMaybeSingleData.retention_posted_days = 0;
+    mockMaybeSingleData.retention_terminal_days = -10;
+    mockMaybeSingleData.pa_runs_retention_days = 0;
+    mockMaybeSingleData.pa_metrics_retention_days = -5;
+
+    const payload = await runRetentionCleanup(workspaceId, {}, { trigger: 'api' });
+
+    // Should clamp posted days and negative days to safe minimum (1)
+    expect(payload.retention_posted_days).toBe(1);
+    expect(mockUpsertFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        retention_posted_days: 1,
+        retention_terminal_days: 1, // -10 clamped to safe min 1
+        pa_runs_retention_days: 60, // 0 falls back to default 60
+        pa_metrics_retention_days: 1, // -5 clamped to safe min 1
       })
     );
   });

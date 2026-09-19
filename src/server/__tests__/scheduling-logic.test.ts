@@ -72,6 +72,17 @@ describe('Pure Scheduling Logic Suite (scheduling-logic.ts)', () => {
       expect(cron).toBe('*/15 10,11 * * 0,6');
     });
 
+    it('handles window starting at midnight (00:00 -> 04:00) without coercing 00:00 to 09:00', () => {
+      const cron = buildPortableCron({
+        interval_minutes: 60,
+        window_start: '00:00',
+        window_end: '04:00',
+        active_days: ['Mon', 'Tue'],
+      });
+      // Window should be hours 0,1,2,3,4 - definitely not starting at 9!
+      expect(cron).toBe('0 0,1,2,3,4 * * 1,2');
+    });
+
     it('falls back to defaults when input is empty or partial', () => {
       const cron = buildPortableCron({});
       expect(cron).toBe('0,36 9,10,11,12,13,14,15,16,17,18,19,20,21 * * *');
@@ -155,6 +166,24 @@ describe('Pure Scheduling Logic Suite (scheduling-logic.ts)', () => {
       // Blocked in daytime (12:00)
       const noon = new Date('2026-08-17T12:00:00Z');
       expect(checkScheduleWindow(schedule, noon)).toEqual({ allowed: false, reason: 'window_closed' });
+    });
+
+    it('correctly validates midnight window (00:00 -> 04:00) without coercing 00:00 to 09:00', () => {
+      const schedule = {
+        timezone: 'UTC',
+        active_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+        window_start: '00:00',
+        window_end: '04:00',
+      };
+      // 2026-08-17 is Monday
+      // 02:30 is inside window -> allowed
+      const mondayAt2AM = new Date('2026-08-17T02:30:00Z');
+      expect(checkScheduleWindow(schedule, mondayAt2AM)).toEqual({ allowed: true });
+
+      // 09:30 is outside window (window closed at 04:00) -> blocked
+      // If 00:00 was coerced to 09:00, this would incorrectly be treated as open!
+      const mondayAt9AM = new Date('2026-08-17T09:30:00Z');
+      expect(checkScheduleWindow(schedule, mondayAt9AM)).toEqual({ allowed: false, reason: 'window_closed' });
     });
   });
 

@@ -305,3 +305,70 @@ export async function callGasAccountAges(gasUrl, secret, workspaceId, usernames)
 
   return data.ages || {};
 }
+
+/**
+ * Determine monotonic oldest pin timestamp (LEAST):
+ * Updates only when candidate is strictly older than existing baseline (or baseline is null).
+ * Preserves existing baseline if candidate is newer, identical, or invalid.
+ */
+export function resolveMonotonicOldestPin(baselineIso, candidateIso) {
+  if (!candidateIso || typeof candidateIso !== 'string') {
+    return baselineIso || null;
+  }
+
+  const candidateMs = Date.parse(candidateIso);
+  if (!Number.isFinite(candidateMs)) {
+    return baselineIso || null;
+  }
+
+  if (!baselineIso || typeof baselineIso !== 'string') {
+    return new Date(candidateMs).toISOString();
+  }
+
+  const baselineMs = Date.parse(baselineIso);
+  if (!Number.isFinite(baselineMs)) {
+    return new Date(candidateMs).toISOString();
+  }
+
+  // Strictly monotonic: candidate must be strictly older (earlier in time) than baseline
+  if (candidateMs < baselineMs) {
+    return new Date(candidateMs).toISOString();
+  }
+
+  return baselineIso;
+}
+
+/**
+ * Keyset cursor pagination over pa_accounts.
+ * Carries --workspace and --username filters across every page.
+ */
+export async function fetchAllAccounts(supaQueryFn, filters = {}, pageSize = 1000) {
+  const allAccounts = [];
+  let lastId = null;
+
+  while (true) {
+    let params = `select=id,workspace_id,username,oldest_pin_at,pins_count&order=id.asc&limit=${pageSize}`;
+    if (filters.workspace) {
+      params += `&workspace_id=eq.${filters.workspace}`;
+    }
+    if (filters.username) {
+      params += `&username=eq.${filters.username.toLowerCase().replace(/^@/, '')}`;
+    }
+    if (lastId) {
+      params += `&id=gt.${lastId}`;
+    }
+
+    const batch = await supaQueryFn('pa_accounts', params);
+    if (!Array.isArray(batch) || batch.length === 0) {
+      break;
+    }
+    allAccounts.push(...batch);
+    if (batch.length < pageSize) {
+      break;
+    }
+    lastId = batch[batch.length - 1].id;
+  }
+
+  return allAccounts;
+}
+

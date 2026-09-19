@@ -288,6 +288,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         const { data: existingBoards } = await admin
           .from('boards')
           .select('board_id, created_via, pin_count, follower_count, board_created_at, board_pins_modified_at')
+          .eq('workspace_id', acc.workspace_id)
           .eq('account_id', accId)
           .in('board_id', bIds);
 

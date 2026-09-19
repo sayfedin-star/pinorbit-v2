@@ -322,9 +322,9 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
     if (!rpcHandled && pins.length > 0) {
       // Fetch existing pin metric & enrichment state in chunks of 100 to avoid URI 414 errors
       const existingPins: any[] = [];
-      const CHUNK_SIZE = 100;
-      for (let i = 0; i < pinIds.length; i += CHUNK_SIZE) {
-        const chunk = pinIds.slice(i, i + CHUNK_SIZE);
+      const FETCH_CHUNK_SIZE = 100;
+      for (let i = 0; i < pinIds.length; i += FETCH_CHUNK_SIZE) {
+        const chunk = pinIds.slice(i, i + FETCH_CHUNK_SIZE);
         const { data, error } = await pinArchive
           .from('pa_pins')
           .select('id, pin_id, saves, repins, comments, share_count, reactions, archived_at, annotations, board_pin_count, board_last_modified_at, seo_category, canonical_pin_id, utm_link, image_signature, dominant_color, seo_alt_text, title, description, link, domain, board_name, board_id, created_at_pinterest, image_url, node_id, is_video, is_product, promoted, price, currency, site_name')
@@ -489,16 +489,25 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
         };
       });
 
-      const { data: upsertedPins, error: pinErr } = await pinArchive
-        .from('pa_pins')
-        .upsert(pinsToUpsert, { onConflict: 'workspace_id,pin_id' })
-        .select('id, pin_id, saves, repins, comments, share_count, reactions');
+      const BATCH_CHUNK_SIZE = 500;
+      const upsertedPins: Array<{ id: string; pin_id: string; saves: number; repins: number; comments: number; share_count: number; reactions: any }> = [];
 
-      if (pinErr) {
-        return new Response(
-          JSON.stringify({ success: false, error: `Pins upsert failed: ${pinErr.message}` }),
-          { status: 500, headers: { 'Content-Type': 'application/json' } }
-        );
+      for (let i = 0; i < pinsToUpsert.length; i += BATCH_CHUNK_SIZE) {
+        const chunk = pinsToUpsert.slice(i, i + BATCH_CHUNK_SIZE);
+        const { data: chunkPins, error: pinErr } = await pinArchive
+          .from('pa_pins')
+          .upsert(chunk, { onConflict: 'workspace_id,pin_id' })
+          .select('id, pin_id, saves, repins, comments, share_count, reactions');
+
+        if (pinErr) {
+          return new Response(
+            JSON.stringify({ success: false, error: `Pins upsert failed: ${pinErr.message}` }),
+            { status: 500, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (chunkPins) {
+          upsertedPins.push(...(chunkPins as any[]));
+        }
       }
 
       // C) Insert pa_pin_metrics snapshot ONLY on new pins or when metrics strictly advance
@@ -549,10 +558,15 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
       }
 
       if (metricsToInsert.length > 0) {
-        const { count: mCount } = await pinArchive
-          .from('pa_pin_metrics')
-          .upsert(metricsToInsert, { onConflict: 'pin_ref,recorded_at', ignoreDuplicates: true, count: 'exact' });
-        metricsRecordedCount = mCount ?? 0;
+        for (let i = 0; i < metricsToInsert.length; i += BATCH_CHUNK_SIZE) {
+          const mChunk = metricsToInsert.slice(i, i + BATCH_CHUNK_SIZE);
+          const { count: mCount } = await pinArchive
+            .from('pa_pin_metrics')
+            .upsert(mChunk, { onConflict: 'pin_ref,recorded_at', ignoreDuplicates: true, count: 'exact' });
+          if (mCount) {
+            metricsRecordedCount += mCount;
+          }
+        }
       }
     }
 

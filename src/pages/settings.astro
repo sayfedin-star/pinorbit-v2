@@ -124,45 +124,51 @@ if (supabase && currentWorkspace) {
   }
 }
 
+function formatSafeDate(val: any): string {
+  if (!val) return '—';
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
+}
+
 function formatLastRunP1(result: any) {
   const p1 = result?.sections?.p1;
   if (!result || !p1) return 'No cleanup runs recorded yet.';
-  const d = new Date(result.at).toLocaleString();
+  const d = formatSafeDate(result.at);
   const trigger = result.trigger || 'api';
-  const pins = p1.pins ?? 0;
-  const terminal = p1.terminal ?? 0;
-  const logs = p1.logs ?? 0;
-  const sessions = p1.sessions ?? 0;
+  const pins = Number(p1.pins) || 0;
+  const terminal = Number(p1.terminal) || 0;
+  const logs = Number(p1.logs) || 0;
+  const sessions = Number(p1.sessions) || 0;
   return `Last run: ${d} · ${trigger} · deleted ${pins} posted pins, ${terminal} terminal pins, ${logs} logs, ${sessions} sessions`;
 }
 
 function formatLastRunP2(result: any) {
   const p2 = result?.sections?.p2;
   if (!result || !p2) return 'No cleanup runs recorded yet.';
-  const d = new Date(result.at).toLocaleString();
+  const d = formatSafeDate(result.at);
   const trigger = result.trigger || 'api';
-  const snapshots = p2.snapshots ?? 0;
-  const jobs = p2.jobs ?? 0;
+  const snapshots = Number(p2.snapshots) || 0;
+  const jobs = Number(p2.jobs) || 0;
   return `Last run: ${d} · ${trigger} · deleted ${snapshots} snapshots, ${jobs} jobs`;
 }
 
 function formatLastRunP3(result: any) {
   const p3 = result?.sections?.p3;
   if (!result || !p3) return 'No cleanup runs recorded yet.';
-  const d = new Date(result.at).toLocaleString();
+  const d = formatSafeDate(result.at);
   const trigger = result.trigger || 'api';
-  const runs = p3.runs ?? 0;
-  const snapshots = p3.snapshots ?? 0;
+  const runs = Number(p3.runs) || 0;
+  const snapshots = Number(p3.snapshots) || 0;
   return `Last run: ${d} · ${trigger} · deleted ${runs} ingestion runs, ${snapshots} snapshots`;
 }
 
 function formatLastRunP4(result: any) {
   const p4 = result?.sections?.p4;
   if (!result || !p4) return 'No cleanup runs recorded yet.';
-  const d = new Date(result.at).toLocaleString();
+  const d = formatSafeDate(result.at);
   const trigger = result.trigger || 'api';
-  const runs = p4.runs ?? 0;
-  const metrics = p4.metrics ?? 0;
+  const runs = Number(p4.runs) || 0;
+  const metrics = Number(p4.metrics) || 0;
   return `Last run: ${d} · ${trigger} · deleted ${runs} runs, ${metrics} metrics`;
 }
 ---
@@ -967,8 +973,9 @@ function formatLastRunP4(result: any) {
 
       if (!confirm(confirmMsg)) return;
 
+      const allRunButtons = document.querySelectorAll<HTMLButtonElement>('button[id^="run-now-"]');
+      allRunButtons.forEach(b => { b.disabled = true; });
       const originalText = btn.textContent;
-      btn.disabled = true;
       btn.textContent = 'Running…';
 
       try {
@@ -1022,7 +1029,7 @@ function formatLastRunP4(result: any) {
           statusMsg.classList.remove('hidden');
         }
       } finally {
-        btn.disabled = false;
+        allRunButtons.forEach(b => { b.disabled = false; });
         btn.textContent = originalText;
       }
     });

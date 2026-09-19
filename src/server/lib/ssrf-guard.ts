@@ -21,6 +21,20 @@ export function isPrivateOrReservedIp(rawHost: string): boolean {
   // Common localhost / loopback names
   if (host === 'localhost' || host === 'ip6-localhost' || host === 'ip6-loopback') return true;
 
+  // Cloud metadata & internal network domain names
+  if (
+    host === 'metadata.google.internal' ||
+    host === 'metadata' ||
+    host === 'instance-data' ||
+    host.endsWith('.internal') ||
+    host.endsWith('.local') ||
+    host.endsWith('.lan') ||
+    host.endsWith('.corp') ||
+    host.endsWith('.onion')
+  ) {
+    return true;
+  }
+
   // IPv6 mapped IPv4 e.g. ::ffff:127.0.0.1 or ::ffff:7f00:1
   if (host.startsWith('::ffff:')) {
     const v4Part = host.slice(7);

@@ -6,7 +6,7 @@ import { validateSafeUrl } from '../../../../server/lib/ssrf-guard';
 import {
   checkScheduleWindow,
   clampProcessingTimeoutMinutes,
-  buildPinPostIdempotencyKey,
+  buildDeterministicPinPostKey,
   buildBoardCreateIdempotencyKey,
 } from '../../../../server/services/scheduling-logic';
 import { timingSafeEqual } from '../../../../server/lib/timing-safe';
@@ -134,8 +134,14 @@ export async function handleDispatch(body: any, locals: any) {
     }
 
     // 3) Account + daily cap
-    const { data: account } = await admin.from('accounts').select('*').eq('id', accountId).maybeSingle();
-    if (!force && (!account || account.is_active === false)) return json({ success: true, dispatched: false, reason: 'account_inactive' });
+    const { data: account } = await admin
+      .from('accounts')
+      .select('*')
+      .eq('id', accountId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle();
+    if (!account) return json({ success: false, error: 'Account not found in workspace.' }, 404);
+    if (!force && account.is_active === false) return json({ success: true, dispatched: false, reason: 'account_inactive' });
     const todayStart = new Date(); todayStart.setUTCHours(0, 0, 0, 0);
     const { count: postedToday } = await admin.from('pins').select('*', { count: 'exact', head: true })
       .eq('workspace_id', workspaceId).eq('account_id', accountId).eq('status', 'posted').gte('posted_at', todayStart.toISOString());
@@ -291,7 +297,7 @@ export async function handleDispatch(body: any, locals: any) {
         continue;
       }
 
-      const idempotencyKey = buildPinPostIdempotencyKey(pin.id, verifiedPin.attempts);
+      const idempotencyKey = buildDeterministicPinPostKey(pin.id);
 
       const pushRes = await fetch(hook.webhook_url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },

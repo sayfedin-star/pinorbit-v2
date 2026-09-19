@@ -228,12 +228,22 @@ export const competitorsDb = {
       workspace_id: workspaceId,
     }));
 
-    const { data, error } = await client
-      .from('competitors')
-      .upsert(rows, { onConflict: 'workspace_id,username' })
-      .select();
+    const CHUNK_SIZE = 500;
+    const upsertedCompetitors: CompetitorRecord[] = [];
 
-    if (error) throw error;
-    return (data as CompetitorRecord[]) || [];
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const { data, error } = await client
+        .from('competitors')
+        .upsert(chunk, { onConflict: 'workspace_id,username' })
+        .select();
+
+      if (error) throw error;
+      if (data) {
+        upsertedCompetitors.push(...(data as CompetitorRecord[]));
+      }
+    }
+
+    return upsertedCompetitors;
   },
 };

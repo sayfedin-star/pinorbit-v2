@@ -9,11 +9,11 @@ export interface CleanupOverrides {
 }
 
 interface BatchedDeleteOptions {
-  column: string;
-  value: string;
+  workspaceId: string;
+  column?: string;
+  value?: string;
   dateColumn: string;
   cutoff: string;
-  workspaceId?: string;
   extraFilter?: { column: string; value: string };
   batchSize?: number;
 }
@@ -28,19 +28,32 @@ export async function batchedDelete(
   table: string,
   options: BatchedDeleteOptions
 ): Promise<BatchedDeleteResult> {
+  const ws = options.workspaceId;
+  if (!ws || typeof ws !== 'string' || ws.trim() === '') {
+    throw new Error(`[batchedDelete] CRITICAL: Valid workspaceId is required for table "${table}". Aborting delete.`);
+  }
+  const cleanWs = ws.trim();
+
   let totalDeleted = 0;
-  const batchSize = options.batchSize || 500;
+  const batchSize = Math.max(1, Math.min(1000, options.batchSize || 500));
   const MAX_BATCH_ITERATIONS = 50;
   let iterations = 0;
   let hitCap = false;
+
+  const col = options.column || 'workspace_id';
+  const val = options.value !== undefined ? options.value : cleanWs;
 
   while (iterations < MAX_BATCH_ITERATIONS) {
     iterations++;
     let query = client
       .from(table)
       .select('id')
-      .eq(options.column, options.value)
+      .eq('workspace_id', cleanWs)
       .lt(options.dateColumn, options.cutoff);
+
+    if (col !== 'workspace_id') {
+      query = query.eq(col, val);
+    }
 
     if (options.extraFilter) {
       query = query.eq(options.extraFilter.column, options.extraFilter.value);
@@ -54,12 +67,8 @@ export async function batchedDelete(
     let delQuery = client
       .from(table)
       .delete({ count: 'exact' })
+      .eq('workspace_id', cleanWs)
       .in('id', ids);
-
-    const ws = options.workspaceId || (options.column === 'workspace_id' ? options.value : undefined);
-    if (ws) {
-      delQuery = delQuery.eq('workspace_id', ws);
-    }
 
     const { count, error: deleteErr } = await delQuery;
 
@@ -87,18 +96,38 @@ export async function runRetentionCleanup(
   runtimeEnv: Record<string, any>,
   opts?: { overrides?: CleanupOverrides; trigger?: 'api' | 'manual' }
 ): Promise<Record<string, any>> {
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!workspaceId || typeof workspaceId !== 'string' || !UUID_REGEX.test(workspaceId.trim())) {
+    throw new Error(`[runRetentionCleanup] CRITICAL: Invalid or missing workspace_id ("${workspaceId}"). Aborting retention cleanup.`);
+  }
+  const cleanWorkspaceId = workspaceId.trim();
+
   const schedulingAdmin = dbClients.getSchedulingAdmin(runtimeEnv);
 
   // Read workspace retention settings (with fallbacks)
   const { data: wsSettings } = await schedulingAdmin
     .from('workspace_retention_settings')
     .select('*')
-    .eq('workspace_id', workspaceId)
+    .eq('workspace_id', cleanWorkspaceId)
     .maybeSingle();
 
   const retentionPostedDays = clampRetentionPostedDays(wsSettings?.retention_posted_days);
   const processingTimeoutMinutes = clampProcessingTimeoutMinutes(wsSettings?.processing_timeout_minutes);
   const postedCutoff = new Date(Date.now() - retentionPostedDays * 86400000).toISOString();
+
+  // Strict Clamping for all sub-project retention days to prevent accidental zero-wipe
+  const terminalDays = Math.max(1, Math.min(365, Number(wsSettings?.retention_terminal_days) || 90));
+  const logsDays = Math.max(1, Math.min(180, Number(wsSettings?.retention_logs_days) || 14));
+  const importDays = Math.max(1, Math.min(365, Number(wsSettings?.import_sessions_days) || 30));
+
+  const compSnapshotsDays = Math.max(1, Math.min(365, Number(wsSettings?.competitor_snapshots_days) || 90));
+  const compJobsDays = Math.max(1, Math.min(180, Number(wsSettings?.competitor_jobs_days) || 30));
+
+  const ingestionRunsDays = Math.max(1, Math.min(365, Number(wsSettings?.ingestion_runs_days) || 30));
+  const topPinsRawDays = Math.max(1, Math.min(730, Number(wsSettings?.top_pins_raw_days) || 180));
+
+  const paRunsDays = Math.max(1, Math.min(365, Number(wsSettings?.pa_runs_retention_days ?? wsSettings?.pa_runs_days) || 60));
+  const paMetricsDays = Math.max(1, Math.min(365, Number(wsSettings?.pa_metrics_retention_days ?? wsSettings?.pa_metrics_days) || 90));
 
   const warnings: string[] = [];
 
@@ -121,7 +150,7 @@ export async function runRetentionCleanup(
         claimed_by_schedule_id: null,
         updated_at: new Date().toISOString(),
       })
-      .eq('workspace_id', workspaceId)
+      .eq('workspace_id', cleanWorkspaceId)
       .eq('status', 'processing');
 
     const effectiveSweepQuery = typeof sweepQuery.or === 'function'
@@ -149,7 +178,7 @@ export async function runRetentionCleanup(
           claimed_by_schedule_id: null,
           updated_at: new Date().toISOString(),
         })
-        .eq('workspace_id', workspaceId)
+        .eq('workspace_id', cleanWorkspaceId)
         .eq('status', 'processing');
 
       const effectiveQ = typeof q.or === 'function'
@@ -176,8 +205,8 @@ export async function runRetentionCleanup(
       // 1. Purge posted pins older than workspace retention days using batchedDelete
       const resPosted = await batchedDelete(schedulingAdmin, 'pins', {
         column: 'workspace_id',
-        value: workspaceId,
-        workspaceId,
+        value: cleanWorkspaceId,
+        workspaceId: cleanWorkspaceId,
         dateColumn: 'posted_at',
         cutoff: postedCutoff,
         extraFilter: { column: 'status', value: 'posted' },
@@ -186,12 +215,11 @@ export async function runRetentionCleanup(
       if (resPosted.hitCap) wasTruncated = true;
 
       // 2. Terminal pins: failed & cancelled using batchedDelete
-      const terminalDays = typeof wsSettings?.retention_terminal_days === 'number' ? wsSettings.retention_terminal_days : 90;
       const terminalCutoff = new Date(Date.now() - terminalDays * 86400000).toISOString();
       const delFailed = await batchedDelete(schedulingAdmin, 'pins', {
         column: 'workspace_id',
-        value: workspaceId,
-        workspaceId,
+        value: cleanWorkspaceId,
+        workspaceId: cleanWorkspaceId,
         dateColumn: 'updated_at',
         cutoff: terminalCutoff,
         extraFilter: { column: 'status', value: 'failed' },
@@ -200,8 +228,8 @@ export async function runRetentionCleanup(
 
       const delCancelled = await batchedDelete(schedulingAdmin, 'pins', {
         column: 'workspace_id',
-        value: workspaceId,
-        workspaceId,
+        value: cleanWorkspaceId,
+        workspaceId: cleanWorkspaceId,
         dateColumn: 'updated_at',
         cutoff: terminalCutoff,
         extraFilter: { column: 'status', value: 'cancelled' },
@@ -211,22 +239,20 @@ export async function runRetentionCleanup(
       deletedTerminalPinsCount = delFailed.deleted + delCancelled.deleted;
 
       // 3. Pin delivery logs RPC
-      const logsDays = typeof wsSettings?.retention_logs_days === 'number' ? wsSettings.retention_logs_days : 14;
       const { data: logsData, error: logsErr } = await schedulingAdmin.rpc('purge_old_pin_delivery_logs', {
         p_keep_success_days: logsDays,
         p_keep_failure_days: Math.max(logsDays, 30),
-        p_workspace_id: workspaceId,
+        p_workspace_id: cleanWorkspaceId,
       });
       if (logsErr) throw logsErr;
       deletedDeliveryLogs = typeof logsData === 'number' ? logsData : 0;
 
       // 4. Import sessions using batchedDelete
-      const importDays = typeof wsSettings?.import_sessions_days === 'number' ? wsSettings.import_sessions_days : 30;
       const sessionsCutoff = new Date(Date.now() - importDays * 86400000).toISOString();
       const resSessions = await batchedDelete(schedulingAdmin, 'import_sessions', {
         column: 'workspace_id',
-        value: workspaceId,
-        workspaceId,
+        value: cleanWorkspaceId,
+        workspaceId: cleanWorkspaceId,
         dateColumn: 'created_at',
         cutoff: sessionsCutoff,
       });
@@ -243,12 +269,10 @@ export async function runRetentionCleanup(
   if (effectiveP2) {
     try {
       const competitorsClient = dbClients.getCompetitors(runtimeEnv);
-      const compSnapshotsDays = typeof wsSettings?.competitor_snapshots_days === 'number' ? wsSettings.competitor_snapshots_days : 90;
-      const compJobsDays = typeof wsSettings?.competitor_jobs_days === 'number' ? wsSettings.competitor_jobs_days : 30;
       const { data: p2Data, error: p2Err } = await competitorsClient.rpc('purge_competitor_retention', {
         p_keep_snapshot_days: compSnapshotsDays,
         p_keep_job_days: compJobsDays,
-        p_workspace_id: workspaceId,
+        p_workspace_id: cleanWorkspaceId,
       });
       if (p2Err) throw p2Err;
       p2Result = p2Data;
@@ -264,21 +288,19 @@ export async function runRetentionCleanup(
   if (effectiveP3) {
     try {
       const analyticsClient = dbClients.getAnalytics(runtimeEnv);
-      const ingestionRunsDays = typeof wsSettings?.ingestion_runs_days === 'number' ? wsSettings.ingestion_runs_days : 30;
       const { data: runsData, error: runsErr } = await analyticsClient.rpc('purge_old_analytics_ingestion_runs', {
         p_keep_days: ingestionRunsDays,
-        p_workspace_id: workspaceId,
+        p_workspace_id: cleanWorkspaceId,
       });
       if (runsErr) throw runsErr;
       deletedIngestionRuns = runsData?.deleted_runs ?? (typeof runsData === 'number' ? runsData : 0);
 
-      const topPinsRawDays = typeof wsSettings?.top_pins_raw_days === 'number' ? wsSettings.top_pins_raw_days : 180;
       const snapshotCutoff = new Date(Date.now() - topPinsRawDays * 86400000).toISOString().split('T')[0];
 
       const resSnapshots = await batchedDelete(analyticsClient, 'top_pins_snapshots', {
         column: 'workspace_id',
-        value: workspaceId,
-        workspaceId,
+        value: cleanWorkspaceId,
+        workspaceId: cleanWorkspaceId,
         dateColumn: 'window_end',
         cutoff: snapshotCutoff,
       });
@@ -286,7 +308,7 @@ export async function runRetentionCleanup(
       if (resSnapshots.hitCap) wasTruncated = true;
 
       if (wsSettings?.top_pins_downsample_enabled) {
-        console.warn('[Retention] Top pins downsampling requested for workspace:', workspaceId);
+        console.warn('[Retention] Top pins downsampling requested for workspace:', cleanWorkspaceId);
       }
     } catch (p3Err: any) {
       console.error('[Retention] P3 prune failed:', p3Err);
@@ -300,30 +322,24 @@ export async function runRetentionCleanup(
   if (effectiveP4) {
     try {
       const pinArchiveClient = dbClients.getPinArchive(runtimeEnv);
-      const paRunsDays = typeof wsSettings?.pa_runs_retention_days === 'number'
-        ? wsSettings.pa_runs_retention_days
-        : (typeof wsSettings?.pa_runs_days === 'number' ? wsSettings.pa_runs_days : 60);
       const paRunsCutoff = new Date(Date.now() - paRunsDays * 86400000).toISOString();
 
       const resRuns = await batchedDelete(pinArchiveClient, 'pa_runs', {
         column: 'workspace_id',
-        value: workspaceId,
-        workspaceId,
+        value: cleanWorkspaceId,
+        workspaceId: cleanWorkspaceId,
         dateColumn: 'started_at',
         cutoff: paRunsCutoff,
       });
       deletedPaRuns = resRuns.deleted;
       if (resRuns.hitCap) wasTruncated = true;
 
-      const paMetricsDays = typeof wsSettings?.pa_metrics_retention_days === 'number'
-        ? wsSettings.pa_metrics_retention_days
-        : (typeof wsSettings?.pa_metrics_days === 'number' ? wsSettings.pa_metrics_days : 90);
       const paMetricsCutoff = new Date(Date.now() - paMetricsDays * 86400000).toISOString();
 
       const resMetrics = await batchedDelete(pinArchiveClient, 'pa_pin_metrics', {
         column: 'workspace_id',
-        value: workspaceId,
-        workspaceId,
+        value: cleanWorkspaceId,
+        workspaceId: cleanWorkspaceId,
         dateColumn: 'recorded_at',
         cutoff: paMetricsCutoff,
       });
@@ -336,10 +352,13 @@ export async function runRetentionCleanup(
   }
 
   // Construct consolidated payload
+  const attemptedGates = [effectiveP1, effectiveP2, effectiveP3, effectiveP4].filter(Boolean).length;
+  const allFailed = attemptedGates > 0 && warnings.length >= attemptedGates;
+
   const payload: Record<string, any> = {
-    success: true,
+    success: !allFailed,
     truncated: wasTruncated,
-    workspace_id: workspaceId,
+    workspace_id: cleanWorkspaceId,
     auto_prune_enabled: Boolean(wsSettings?.auto_prune_enabled ?? false),
     p2_prune_enabled: Boolean(wsSettings?.p2_prune_enabled ?? false),
     p3_prune_enabled: Boolean(wsSettings?.p3_prune_enabled ?? false),
@@ -364,24 +383,24 @@ export async function runRetentionCleanup(
   try {
     const telemetryPayload = {
       ...(wsSettings ?? {}),
-      workspace_id: workspaceId,
+      workspace_id: cleanWorkspaceId,
       auto_prune_enabled: wsSettings?.auto_prune_enabled ?? false,
       retention_posted_days: retentionPostedDays,
-      retention_terminal_days: wsSettings?.retention_terminal_days ?? 90,
-      retention_logs_days: wsSettings?.retention_logs_days ?? 14,
-      import_sessions_days: wsSettings?.import_sessions_days ?? 30,
+      retention_terminal_days: terminalDays,
+      retention_logs_days: logsDays,
+      import_sessions_days: importDays,
       processing_timeout_minutes: processingTimeoutMinutes,
       p2_prune_enabled: wsSettings?.p2_prune_enabled ?? false,
-      competitor_snapshots_days: wsSettings?.competitor_snapshots_days ?? 90,
-      competitor_jobs_days: wsSettings?.competitor_jobs_days ?? 30,
+      competitor_snapshots_days: compSnapshotsDays,
+      competitor_jobs_days: compJobsDays,
       p3_prune_enabled: wsSettings?.p3_prune_enabled ?? false,
-      ingestion_runs_days: wsSettings?.ingestion_runs_days ?? 30,
-      top_pins_raw_days: wsSettings?.top_pins_raw_days ?? 180,
+      ingestion_runs_days: ingestionRunsDays,
+      top_pins_raw_days: topPinsRawDays,
       top_pins_downsample_enabled: wsSettings?.top_pins_downsample_enabled ?? false,
       analytics_daily_keep_days: wsSettings?.analytics_daily_keep_days ?? null,
       p4_prune_enabled: wsSettings?.p4_prune_enabled ?? false,
-      pa_runs_retention_days: wsSettings?.pa_runs_retention_days ?? wsSettings?.pa_runs_days ?? 60,
-      pa_metrics_retention_days: wsSettings?.pa_metrics_retention_days ?? wsSettings?.pa_metrics_days ?? 90,
+      pa_runs_retention_days: paRunsDays,
+      pa_metrics_retention_days: paMetricsDays,
       last_cleanup_at: new Date().toISOString(),
       last_cleanup_result: {
         at: new Date().toISOString(),
