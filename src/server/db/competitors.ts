@@ -209,4 +209,41 @@ export const competitorsDb = {
     if (error) throw error;
     return data as CompetitorRecord;
   },
+
+  /**
+   * Batch upserts competitors in the tenant's workspace.
+   */
+  async upsertCompetitorsBatch(
+    workspaceId: string,
+    competitors: Array<Partial<CompetitorRecord> & { username: string }>
+  ): Promise<CompetitorRecord[]> {
+    if (!workspaceId) {
+      throw new Error('Tenant Boundary Violation: workspaceId is required.');
+    }
+    if (competitors.length === 0) return [];
+
+    const client = dbClients.getCompetitors();
+    const rows = competitors.map(c => ({
+      ...c,
+      workspace_id: workspaceId,
+    }));
+
+    const CHUNK_SIZE = 500;
+    const upsertedCompetitors: CompetitorRecord[] = [];
+
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const { data, error } = await client
+        .from('competitors')
+        .upsert(chunk, { onConflict: 'workspace_id,username' })
+        .select();
+
+      if (error) throw error;
+      if (data) {
+        upsertedCompetitors.push(...(data as CompetitorRecord[]));
+      }
+    }
+
+    return upsertedCompetitors;
+  },
 };

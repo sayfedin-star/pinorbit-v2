@@ -67,17 +67,17 @@ export async function gasCall(
       };
     }
 
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      const data = await res.json();
-      if (typeof data === 'object' && data !== null) {
-        const ok = typeof data.ok === 'boolean' ? data.ok : (data.success !== false && !data.error);
-        return { ok, ...data };
-      }
-      return { ok: true, data };
+    let text = '';
+    try {
+      text = await res.text();
+    } catch {
+      return { ok: false, error: 'Failed to read response body from GAS.' };
     }
 
-    const text = await res.text();
+    if (!text || text.trim().length === 0) {
+      return { ok: false, error: 'Empty response body from GAS.' };
+    }
+
     try {
       const parsed = JSON.parse(text);
       if (typeof parsed === 'object' && parsed !== null) {

@@ -323,6 +323,7 @@ describe('Dispatched Ledger Service Suite', () => {
         }
         return {
           select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
           in: vi.fn().mockResolvedValue({ data: [], error: null }),
         };
       }),

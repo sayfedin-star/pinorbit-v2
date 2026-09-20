@@ -260,7 +260,7 @@ export async function createBoardViaWebhook(options: CreateBoardOptions): Promis
         webhook_id: webhookId || undefined,
       }),
     });
-    const d = await res.json();
+    const d = await res.json().catch(() => ({ error: 'Invalid response from server' }));
     if (!res.ok) {
       return { success: false, error: d.error || 'Failed to dispatch board creation' };
     }

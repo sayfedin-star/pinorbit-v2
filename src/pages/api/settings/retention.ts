@@ -58,6 +58,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
           top_pins_raw_days: 180,
           top_pins_downsample_enabled: false,
           analytics_daily_keep_days: null,
+          p4_prune_enabled: false,
+          pa_runs_retention_days: 60,
+          pa_metrics_retention_days: 90,
           last_cleanup_at: null,
           last_cleanup_result: null,
           is_default: true,
@@ -86,6 +89,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
         top_pins_raw_days: settings.top_pins_raw_days ?? 180,
         top_pins_downsample_enabled: settings.top_pins_downsample_enabled ?? false,
         analytics_daily_keep_days: settings.analytics_daily_keep_days ?? null,
+        p4_prune_enabled: settings.p4_prune_enabled ?? false,
+        pa_runs_retention_days: settings.pa_runs_retention_days ?? 60,
+        pa_metrics_retention_days: settings.pa_metrics_retention_days ?? 90,
         last_cleanup_at: settings.last_cleanup_at ?? null,
         last_cleanup_result: settings.last_cleanup_result ?? null,
         is_default: false,
@@ -162,6 +168,10 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
     const rawTopPinsRaw = body.top_pins_raw_days !== undefined ? body.top_pins_raw_days : existing?.top_pins_raw_days;
     const rawTopPinsDownsample = body.top_pins_downsample_enabled !== undefined ? body.top_pins_downsample_enabled : existing?.top_pins_downsample_enabled;
 
+    const rawP4Prune = body.p4_prune_enabled !== undefined ? body.p4_prune_enabled : existing?.p4_prune_enabled;
+    const rawPaRuns = body.pa_runs_retention_days !== undefined ? body.pa_runs_retention_days : existing?.pa_runs_retention_days;
+    const rawPaMetrics = body.pa_metrics_retention_days !== undefined ? body.pa_metrics_retention_days : existing?.pa_metrics_retention_days;
+
     let clampedDailyKeep: number | null = null;
     if (body.analytics_daily_keep_days === null || body.analytics_daily_keep_days === '') {
       clampedDailyKeep = null;
@@ -188,6 +198,9 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
       top_pins_raw_days: clampInt(rawTopPinsRaw, 1, 730, existing?.top_pins_raw_days ?? 180) ?? 180,
       top_pins_downsample_enabled: Boolean(rawTopPinsDownsample ?? false),
       analytics_daily_keep_days: clampedDailyKeep,
+      p4_prune_enabled: Boolean(rawP4Prune ?? false),
+      pa_runs_retention_days: clampInt(rawPaRuns, 1, 365, existing?.pa_runs_retention_days ?? 60) ?? 60,
+      pa_metrics_retention_days: clampInt(rawPaMetrics, 1, 365, existing?.pa_metrics_retention_days ?? 90) ?? 90,
       updated_at: new Date().toISOString(),
     };
 
@@ -217,6 +230,9 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
         top_pins_raw_days: saved.top_pins_raw_days,
         top_pins_downsample_enabled: saved.top_pins_downsample_enabled,
         analytics_daily_keep_days: saved.analytics_daily_keep_days,
+        p4_prune_enabled: saved.p4_prune_enabled,
+        pa_runs_retention_days: saved.pa_runs_retention_days,
+        pa_metrics_retention_days: saved.pa_metrics_retention_days,
         last_cleanup_at: saved.last_cleanup_at ?? null,
         last_cleanup_result: saved.last_cleanup_result ?? null,
         is_default: false,

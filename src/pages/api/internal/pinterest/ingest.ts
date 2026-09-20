@@ -2,7 +2,7 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { dbClients, isKnownDefaultIngestSecret, isProductionEnv } from '../../../../server/db/clients';
-import { getEffectiveSecret } from '../../../../server/services/webhook-secrets';
+import { getEffectiveSecret, verifyIngestSecret, GLOBAL_KEY, wsKey } from '../../../../server/services/webhook-secrets';
 import { pinnerETL } from '../../../../server/services/pinner-etl';
 import { timingSafeEqual } from '../../../../server/lib/timing-safe';
 import { buildBoardCreateIdempotencyKey } from '../../../../server/services/scheduling-logic';
@@ -46,7 +46,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return new Response(JSON.stringify({ success: false, error: 'Service unavailable: ingest secret not configured on server.' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
     }
     const prov = request.headers.get('x-ingest-secret') || (typeof payload.ingest_secret === 'string' ? payload.ingest_secret : null);
-    if (!prov || !eff.value || !(await timingSafeEqual(prov, eff.value))) {
+    let isAuthed = Boolean(prov && eff.value && (await timingSafeEqual(prov, eff.value)));
+    if (!isAuthed && prov && runtimeEnv?.INGEST_SECRETS_KV) {
+      const prevKey = eff.source === 'workspace' ? `${wsKey(wsId)}:prev` : `${GLOBAL_KEY}:prev`;
+      const prevVal = await runtimeEnv.INGEST_SECRETS_KV.get(prevKey);
+      if (prevVal) {
+        isAuthed = await timingSafeEqual(prov, prevVal);
+      }
+    }
+    if (!isAuthed) {
       return new Response(JSON.stringify({ success: false, error: 'Unauthorized: missing or invalid x-ingest-secret header.' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
     }
 
@@ -288,6 +296,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         const { data: existingBoards } = await admin
           .from('boards')
           .select('board_id, created_via, pin_count, follower_count, board_created_at, board_pins_modified_at')
+          .eq('workspace_id', acc.workspace_id)
           .eq('account_id', accId)
           .in('board_id', bIds);
 
@@ -407,7 +416,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response(JSON.stringify({ success: false, error: 'Service unavailable: ingest secret not configured on server.' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
   }
   const providedSecret = request.headers.get('x-ingest-secret');
-  if (!providedSecret || !preEff.value || !(await timingSafeEqual(providedSecret, preEff.value))) {
+  let isPreAuthed = Boolean(providedSecret && preEff.value && (await timingSafeEqual(providedSecret, preEff.value)));
+  if (!isPreAuthed && providedSecret && runtimeEnv?.INGEST_SECRETS_KV) {
+    const prevKey = preEff.source === 'workspace' && payload.workspace_id ? `${wsKey(payload.workspace_id)}:prev` : `${GLOBAL_KEY}:prev`;
+    const prevVal = await runtimeEnv.INGEST_SECRETS_KV.get(prevKey);
+    if (prevVal) {
+      isPreAuthed = await timingSafeEqual(providedSecret, prevVal);
+    }
+  }
+  if (!isPreAuthed) {
     return new Response(JSON.stringify({ success: false, error: 'Unauthorized: missing or invalid x-ingest-secret header.' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 
@@ -438,7 +455,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   const targetSecret = await getEffectiveSecret(connection.workspace_id, runtimeEnv);
-  if (!targetSecret?.value || !providedSecret || !(await timingSafeEqual(providedSecret, targetSecret.value))) {
+  let isTargetAuthed = Boolean(providedSecret && targetSecret?.value && (await timingSafeEqual(providedSecret, targetSecret.value)));
+  if (!isTargetAuthed && providedSecret && runtimeEnv?.INGEST_SECRETS_KV) {
+    const prevKey = targetSecret.source === 'workspace' ? `${wsKey(connection.workspace_id)}:prev` : `${GLOBAL_KEY}:prev`;
+    const prevVal = await runtimeEnv.INGEST_SECRETS_KV.get(prevKey);
+    if (prevVal) {
+      isTargetAuthed = await timingSafeEqual(providedSecret, prevVal);
+    }
+  }
+  if (!isTargetAuthed) {
     return new Response(JSON.stringify({ success: false, error: 'Unauthorized: invalid secret for connection workspace.' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
   payload.workspace_id = connection.workspace_id;

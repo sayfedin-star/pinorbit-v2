@@ -55,6 +55,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   if (parsed.type === 'user_boards' && parsed.boardsData) {
     const rows = parsed.boardsData.map((bd: any) => ({
+      workspace_id: ws,
       competitor_id: comp.data.id, board_id: bd.board_id, name: bd.name,
       description: bd.description || '', url: bd.url || '', pin_count: Number(bd.pin_count || 0),
       follower_count: Number(bd.follower_count || 0),

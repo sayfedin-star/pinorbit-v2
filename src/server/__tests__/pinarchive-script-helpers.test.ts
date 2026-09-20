@@ -1,13 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  resolveMonotonicOldestPin,
-  fetchAllAccounts,
-} from '../../../scripts/sync-oldest-pins-from-sheet.mjs';
-import {
   supaQuery,
   supaPatch,
   pushToIngest,
   writeToGas,
+  resolveMonotonicOldestPin,
+  fetchAllAccounts,
 } from '../../../scripts/lib/pa-client.mjs';
 import {
   aesKey,

@@ -21,11 +21,13 @@ describe('Regression: Retention 25k cap returns hitCap=true and truncated=true (
             })),
           })),
         })),
-        delete: vi.fn(() => ({
-          in: vi.fn(() => ({
-            eq: vi.fn(async () => ({ count: batchSize, error: null })),
-          })),
-        })),
+        delete: vi.fn(() => {
+          const d: any = {
+            eq: vi.fn(() => d),
+            in: vi.fn(async () => ({ count: batchSize, error: null })),
+          };
+          return d;
+        }),
       })),
     };
 
@@ -63,11 +65,13 @@ describe('Regression: Retention 25k cap returns hitCap=true and truncated=true (
             })),
           })),
         })),
-        delete: vi.fn(() => ({
-          in: vi.fn(() => ({
-            eq: vi.fn(async () => ({ count: 500, error: null })),
-          })),
-        })),
+        delete: vi.fn(() => {
+          const d: any = {
+            eq: vi.fn(() => d),
+            in: vi.fn(async () => ({ count: 500, error: null })),
+          };
+          return d;
+        }),
       })),
     };
 

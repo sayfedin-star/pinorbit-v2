@@ -129,24 +129,26 @@ export const GET: APIRoute = async ({ locals, url }) => {
     }
 
     // ═══ MODE B: Unpaginated Legacy Query (Backward Compatibility) ═══
-    // Range-chunked to guarantee all links are retrieved without PostgREST 1000-row capping
+    // Range-chunked with MAX_LEGACY_LIMIT to protect against Cloudflare Worker 128MB OOM crashes
     const fetchAllLinks = async (table: 'user_links' | 'workspace_links', filterCol: string, filterVal: string) => {
       const CHUNK_SIZE = 1000;
+      const MAX_LEGACY_LIMIT = 2000;
       const all: any[] = [];
       let from = 0;
-      while (true) {
+      while (all.length < MAX_LEGACY_LIMIT) {
+        const fetchCount = Math.min(CHUNK_SIZE, MAX_LEGACY_LIMIT - all.length);
         const { data, error } = await paAdmin
           .from(table)
           .select('*')
           .eq(filterCol, filterVal)
           .order('is_default', { ascending: false })
           .order('created_at', { ascending: false })
-          .range(from, from + CHUNK_SIZE - 1);
+          .range(from, from + fetchCount - 1);
 
         if (error || !data || data.length === 0) break;
         all.push(...data);
-        if (data.length < CHUNK_SIZE) break;
-        from += CHUNK_SIZE;
+        if (data.length < fetchCount) break;
+        from += fetchCount;
       }
       return all;
     };

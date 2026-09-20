@@ -97,13 +97,18 @@ export async function verifyIngestSecret(
 
   const candidates = await getSecretCandidates(wsId, runtimeEnv);
 
+  let valid = false;
+  let matchedSource: SecretCandidate['source'] | undefined;
+
   for (const candidate of candidates) {
-    if (candidate.value && (await timingSafeEqual(providedSecret.trim(), candidate.value.trim()))) {
-      return { valid: true, matchedSource: candidate.source };
+    const isMatch = candidate.value ? await timingSafeEqual(providedSecret.trim(), candidate.value.trim()) : false;
+    if (isMatch && !valid) {
+      valid = true;
+      matchedSource = candidate.source;
     }
   }
 
-  return { valid: false };
+  return { valid, matchedSource };
 }
 
 /**

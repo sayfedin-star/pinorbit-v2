@@ -132,6 +132,42 @@ export const schedulingDb = {
   },
 
   /**
+   * Batch creates pins within an authorized workspace.
+   */
+  async createPinsBatch(
+    schedulingClient: SupabaseClient,
+    workspaceId: string,
+    userId: string,
+    pinsData: Array<Omit<PinRecord, 'id' | 'workspace_id' | 'created_at' | 'updated_at' | 'attempts' | 'last_error_code' | 'last_error_message' | 'processing_started_at' | 'posted_at'>>
+  ): Promise<PinRecord[]> {
+    if (pinsData.length === 0) return [];
+    await assertWorkspaceAccess(schedulingClient, workspaceId, userId);
+
+    const rows = pinsData.map(pin => ({
+      ...pin,
+      workspace_id: workspaceId,
+    }));
+
+    const CHUNK_SIZE = 500;
+    const insertedPins: PinRecord[] = [];
+
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const { data, error } = await schedulingClient
+        .from('pins')
+        .insert(chunk)
+        .select();
+
+      if (error) throw error;
+      if (data) {
+        insertedPins.push(...(data as PinRecord[]));
+      }
+    }
+
+    return insertedPins;
+  },
+
+  /**
    * Updates pin status or rescheduling time.
    */
   async updatePinStatus(
@@ -169,6 +205,7 @@ export const schedulingDb = {
     const { data, error } = await schedulingClient
       .from('account_posting_windows')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .eq('account_id', accountId)
       .order('day_of_week', { ascending: true })
       .order('posting_time', { ascending: true });

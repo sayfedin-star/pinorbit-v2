@@ -49,7 +49,9 @@ export function calculateJSPacingForAccount(accountId: string): number {
       if (Array.isArray(activeDays) && activeDays.length > 0 && !activeDays.includes(dayName)) {
         currTime.setDate(currTime.getDate() + 1);
         const [sH, sM] = winStart.split(':').map(Number);
-        currTime.setHours(sH || 9, sM || 0, 0, 0);
+        const sHNum = Number.isFinite(sH) ? sH : 9;
+        const sMNum = Number.isFinite(sM) ? sM : 0;
+        currTime.setHours(sHNum, sMNum, 0, 0);
         continue;
       }
 
@@ -59,22 +61,26 @@ export function calculateJSPacingForAccount(accountId: string): number {
 
       const [sH, sM] = winStart.split(':').map(Number);
       const [eH, eM] = winEnd.split(':').map(Number);
-      const startTotal = (sH || 9) * 60 + (sM || 0);
-      const endTotal = (eH || 21) * 60 + (eM || 0);
+      const sHNum = Number.isFinite(sH) ? sH : 9;
+      const sMNum = Number.isFinite(sM) ? sM : 0;
+      const eHNum = Number.isFinite(eH) ? eH : 21;
+      const eMNum = Number.isFinite(eM) ? eM : 0;
+      const startTotal = sHNum * 60 + sMNum;
+      const endTotal = eHNum * 60 + eMNum;
 
       if (startTotal <= endTotal) {
         if (curTotal < startTotal) {
-          currTime.setHours(sH || 9, sM || 0, 0, 0);
+          currTime.setHours(sHNum, sMNum, 0, 0);
           continue;
         }
         if (curTotal > endTotal) {
           currTime.setDate(currTime.getDate() + 1);
-          currTime.setHours(sH || 9, sM || 0, 0, 0);
+          currTime.setHours(sHNum, sMNum, 0, 0);
           continue;
         }
       } else {
         if (curTotal > endTotal && curTotal < startTotal) {
-          currTime.setHours(sH || 9, sM || 0, 0, 0);
+          currTime.setHours(sHNum, sMNum, 0, 0);
           continue;
         }
       }
@@ -183,7 +189,9 @@ export async function rescheduleAccountPendingPins(accountId: string): Promise<{
         if (Array.isArray(activeDays) && activeDays.length > 0 && !activeDays.includes(dayName)) {
           currTime.setDate(currTime.getDate() + 1);
           const [sH, sM] = winStart.split(':').map(Number);
-          currTime.setHours(sH || 9, sM || 0, 0, 0);
+          const sHNum = Number.isFinite(sH) ? sH : 9;
+          const sMNum = Number.isFinite(sM) ? sM : 0;
+          currTime.setHours(sHNum, sMNum, 0, 0);
           continue;
         }
 
@@ -193,22 +201,26 @@ export async function rescheduleAccountPendingPins(accountId: string): Promise<{
 
         const [sH, sM] = winStart.split(':').map(Number);
         const [eH, eM] = winEnd.split(':').map(Number);
-        const startTotal = (sH || 9) * 60 + (sM || 0);
-        const endTotal = (eH || 21) * 60 + (eM || 0);
+        const sHNum = Number.isFinite(sH) ? sH : 9;
+        const sMNum = Number.isFinite(sM) ? sM : 0;
+        const eHNum = Number.isFinite(eH) ? eH : 21;
+        const eMNum = Number.isFinite(eM) ? eM : 0;
+        const startTotal = sHNum * 60 + sMNum;
+        const endTotal = eHNum * 60 + eMNum;
 
         if (startTotal <= endTotal) {
           if (curTotal < startTotal) {
-            currTime.setHours(sH || 9, sM || 0, 0, 0);
+            currTime.setHours(sHNum, sMNum, 0, 0);
             continue;
           }
           if (curTotal > endTotal) {
             currTime.setDate(currTime.getDate() + 1);
-            currTime.setHours(sH || 9, sM || 0, 0, 0);
+            currTime.setHours(sHNum, sMNum, 0, 0);
             continue;
           }
         } else {
           if (curTotal > endTotal && curTotal < startTotal) {
-            currTime.setHours(sH || 9, sM || 0, 0, 0);
+            currTime.setHours(sHNum, sMNum, 0, 0);
             continue;
           }
         }

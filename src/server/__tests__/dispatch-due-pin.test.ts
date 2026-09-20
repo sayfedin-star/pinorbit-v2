@@ -326,7 +326,7 @@ describe('Thread-Safe Dispatch Due Pin Concurrency & Hardening Suite', () => {
     // Verify webhook was pushed exactly ONCE (zero double-dispatch)
     expect(webhookCalls.length).toBe(1);
     expect(webhookCalls[0].body.pin_id).toBe('pin-001');
-    expect(webhookCalls[0].body.idempotency_key).toBe('pin.post:pin-001:1');
+    expect(webhookCalls[0].body.idempotency_key).toBe('pin.post:pin-001');
   });
 
   it('2. Per-Schedule Orphan Sweep: Sweeps only target schedule pins without touching other schedules in workspace', async () => {
