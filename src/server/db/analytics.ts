@@ -573,7 +573,7 @@ export const analyticsDb = {
       p_connection_id: connectionId,
       p_sort_by: sortBy,
       p_days: days,
-      p_limit: Math.min(Math.max((limit || 25) * 40, 1000), 5000),
+      p_limit: Math.min(Math.max((limit || 25) * 40, 1000), 2000),
       p_search: cleanSearch,
       p_workspace_id: workspaceId,
     });
@@ -1086,7 +1086,9 @@ export const analyticsDb = {
 
     let totalsOffset = 0;
     const totalsBatchSize = 1000;
-    while (true) {
+    const MAX_TOTALS_BATCHES = 10;
+    let totalsBatchCount = 0;
+    while (totalsBatchCount < MAX_TOTALS_BATCHES) {
       const { data: chunk, error: totalsErr } = await totalsQuery.range(totalsOffset, totalsOffset + totalsBatchSize - 1);
       if (totalsErr) throw totalsErr;
       const rows = chunk || [];
@@ -1097,6 +1099,7 @@ export const analyticsDb = {
         pin_clicks += Number(row.pin_clicks || 0);
         saves += Number(row.saves || 0);
       }
+      totalsBatchCount++;
       if (rows.length < totalsBatchSize) break;
       totalsOffset += totalsBatchSize;
     }

@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { executeBidirectionalCompensation } from '../services/repurpose-service';
 import { POST as deleteWorkspaceHandler } from '../../pages/api/workspaces/delete';
 import { POST as ingestHandler } from '../../pages/api/internal/pinterest/ingest';
+import { POST as dailyDispatchHandler } from '../../pages/api/internal/pinterest/daily-dispatch';
+import { POST as cleanupRetentionHandler } from '../../pages/api/internal/pinterest/cleanup-retention';
 import { verifyIngestSecret } from '../services/webhook-secrets';
+import { safeParseJson } from '../lib/safe-json';
 import { pinnerETL } from '../services/pinner-etl';
 import { gasCall } from '../lib/gas-bridge';
 import { createBoardViaWebhook } from '../../lib/boards';
@@ -417,6 +420,51 @@ describe('Level-2 Adversarial & Chaos Stress Test Suite', () => {
       expect(selectedColumns['account_analytics_summaries']).not.toBe('*');
       expect(result.impressions).toBe(500);
     });
+
+    it('getConnectionDailyMetrics caps totals query iterations at MAX_TOTALS_BATCHES = 10 to prevent unbounded execution', async () => {
+      let totalsRangeCallCount = 0;
+
+      const mockAnalyticsClient: any = {
+        from: vi.fn((table: string) => {
+          if (table === 'account_analytics_daily') {
+            return {
+              select: vi.fn().mockReturnThis(),
+              eq: vi.fn().mockReturnThis(),
+              gte: vi.fn().mockReturnThis(),
+              lte: vi.fn().mockReturnThis(),
+              order: vi.fn().mockReturnThis(),
+              range: vi.fn().mockImplementation(() => {
+                totalsRangeCallCount++;
+                return Promise.resolve({
+                  data: Array.from({ length: 1000 }, () => ({
+                    impressions: 100,
+                    engagements: 10,
+                    outbound_clicks: 5,
+                    pin_clicks: 5,
+                    saves: 2,
+                  })),
+                  error: null,
+                });
+              }),
+            };
+          }
+          return {};
+        }),
+      };
+
+      vi.spyOn(dbClients, 'getAnalytics').mockReturnValue(mockAnalyticsClient);
+
+      const result = await analyticsDb.getConnectionDailyMetrics(
+        '00000000-0000-0000-0000-000000000001',
+        'conn-001',
+        '2026-01-01',
+        '2026-12-31'
+      );
+
+      // Must have stopped at MAX_TOTALS_BATCHES = 10 instead of running infinitely
+      expect(totalsRangeCallCount).toBeGreaterThanOrEqual(10);
+      expect(result.totals.impressions).toBe(100 * 1000 * 10);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -587,6 +635,120 @@ describe('Level-2 Adversarial & Chaos Stress Test Suite', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Invalid response from server');
+    });
+
+    it('daily-dispatch rejects SSRF webhook URLs with HTTP 400 before attempting fetch', async () => {
+      const mockAnalyticsClient = {
+        from: vi.fn((table: string) => ({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          is: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: {
+              id: 'conn-001',
+              workspace_id: '00000000-0000-0000-0000-000000000001',
+              analytics_webhook_url: 'http://169.254.169.254/latest/meta-data',
+              top_pins_webhook_url: null,
+            },
+            error: null,
+          }),
+        })),
+      };
+
+      vi.spyOn(dbClients, 'getAnalytics').mockReturnValue(mockAnalyticsClient as any);
+
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      const req = new Request('http://localhost:4321/api/internal/pinterest/daily-dispatch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-ingest-secret': 'test-secret',
+        },
+        body: JSON.stringify({
+          connection_id: 'conn-001',
+          channel: 'account_analytics',
+        }),
+      });
+
+      const res = await dailyDispatchHandler({
+        request: req,
+        locals: {
+          runtime: {
+            env: {
+              INGEST_SECRETS_KV: {
+                get: vi.fn().mockResolvedValue('test-secret'),
+              },
+            },
+          },
+        },
+      } as any);
+
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toContain('Unsafe webhook URL');
+      // fetch MUST NOT have been called for SSRF URL
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('cleanup-retention catches stream read error and returns HTTP 400 without crashing', async () => {
+      const req = {
+        headers: new Headers({
+          'Content-Type': 'application/json',
+          'x-workspace-id': '00000000-0000-0000-0000-000000000001',
+        }),
+        text: vi.fn().mockRejectedValue(new Error('Connection reset by peer')),
+      };
+
+      const res = await cleanupRetentionHandler({
+        request: req as any,
+        locals: {},
+      } as any);
+
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toContain('Failed to read request body');
+    });
+
+    it('safeParseJson enforces 5MB limit, catches unreadable streams, and parses valid JSON', async () => {
+      // 1. Normal JSON parsing
+      const validReq = new Request('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ valid: true, data: 123 }),
+      });
+      const validRes = await safeParseJson(validReq);
+      expect(validRes.ok).toBe(true);
+      expect(validRes.body).toEqual({ valid: true, data: 123 });
+
+      // 2. Unreadable stream
+      const brokenReq = {
+        text: vi.fn().mockRejectedValue(new Error('Stream aborted by client')),
+      } as any;
+      const brokenRes = await safeParseJson(brokenReq);
+      expect(brokenRes.ok).toBe(false);
+      expect(brokenRes.status).toBe(400);
+      expect(brokenRes.error).toContain('Failed to read request body');
+
+      // 3. Oversized payload (>5MB)
+      const hugeText = 'x'.repeat(5 * 1024 * 1024 + 10);
+      const hugeReq = {
+        text: vi.fn().mockResolvedValue(hugeText),
+      } as any;
+      const hugeRes = await safeParseJson(hugeReq);
+      expect(hugeRes.ok).toBe(false);
+      expect(hugeRes.status).toBe(413);
+      expect(hugeRes.error).toContain('Payload too large');
+
+      // 4. Malformed JSON
+      const malformedReq = new Request('http://localhost', {
+        method: 'POST',
+        body: '<html>502 Bad Gateway</html>',
+      });
+      const malformedRes = await safeParseJson(malformedReq);
+      expect(malformedRes.ok).toBe(false);
+      expect(malformedRes.status).toBe(400);
+      expect(malformedRes.error).toContain('Malformed JSON payload');
     });
   });
 });

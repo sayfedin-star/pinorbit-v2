@@ -463,23 +463,14 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
           price: p.price ?? (existing as any)?.price ?? null,
           currency: p.currency || (existing as any)?.currency || null,
           site_name: p.site_name || (existing as any)?.site_name || null,
-          saves: Math.max(Number(p.saves || 0), existing?.saves || 0),
-          repins: Math.max(Number(p.repins || 0), existing?.repins || 0),
-          comments: Math.max(Number(p.comments || 0), existing?.comments || 0),
-          reactions: (() => {
-            const pTot = typeof (p.reactions as any)?.total === 'number' ? Number((p.reactions as any).total) : 0;
-            const exTot = typeof (existing?.reactions as any)?.total === 'number' ? Number((existing?.reactions as any).total) : 0;
-            if (pTot >= exTot && pTot > 0) return p.reactions;
-            if (exTot > 0) return existing?.reactions;
-            return p.reactions ?? existing?.reactions ?? {};
-          })(),
+          saves: Number(p.saves || 0),
+          repins: Number(p.repins || 0),
+          comments: Number(p.comments || 0),
+          reactions: p.reactions ?? existing?.reactions ?? {},
           velocity: Number(p.velocity || 0),
           promoted: p.promoted !== undefined ? Boolean(p.promoted) : (existing?.promoted ?? false),
           last_updated_at: fetchedAt,
-          share_count: Math.max(
-            p.share_count === undefined ? (existing?.share_count ?? 0) : Number(p.share_count || 0),
-            existing?.share_count || 0
-          ),
+          share_count: p.share_count === undefined ? (existing?.share_count ?? 0) : Number(p.share_count || 0),
 
           // Preserved Enrichment & Direct Qualified Ingestion
           archived_at: existing?.archived_at || (p.archived_at !== undefined ? p.archived_at : fetchedAt),

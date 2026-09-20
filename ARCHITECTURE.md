@@ -197,3 +197,10 @@ All migrations must be applied sequentially in chronological order matching the 
 26. **Edge KV Prefix Isolation & In-Memory TTL Fallbacks:**
     - *Scoping:* FastCron token resolution and temporary session data utilize namespace/workspace-prefixed keys across edge KV stores and in-memory caches, preventing cross-tenant leakage in multi-tenant edge deployments.
     - *Bounded Life-Cycle:* Where edge stores are unavailable, resilient in-memory TTL maps with bounded capacities and periodic eviction sweeps serve as fail-safe fallbacks without blocking request pipelines.
+27. **Cross-Project (P1 ↔ P4) Distributed Transaction Impossibility & Compensation Contract:**
+    - *Architectural Reality (Accepted-by-Design):* P1 (Scheduling) and P4 (PinArchive) reside in separate Supabase projects with distinct database hosts, connection pools, and credentials. In PostgREST, atomic multi-database two-phase commit (2PC) transactions across P1 and P4 are fundamentally impossible.
+    - *Contract:* Cross-project atomicity is guaranteed at the architectural level through:
+      1. Single-project atomic RPCs within each respective database engine (e.g. `pa_repurpose_commit_batch` / `pa_ingest_pin_batch`).
+      2. Deterministic, indexed correlation references (`source_ref` / `batch_uuid`) linking P1 pins to P4 repurpose dispatches.
+      3. Idempotent compensation handlers (`executeBidirectionalCompensation`) that clean up P1 pins in 100-item chunks upon batch cancellation or ownership loss.
+      4. Scheduled reverse-reconciliation sweeps (`reverse-reconciliation.ts`) to detect and prune any orphaned records across project boundaries.
