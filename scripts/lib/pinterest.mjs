@@ -108,16 +108,29 @@ export function formatPin(pin) {
   const annotations = Array.from(annotationsMap.values());
 
   // --- reactions ---
-  const reactionsPayload = pin?.reactionCountsData || pin?.reactions || [];
-  const reactionsMap = {};
-  if (Array.isArray(reactionsPayload)) {
-    for (const r of reactionsPayload) {
-      if (r?.reactionType !== undefined) {
-        reactionsMap[`type_${r.reactionType}`] = r.reactionCount;
+  const reactionsPayload = pin?.reactionCountsData || pin?.reactions;
+  const hasReactionsArray = Array.isArray(reactionsPayload) && reactionsPayload.length > 0;
+  const rawTotal = pin?.totalReactionCount ?? pin?.reactions_total;
+  let reactions = {};
+
+  if (hasReactionsArray || (rawTotal !== null && rawTotal !== undefined)) {
+    const reactionsMap = {};
+    if (Array.isArray(reactionsPayload)) {
+      for (const r of reactionsPayload) {
+        if (r?.reactionType !== undefined) {
+          reactionsMap[`type_${r.reactionType}`] = Number(r.reactionCount || 0);
+        }
       }
     }
+    if (rawTotal !== null && rawTotal !== undefined) {
+      reactionsMap.total = Number(rawTotal);
+    } else if (hasReactionsArray) {
+      reactionsMap.total = Object.values(reactionsMap).reduce((a, b) => a + b, 0);
+    } else {
+      reactionsMap.total = 0;
+    }
+    reactions = reactionsMap;
   }
-  reactionsMap.total = Number(pin?.totalReactionCount || pin?.reactions_total || 0);
 
   // --- canonical_pin_id ---
   const canonicalPinId =
@@ -152,7 +165,7 @@ export function formatPin(pin) {
     node_id: pin.id || pin.node_id || null,
     created_at_pinterest: pin.createdAt || pin.created_at || null,
     is_video: Boolean(pin.isVideo || pin.is_video),
-    reactions: reactionsMap,
+    reactions,
 
     // Enriched fields
     annotations,
@@ -292,6 +305,11 @@ export function extractPinData(html, pinId) {
             !Array.isArray(merged[k])
           ) {
             merged[k] = { ...merged[k], ...v };
+          } else if (Array.isArray(v)) {
+            // Guard: Never let an empty array in a secondary block overwrite an already populated array
+            if (v.length > 0 || !Array.isArray(merged[k]) || merged[k].length === 0) {
+              merged[k] = v;
+            }
           } else {
             merged[k] = v;
           }

@@ -9,6 +9,7 @@ import type {
   WorkspaceAnalyticsSettings,
   AnalyticsConnection,
   AnalyticsIngestionRun,
+  AnalyticsBackfillJob,
   PinLeaderboardItem,
   PinLeaderboardOptions,
   PinLeaderboardResult,
@@ -1722,6 +1723,205 @@ export const analyticsDb = {
       purge_log_id: data.purge_log_id,
       counts: data.counts,
     };
+  },
+
+  // ============================================================================
+  // Project 3 Cloud Background Backfill Jobs (FastCron Recurring Loop)
+  // ============================================================================
+
+  /**
+   * Creates a new background backfill job record in Project 3.
+   */
+  async createBackfillJob(
+    params: {
+      workspaceId: string;
+      connectionId: string;
+      channel: 'account_analytics' | 'top_pins';
+      startDate: string;
+      endDate: string;
+      totalDays: number;
+      intervalMinutes?: number;
+      fastcronJobId?: number | null;
+    },
+    runtimeEnv?: Record<string, any>
+  ): Promise<AnalyticsBackfillJob> {
+    const analyticsClient = dbClients.getAnalytics(runtimeEnv);
+    const { data, error } = await analyticsClient
+      .from('analytics_backfill_jobs')
+      .insert({
+        workspace_id: params.workspaceId,
+        connection_id: params.connectionId,
+        channel: params.channel,
+        status: 'running',
+        start_date: params.startDate,
+        end_date: params.endDate,
+        current_date: params.startDate,
+        total_days: params.totalDays,
+        completed_days: 0,
+        failed_days: 0,
+        interval_minutes: params.intervalMinutes || 5,
+        fastcron_job_id: params.fastcronJobId || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data as AnalyticsBackfillJob;
+  },
+
+  /**
+   * Gets the active (running or paused) backfill job for a connection and channel.
+   */
+  async getActiveBackfillJob(
+    workspaceId: string,
+    connectionId: string,
+    channel: 'account_analytics' | 'top_pins',
+    runtimeEnv?: Record<string, any>
+  ): Promise<AnalyticsBackfillJob | null> {
+    const analyticsClient = dbClients.getAnalytics(runtimeEnv);
+    const { data, error } = await analyticsClient
+      .from('analytics_backfill_jobs')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('connection_id', connectionId)
+      .eq('channel', channel)
+      .in('status', ['running', 'paused'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data as AnalyticsBackfillJob | null;
+  },
+
+  /**
+   * Gets a specific backfill job by ID.
+   */
+  async getBackfillJobById(
+    jobId: string,
+    runtimeEnv?: Record<string, any>
+  ): Promise<AnalyticsBackfillJob | null> {
+    const analyticsClient = dbClients.getAnalytics(runtimeEnv);
+    const { data, error } = await analyticsClient
+      .from('analytics_backfill_jobs')
+      .select('*')
+      .eq('id', jobId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data as AnalyticsBackfillJob | null;
+  },
+
+  /**
+   * Updates backfill job status and metadata.
+   */
+  async updateBackfillJob(
+    jobId: string,
+    updates: Partial<{
+      status: 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+      fastcron_job_id: number | null;
+      last_run_at: string | null;
+      completed_at: string | null;
+      error_details: Record<string, any> | null;
+    }>,
+    runtimeEnv?: Record<string, any>
+  ): Promise<AnalyticsBackfillJob | null> {
+    const analyticsClient = dbClients.getAnalytics(runtimeEnv);
+    const { data, error } = await analyticsClient
+      .from('analytics_backfill_jobs')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', jobId)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    return data as AnalyticsBackfillJob | null;
+  },
+
+  /**
+   * Atomically claims a backfill tick to prevent double-execution race conditions.
+   * Only succeeds if status is 'running' and (last_run_at IS NULL OR last_run_at < now() - 30s).
+   */
+  async claimBackfillTick(
+    jobId: string,
+    runtimeEnv?: Record<string, any>
+  ): Promise<AnalyticsBackfillJob | null> {
+    const analyticsClient = dbClients.getAnalytics(runtimeEnv);
+    const nowIso = new Date().toISOString();
+    const staleThreshold = new Date(Date.now() - 30 * 1000).toISOString();
+
+    const { data, error } = await analyticsClient
+      .from('analytics_backfill_jobs')
+      .update({
+        last_run_at: nowIso,
+        updated_at: nowIso,
+      })
+      .eq('id', jobId)
+      .eq('status', 'running')
+      .or(`last_run_at.is.null,last_run_at.lt."${staleThreshold}"`)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    return data as AnalyticsBackfillJob | null;
+  },
+
+  /**
+   * Advances the backfill job to the next day, increments completed/failed counts,
+   * and completes the job if the last day was reached.
+   */
+  async advanceBackfillJob(
+    jobId: string,
+    params: {
+      nextDate: string;
+      isFinished: boolean;
+      failed?: boolean;
+      error?: string;
+    },
+    runtimeEnv?: Record<string, any>
+  ): Promise<AnalyticsBackfillJob | null> {
+    const analyticsClient = dbClients.getAnalytics(runtimeEnv);
+    const job = await this.getBackfillJobById(jobId, runtimeEnv);
+    if (!job) return null;
+
+    const completedDays = params.failed ? job.completed_days : job.completed_days + 1;
+    const failedDays = params.failed ? job.failed_days + 1 : job.failed_days;
+    const nowIso = new Date().toISOString();
+
+    const updates: any = {
+      current_date: params.nextDate,
+      completed_days: completedDays,
+      failed_days: failedDays,
+      updated_at: nowIso,
+    };
+
+    if (params.error) {
+      updates.error_details = {
+        last_error: params.error,
+        failed_at: nowIso,
+        failed_date: job.current_date,
+      };
+    }
+
+    if (params.isFinished) {
+      updates.status = 'completed';
+      updates.completed_at = nowIso;
+    }
+
+    const { data, error } = await analyticsClient
+      .from('analytics_backfill_jobs')
+      .update(updates)
+      .eq('id', jobId)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    return data as AnalyticsBackfillJob | null;
   },
 };
 

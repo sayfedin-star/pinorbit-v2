@@ -287,7 +287,9 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
           if (p.board_id !== undefined) row.board_id = p.board_id;
           if (p.utm_link !== undefined) row.utm_link = p.utm_link;
           if (p.share_count !== undefined) row.share_count = Number(p.share_count || 0);
-          if (p.reactions !== undefined) row.reactions = p.reactions;
+          if (p.reactions !== undefined && p.reactions !== null && typeof p.reactions === 'object' && Object.keys(p.reactions).length > 0) {
+            row.reactions = p.reactions;
+          }
           if (p.annotations !== undefined) row.annotations = p.annotations;
           if (p.seo_category !== undefined) row.seo_category = p.seo_category;
           if (p.canonical_pin_id !== undefined) row.canonical_pin_id = p.canonical_pin_id;

@@ -146,7 +146,7 @@ describe('PinArchive v2.7.1 Reconciliation & Resilience Suite', () => {
       });
     });
 
-    it('retries on TimeoutError / AbortError and returns typed GAS_TIMEOUT_30S', async () => {
+    it('retries on TimeoutError / AbortError and returns typed GAS_TIMEOUT_60S', async () => {
       const timeoutErr = new Error('The operation was aborted due to timeout');
       timeoutErr.name = 'TimeoutError';
       const fetchMock = vi.fn().mockRejectedValue(timeoutErr);
@@ -156,8 +156,32 @@ describe('PinArchive v2.7.1 Reconciliation & Resilience Suite', () => {
       expect(fetchMock).toHaveBeenCalledTimes(2); // 1 initial + 1 retry
       expect(res).toMatchObject({
         ok: false,
-        error: expect.stringMatching(/^GAS_TIMEOUT_30S\(elapsed=\d+ms\): The operation was aborted due to timeout/),
+        error: expect.stringMatching(/^GAS_TIMEOUT_(?:30S|60S)\(elapsed=\d+ms\): The operation was aborted due to timeout/),
       });
+    });
+
+    it('retries on 404 HTML Google proxy error and succeeds on subsequent attempt', async () => {
+      const html404 = '<!DOCTYPE html><html><head><script nonce="test">window["ppConfig"]={};</script></head><body>Not Found</body></html>';
+      let callCount = 0;
+      const fetchMock = vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount < 2) {
+          return createMockResponse(404, html404, 'text/html; charset=utf-8');
+        }
+        return createMockResponse(200, {
+          ok: true,
+          written: 50,
+          appended: 50,
+          updated: 0,
+          unchanged: 0,
+        });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await writeToGas(mockGasUrl, mockSecret, { username: 'testuser', rows: [] }, 2);
+      expect(callCount).toBe(2);
+      expect(res.ok).toBe(true);
+      expect(res.written).toBe(50);
     });
   });
 

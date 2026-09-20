@@ -1317,6 +1317,628 @@ if (pipeConnId) {
     });
   }
 
+  // Automated Day-by-Day Backfill Controller (V22 - Dual Mode: Browser & Cloud)
+  function setupBackfillController() {
+    const modal = document.getElementById('backfill-modal');
+    if (!modal) return;
+
+    const btnCloseX = document.getElementById('backfill-btn-close-x');
+    const btnClose = document.getElementById('backfill-btn-close');
+    const btnStart = document.getElementById('backfill-btn-start') as HTMLButtonElement | null;
+    const startIcon = document.getElementById('backfill-start-icon');
+    const startLabel = document.getElementById('backfill-start-label');
+    const btnPause = document.getElementById('backfill-btn-pause') as HTMLButtonElement | null;
+    const btnStop = document.getElementById('backfill-btn-stop') as HTMLButtonElement | null;
+    const pauseIcon = document.getElementById('backfill-pause-icon');
+    const pauseLabel = document.getElementById('backfill-pause-label');
+    const progressBar = document.getElementById('backfill-progress-bar');
+    const progressPercent = document.getElementById('backfill-progress-percent');
+    const statusEl = document.getElementById('backfill-current-status');
+    const subtitleEl = document.getElementById('backfill-modal-subtitle');
+    const statTotal = document.getElementById('backfill-stat-total');
+    const statCompleted = document.getElementById('backfill-stat-completed');
+    const statFailed = document.getElementById('backfill-stat-failed');
+    const statRemaining = document.getElementById('backfill-stat-remaining');
+    const logConsole = document.getElementById('backfill-log-console');
+    const clearLogsBtn = document.getElementById('backfill-clear-logs');
+    const pacingSelect = document.getElementById('backfill-pacing-select') as HTMLSelectElement | null;
+    const pacingContainer = document.getElementById('backfill-pacing-container');
+    const resumeBanner = document.getElementById('backfill-resume-banner');
+    const resumeText = document.getElementById('backfill-resume-text');
+    const resumeBtn = document.getElementById('backfill-btn-resume-checkpoint');
+
+    // Pipeline B Card Banner Elements
+    const cardBanner = document.getElementById('cloud-backfill-active-card-banner');
+    const cardTitle = document.getElementById('cloud-backfill-card-title');
+    const cardSub = document.getElementById('cloud-backfill-card-subtitle');
+    const cardBtnPause = document.getElementById('cloud-backfill-card-btn-pause') as HTMLButtonElement | null;
+    const cardBtnCancel = document.getElementById('cloud-backfill-card-btn-cancel') as HTMLButtonElement | null;
+
+    let isRunning = false;
+    let isPaused = false;
+    let isCancelled = false;
+    let currentDates: string[] = [];
+    let currentIndex = 0;
+    let completedCount = 0;
+    let failedCount = 0;
+
+    let activeCloudJob: any = null;
+    let cloudPollInterval: any = null;
+
+    const storageKey = `pinorbit:backfill:${pipeConnId}:top_pins`;
+
+    function appendLog(msg: string, type: 'info' | 'success' | 'warn' | 'error' = 'info') {
+      if (!logConsole) return;
+      const time = new Date().toLocaleTimeString();
+      const line = document.createElement('div');
+      line.className = 'flex items-start gap-2 leading-relaxed';
+      let color = 'text-zinc-300';
+      if (type === 'success') color = 'text-emerald-400';
+      if (type === 'warn') color = 'text-amber-400';
+      if (type === 'error') color = 'text-red-400 font-semibold';
+
+      line.innerHTML = `<span class="text-zinc-500 shrink-0">[${time}]</span> <span class="${color}">${escapeHtml(msg)}</span>`;
+      logConsole.appendChild(line);
+      logConsole.scrollTop = logConsole.scrollHeight;
+    }
+
+    function clearLogs() {
+      if (logConsole) logConsole.innerHTML = '';
+    }
+    clearLogsBtn?.addEventListener('click', clearLogs);
+
+    function getSelectedExecMode(): 'browser' | 'cloud' {
+      const checked = document.querySelector('input[name="backfill_exec_mode"]:checked') as HTMLInputElement | null;
+      return (checked?.value as 'browser' | 'cloud') || 'browser';
+    }
+
+    // Toggle pacing dropdown visibility on mode change
+    document.querySelectorAll('input[name="backfill_exec_mode"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        const mode = getSelectedExecMode();
+        if (mode === 'cloud') {
+          pacingContainer?.classList.add('hidden');
+          if (startIcon) startIcon.textContent = '☁️';
+          if (startLabel) startLabel.textContent = 'Launch Cloud Backfill';
+        } else {
+          pacingContainer?.classList.remove('hidden');
+          if (startIcon) startIcon.textContent = '⚡';
+          if (startLabel) startLabel.textContent = 'Start Browser Backfill';
+        }
+      });
+    });
+
+    function openModal() {
+      modal?.classList.remove('hidden');
+      modal?.classList.add('flex');
+      checkResumeState();
+      refreshCloudStatus();
+    }
+
+    function closeModal() {
+      if (isRunning) {
+        if (!confirm('A browser backfill is currently running. Do you want to stop and close?')) {
+          return;
+        }
+        isCancelled = true;
+      }
+      modal?.classList.add('hidden');
+      modal?.classList.remove('flex');
+      if (cloudPollInterval) {
+        clearInterval(cloudPollInterval);
+        cloudPollInterval = null;
+      }
+    }
+
+    btnCloseX?.addEventListener('click', closeModal);
+    btnClose?.addEventListener('click', closeModal);
+
+    function checkResumeState() {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw && resumeBanner && resumeText) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.lastCompletedDate) {
+            resumeText.innerHTML = `A previous run reached <strong>${escapeHtml(parsed.lastCompletedDate)}</strong>.`;
+            resumeBanner.classList.remove('hidden');
+            resumeBanner.classList.add('flex');
+            return;
+          }
+        }
+      } catch {}
+      resumeBanner?.classList.add('hidden');
+      resumeBanner?.classList.remove('flex');
+    }
+
+    resumeBtn?.addEventListener('click', () => {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.lastCompletedDate) {
+            const [y, m, d] = parsed.lastCompletedDate.split('-').map(Number);
+            const nextDay = new Date(Date.UTC(y, m - 1, d + 1, 12, 0, 0)).toISOString().split('T')[0];
+            const article = document.querySelector('[data-pipeline="top_pins"]');
+            const fromInput = article?.querySelector('[data-field="override_from"]') as HTMLInputElement | null;
+            if (fromInput) {
+              fromInput.value = nextDay;
+              showToast(`Start date updated to next day: ${nextDay}`);
+              resumeBanner?.classList.add('hidden');
+              resumeBanner?.classList.remove('flex');
+            }
+          }
+        }
+      } catch {}
+    });
+
+    // Timezone-safe inclusive date range generator
+    function generateDateRange(startStr: string, endStr: string): string[] {
+      const dates: string[] = [];
+      const [sY, sM, sD] = startStr.split('-').map(Number);
+      const [eY, eM, eD] = endStr.split('-').map(Number);
+      let cur = new Date(Date.UTC(sY, sM - 1, sD, 12, 0, 0));
+      const end = new Date(Date.UTC(eY, eM - 1, eD, 12, 0, 0));
+      if (isNaN(cur.getTime()) || isNaN(end.getTime())) return [];
+      while (cur <= end) {
+        dates.push(cur.toISOString().split('T')[0]);
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+      return dates;
+    }
+
+    function updateUI() {
+      const total = currentDates.length;
+      const processed = completedCount + failedCount;
+      const remaining = Math.max(0, total - processed);
+      const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+
+      if (progressBar) progressBar.style.width = `${pct}%`;
+      if (progressPercent) progressPercent.textContent = `${pct}%`;
+      if (statTotal) statTotal.textContent = String(total);
+      if (statCompleted) statCompleted.textContent = String(completedCount);
+      if (statFailed) statFailed.textContent = String(failedCount);
+      if (statRemaining) statRemaining.textContent = String(remaining);
+    }
+
+    function updateUIFromCloudJob(job: any) {
+      if (!job) return;
+      const total = job.total_days || 1;
+      const completed = job.completed_days || 0;
+      const failed = job.failed_days || 0;
+      const processed = completed + failed;
+      const remaining = Math.max(0, total - processed);
+      const pct = Math.min(100, Math.round((processed / total) * 100));
+
+      if (progressBar) progressBar.style.width = `${pct}%`;
+      if (progressPercent) progressPercent.textContent = `${pct}%`;
+      if (statTotal) statTotal.textContent = String(total);
+      if (statCompleted) statCompleted.textContent = String(completed);
+      if (statFailed) statFailed.textContent = String(failed);
+      if (statRemaining) statRemaining.textContent = String(remaining);
+
+      if (statusEl) {
+        if (job.status === 'running') {
+          statusEl.textContent = `Processing Day ${completed + 1} of ${total} (${job.current_date})...`;
+        } else if (job.status === 'paused') {
+          statusEl.textContent = `Paused at Day ${completed + 1} of ${total} (${job.current_date})`;
+        } else if (job.status === 'completed') {
+          statusEl.textContent = `Completed (${completed}/${total} days)`;
+        }
+      }
+
+      // Update Card Banner
+      if (cardBanner) {
+        if (job.status === 'running' || job.status === 'paused') {
+          cardBanner.classList.remove('hidden');
+          if (cardTitle) {
+            cardTitle.textContent = job.status === 'running' ? 'Cloud Backfill Running' : 'Cloud Backfill Paused';
+          }
+          if (cardSub) {
+            cardSub.textContent = `Day ${completed + 1} of ${total} (${job.current_date}) · FastCron #${job.fastcron_job_id || ''}`;
+          }
+          if (cardBtnPause) {
+            cardBtnPause.textContent = job.status === 'running' ? 'Pause' : 'Resume';
+          }
+        } else {
+          cardBanner.classList.add('hidden');
+        }
+      }
+    }
+
+    // Refresh Cloud Job Status from API
+    async function refreshCloudStatus() {
+      if (!pipeConnId) return;
+      try {
+        const res = await fetch(`/api/analytics/backfill?connection_id=${pipeConnId}&channel=top_pins`);
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json.success && json.data) {
+          activeCloudJob = json.data;
+          updateUIFromCloudJob(activeCloudJob);
+
+          if (activeCloudJob.status === 'running' || activeCloudJob.status === 'paused') {
+            btnStart?.classList.add('hidden');
+            btnPause?.classList.remove('hidden');
+            btnPause?.removeAttribute('disabled');
+            btnStop?.classList.remove('hidden');
+            btnStop?.removeAttribute('disabled');
+
+            if (pauseLabel) pauseLabel.textContent = activeCloudJob.status === 'paused' ? 'Resume' : 'Pause';
+            if (pauseIcon) pauseIcon.textContent = activeCloudJob.status === 'paused' ? '▶️' : '⏸️';
+
+            // Start poller if not already polling
+            if (!cloudPollInterval) {
+              cloudPollInterval = setInterval(refreshCloudStatus, 10000);
+            }
+          } else {
+            if (cloudPollInterval) {
+              clearInterval(cloudPollInterval);
+              cloudPollInterval = null;
+            }
+          }
+        } else {
+          activeCloudJob = null;
+          cardBanner?.classList.add('hidden');
+        }
+      } catch {}
+    }
+
+    // Check Cloud Status on initial load
+    refreshCloudStatus();
+
+    // Hook button click: [data-action="backfill"] on article
+    document.querySelectorAll('button[data-action="backfill"]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const target = (e.target as HTMLElement).closest('article');
+        if (!target) return;
+        const channel = target.getAttribute('data-pipeline') || 'top_pins';
+        const fromInput = target.querySelector('[data-field="override_from"]') as HTMLInputElement | null;
+        const toInput = target.querySelector('[data-field="override_to"]') as HTMLInputElement | null;
+        const fromDate = fromInput?.value?.trim();
+        const toDate = toInput?.value?.trim();
+
+        const errEl = target.querySelector('[data-err="override_dates"]') as HTMLElement | null;
+        if (errEl) errEl.classList.add('hidden');
+
+        if (!fromDate || !toDate) {
+          if (errEl) {
+            errEl.textContent = 'Please specify both Override From Date and Override To Date.';
+            errEl.classList.remove('hidden');
+          } else {
+            showToast('Please specify both Override From Date and Override To Date.', false);
+          }
+          return;
+        }
+
+        if (fromDate > toDate) {
+          if (errEl) {
+            errEl.textContent = 'From Date must be before or equal to To Date.';
+            errEl.classList.remove('hidden');
+          } else {
+            showToast('From Date must be before or equal to To Date.', false);
+          }
+          return;
+        }
+
+        // 90-Day Lookback Guard
+        const now = new Date();
+        const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 90, 0, 0, 0));
+        const cutoffStr = cutoff.toISOString().split('T')[0];
+        if (fromDate < cutoffStr) {
+          const warnMsg = `Pinterest API limit: Start date cannot be older than 90 days (Earliest allowed: ${cutoffStr}).`;
+          if (errEl) {
+            errEl.textContent = warnMsg;
+            errEl.classList.remove('hidden');
+          } else {
+            showToast(warnMsg, false);
+          }
+          return;
+        }
+
+        currentDates = generateDateRange(fromDate, toDate);
+        if (currentDates.length === 0) {
+          showToast('Invalid date range.', false);
+          return;
+        }
+
+        openModal();
+        if (subtitleEl) {
+          subtitleEl.textContent = `Range: ${fromDate} to ${toDate} (${currentDates.length} Days) · Channel: ${channel}`;
+        }
+
+        if (!isRunning && (!activeCloudJob || (activeCloudJob.status !== 'running' && activeCloudJob.status !== 'paused'))) {
+          btnStart?.classList.remove('hidden');
+          btnPause?.classList.add('hidden');
+          btnStop?.classList.add('hidden');
+          if (statusEl) statusEl.textContent = 'Ready to launch';
+          if (statTotal) statTotal.textContent = String(currentDates.length);
+          if (statCompleted) statCompleted.textContent = '0';
+          if (statFailed) statFailed.textContent = '0';
+          if (statRemaining) statRemaining.textContent = String(currentDates.length);
+        }
+      });
+    });
+
+    // Start Button Handler (Inside Modal)
+    btnStart?.addEventListener('click', async () => {
+      const mode = getSelectedExecMode();
+      const article = document.querySelector('[data-pipeline="top_pins"]');
+      const fromInput = article?.querySelector('[data-field="override_from"]') as HTMLInputElement | null;
+      const toInput = article?.querySelector('[data-field="override_to"]') as HTMLInputElement | null;
+      const fromDate = fromInput?.value?.trim();
+      const toDate = toInput?.value?.trim();
+      const channel = 'top_pins';
+
+      if (!fromDate || !toDate) {
+        showToast('Please specify both from and to dates.', false);
+        return;
+      }
+
+      // =========================================================================
+      // CLOUD BACKGROUND MODE (FastCron 5m)
+      // =========================================================================
+      if (mode === 'cloud') {
+        btnStart.disabled = true;
+        if (startLabel) startLabel.textContent = 'Launching Cloud Job...';
+        appendLog(`Initiating Cloud Background Backfill for ${currentDates.length} days (${fromDate} → ${toDate})...`, 'info');
+
+        try {
+          const res = await fetch('/api/analytics/backfill', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'start',
+              connection_id: pipeConnId,
+              channel,
+              from_date: fromDate,
+              to_date: toDate,
+              interval_minutes: 5,
+            }),
+          });
+
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.success) {
+            activeCloudJob = data.data;
+            appendLog(`☁️ Cloud Background Backfill launched! FastCron Job #${activeCloudJob.fastcron_job_id} is active.`, 'success');
+            appendLog(`ℹ️ FastCron will process 1 day every 5 minutes in the cloud. You can safely close this browser tab!`, 'info');
+
+            btnStart.classList.add('hidden');
+            btnPause?.classList.remove('hidden');
+            btnPause?.removeAttribute('disabled');
+            btnStop?.classList.remove('hidden');
+            btnStop?.removeAttribute('disabled');
+
+            updateUIFromCloudJob(activeCloudJob);
+            showToast('Cloud Background Backfill started successfully!');
+
+            // Start polling
+            if (cloudPollInterval) clearInterval(cloudPollInterval);
+            cloudPollInterval = setInterval(refreshCloudStatus, 10000);
+          } else {
+            const err = data.error || `HTTP ${res.status}`;
+            appendLog(`Failed to start Cloud Backfill: ${err}`, 'error');
+            showToast(`Error: ${err}`, false);
+            btnStart.disabled = false;
+            if (startLabel) startLabel.textContent = 'Launch Cloud Backfill';
+          }
+        } catch (err: any) {
+          appendLog(`Network error starting Cloud Backfill: ${err.message}`, 'error');
+          showToast(`Network error: ${err.message}`, false);
+          btnStart.disabled = false;
+          if (startLabel) startLabel.textContent = 'Launch Cloud Backfill';
+        }
+        return;
+      }
+
+      // =========================================================================
+      // BROWSER INTERACTIVE MODE (15s Pacing)
+      // =========================================================================
+      isRunning = true;
+      isPaused = false;
+      isCancelled = false;
+      currentIndex = 0;
+      completedCount = 0;
+      failedCount = 0;
+      updateUI();
+
+      btnStart.classList.add('hidden');
+      btnPause?.classList.remove('hidden');
+      btnPause?.removeAttribute('disabled');
+      btnStop?.classList.remove('hidden');
+      btnStop?.removeAttribute('disabled');
+      if (pauseLabel) pauseLabel.textContent = 'Pause';
+      if (pauseIcon) pauseIcon.textContent = '⏸️';
+
+      const initialDelaySec = pacingSelect ? Math.round((parseInt(pacingSelect.value, 10) || 15000) / 1000) : 15;
+      appendLog(`Starting automated browser backfill for ${currentDates.length} days (${fromDate} → ${toDate}) [${initialDelaySec}s pacing delay]...`, 'info');
+
+      const beforeUnloadHandler = (ev: BeforeUnloadEvent) => {
+        if (isRunning) {
+          ev.preventDefault();
+          ev.returnValue = '';
+        }
+      };
+      window.addEventListener('beforeunload', beforeUnloadHandler);
+
+      try {
+        for (let i = 0; i < currentDates.length; i++) {
+          if (isCancelled) {
+            appendLog('Operation cancelled by user.', 'warn');
+            break;
+          }
+
+          while (isPaused && !isCancelled) {
+            await new Promise(r => setTimeout(r, 200));
+          }
+          if (isCancelled) {
+            appendLog('Operation cancelled by user.', 'warn');
+            break;
+          }
+
+          currentIndex = i;
+          const day = currentDates[i];
+          if (statusEl) {
+            statusEl.textContent = `Processing Day ${i + 1} of ${currentDates.length} (${day})...`;
+          }
+
+          try {
+            const body = {
+              connection_id: pipeConnId,
+              channel,
+              mode: 'sync',
+              direct: true,
+              from_date: day,
+              to_date: day,
+            };
+
+            const res = await fetch('/api/analytics/trigger-sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+
+            const data = await res.json().catch(() => ({}));
+
+            if (res.ok && data.success) {
+              completedCount++;
+              appendLog(`[Day ${i + 1}/${currentDates.length}] ${day} -> Dispatched to Make.com [Success]`, 'success');
+              try {
+                localStorage.setItem(storageKey, JSON.stringify({
+                  lastCompletedDate: day,
+                  index: i,
+                  total: currentDates.length,
+                  timestamp: new Date().toISOString(),
+                }));
+              } catch {}
+            } else {
+              failedCount++;
+              const errMsg = data.error || data.message || `HTTP ${res.status}`;
+              appendLog(`[Day ${i + 1}/${currentDates.length}] ${day} -> ${errMsg}`, 'error');
+            }
+          } catch (fetchErr: any) {
+            failedCount++;
+            appendLog(`[Day ${i + 1}/${currentDates.length}] ${day} -> Network failure: ${fetchErr.message || 'Unknown error'}`, 'error');
+          }
+
+          updateUI();
+
+          const pacingMs = pacingSelect ? parseInt(pacingSelect.value, 10) || 15000 : 15000;
+          if (i < currentDates.length - 1 && !isCancelled) {
+            await new Promise(r => setTimeout(r, pacingMs));
+          }
+        }
+
+        if (!isCancelled) {
+          appendLog(`🎉 Backfill completed! (${completedCount} succeeded, ${failedCount} failed/skipped).`, 'success');
+          if (statusEl) statusEl.textContent = `Completed (${completedCount}/${currentDates.length} days)`;
+          showToast(`Backfill Complete: ${completedCount}/${currentDates.length} days processed.`);
+          loadPipelineSettings();
+          loadCronJobs();
+        } else {
+          if (statusEl) statusEl.textContent = 'Backfill Stopped';
+        }
+      } finally {
+        isRunning = false;
+        btnStart?.classList.remove('hidden');
+        btnStart?.removeAttribute('disabled');
+        btnPause?.classList.add('hidden');
+        btnStop?.classList.add('hidden');
+        window.removeEventListener('beforeunload', beforeUnloadHandler);
+      }
+    });
+
+    // Pause / Resume handler (Works for both Browser & Cloud)
+    async function handlePauseResume() {
+      if (activeCloudJob && (activeCloudJob.status === 'running' || activeCloudJob.status === 'paused')) {
+        const nextAction = activeCloudJob.status === 'running' ? 'pause' : 'resume';
+        appendLog(`Sending ${nextAction} command for Cloud Job #${activeCloudJob.fastcron_job_id}...`, 'info');
+        try {
+          const res = await fetch('/api/analytics/backfill', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: nextAction, job_id: activeCloudJob.id }),
+          });
+          const json = await res.json().catch(() => ({}));
+          if (res.ok && json.success) {
+            activeCloudJob = json.data;
+            updateUIFromCloudJob(activeCloudJob);
+            if (pauseLabel) pauseLabel.textContent = activeCloudJob.status === 'paused' ? 'Resume' : 'Pause';
+            if (pauseIcon) pauseIcon.textContent = activeCloudJob.status === 'paused' ? '▶️' : '⏸️';
+            appendLog(`Cloud Job ${nextAction === 'pause' ? 'paused' : 'resumed'} successfully.`, 'info');
+            showToast(`Cloud Backfill ${nextAction === 'pause' ? 'paused' : 'resumed'}.`);
+          }
+        } catch (err: any) {
+          showToast(`Error: ${err.message}`, false);
+        }
+        return;
+      }
+
+      // Browser mode pause/resume
+      if (!isRunning) return;
+      isPaused = !isPaused;
+      if (isPaused) {
+        if (pauseLabel) pauseLabel.textContent = 'Resume';
+        if (pauseIcon) pauseIcon.textContent = '▶️';
+        if (statusEl) statusEl.textContent = `Paused at Day ${currentIndex + 1} of ${currentDates.length}`;
+        appendLog(`⏸️ Backfill paused by user. Click Resume to continue.`, 'warn');
+      } else {
+        if (pauseLabel) pauseLabel.textContent = 'Pause';
+        if (pauseIcon) pauseIcon.textContent = '⏸️';
+        if (statusEl) statusEl.textContent = `Resuming from Day ${currentIndex + 1}...`;
+        appendLog(`▶️ Resuming backfill...`, 'info');
+      }
+    }
+
+    btnPause?.addEventListener('click', handlePauseResume);
+    cardBtnPause?.addEventListener('click', handlePauseResume);
+
+    // Stop / Cancel handler (Works for both Browser & Cloud)
+    async function handleStopCancel() {
+      if (activeCloudJob && (activeCloudJob.status === 'running' || activeCloudJob.status === 'paused')) {
+        if (!confirm('Are you sure you want to cancel the cloud backfill? The FastCron job will be deleted.')) {
+          return;
+        }
+        appendLog(`Cancelling Cloud Job #${activeCloudJob.fastcron_job_id}...`, 'warn');
+        try {
+          const res = await fetch('/api/analytics/backfill', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'cancel', job_id: activeCloudJob.id }),
+          });
+          const json = await res.json().catch(() => ({}));
+          if (res.ok && json.success) {
+            activeCloudJob = null;
+            cardBanner?.classList.add('hidden');
+            btnStart?.classList.remove('hidden');
+            btnPause?.classList.add('hidden');
+            btnStop?.classList.add('hidden');
+            if (statusEl) statusEl.textContent = 'Cloud Backfill Cancelled';
+            appendLog(`⏹️ Cloud Backfill cancelled and FastCron job deleted.`, 'warn');
+            showToast('Cloud Backfill cancelled.');
+            if (cloudPollInterval) {
+              clearInterval(cloudPollInterval);
+              cloudPollInterval = null;
+            }
+          }
+        } catch (err: any) {
+          showToast(`Error: ${err.message}`, false);
+        }
+        return;
+      }
+
+      // Browser mode stop
+      if (!isRunning) return;
+      if (confirm('Are you sure you want to stop the backfill?')) {
+        isCancelled = true;
+        btnStop?.setAttribute('disabled', 'true');
+        btnPause?.setAttribute('disabled', 'true');
+      }
+    }
+
+    btnStop?.addEventListener('click', handleStopCancel);
+    cardBtnCancel?.addEventListener('click', handleStopCancel);
+  }
+
+  setupBackfillController();
   loadPipelineSettings();
   loadCronJobs();
 

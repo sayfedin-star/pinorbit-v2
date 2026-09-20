@@ -204,7 +204,7 @@ export async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-ingest-secret': secret },
         body: JSON.stringify({ ...payload, action: 'sheet_write', secret }),
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(60000),
         redirect: 'follow',
       });
       const elapsedMs = Date.now() - startedAt;
@@ -214,11 +214,16 @@ export async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
       // Tier-0 diagnostics: exactly the 5 approved fields; never the secret, never full rows
       console.log(`🩺 [GAS Write] @${username} attempt ${attempt + 1}/${maxRetries + 1}: status=${res.status} ct=${contentType || 'none'} elapsed=${elapsedMs}ms rows=${rowsCount}`);
 
-      // (1) HTTP error: evaluated FIRST
+      // (1) Check for transient HTTP responses including Google proxy/HTML 404
+      const isHtmlResponse = contentType.includes('text/html') || bodyText.includes('<!DOCTYPE html>') || bodyText.includes('ppConfig');
+      const isTransientHttp = res.status >= 500 || res.status === 429 || (res.status === 404 && isHtmlResponse);
+
       if (!res.ok) {
         const typed = `GAS_HTTP_${res.status}: ${bodyText.slice(0, 300).replace(/\s+/g, ' ')}`;
-        if ((res.status >= 500 || res.status === 429) && attempt < maxRetries) {
-          await sleep(Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000));
+        if (isTransientHttp && attempt < maxRetries) {
+          const backoffMs = Math.floor(3000 * Math.pow(2, attempt) + Math.random() * 2000);
+          console.warn(`⚠️ [GAS Write] Transient HTTP ${res.status} on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${backoffMs}ms...`);
+          await sleep(backoffMs);
           continue;
         }
         return { ok: false, error: typed };
@@ -230,9 +235,11 @@ export async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
       // (2) Non-JSON / empty body check (for 2xx responses with non-JSON content)
       if (data === null || typeof data !== 'object') {
         const typed = `GAS_NON_JSON(status=${res.status},ct=${contentType || 'none'}): ${bodyText.slice(0, 300).replace(/\s+/g, ' ')}`;
-        const transient = res.ok || res.status >= 500 || res.status === 429;
+        const transient = res.ok || res.status >= 500 || res.status === 429 || isHtmlResponse;
         if (transient && attempt < maxRetries) {
-          await sleep(Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000));
+          const backoffMs = Math.floor(3000 * Math.pow(2, attempt) + Math.random() * 2000);
+          console.warn(`⚠️ [GAS Write] Non-JSON response on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${backoffMs}ms...`);
+          await sleep(backoffMs);
           continue;
         }
         return { ok: false, error: typed };
@@ -241,8 +248,9 @@ export async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
       // (3) Lock conflict check
       if (data.ok === false && data.error === 'locked') {
         if (attempt < maxRetries) {
-          console.warn(`⚠️ [GAS Write] Lock conflict detected on attempt ${attempt + 1}/${maxRetries + 1}, retrying...`);
-          await sleep(Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000));
+          const backoffMs = Math.floor(3000 * Math.pow(2, attempt) + Math.random() * 2000);
+          console.warn(`⚠️ [GAS Write] Lock conflict detected on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${backoffMs}ms...`);
+          await sleep(backoffMs);
           continue;
         }
         return { ok: false, error: 'locked' };
@@ -256,11 +264,12 @@ export async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
     } catch (err) {
       const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
       const typed = isTimeout
-        ? `GAS_TIMEOUT_30S(elapsed=${Date.now() - startedAt}ms): ${err.message}`
+        ? `GAS_TIMEOUT_60S(elapsed=${Date.now() - startedAt}ms): ${err.message}`
         : (err?.message || 'Unknown GAS write error');
       if (attempt < maxRetries) {
-        console.warn(`⚠️ [GAS Write] Error on attempt ${attempt + 1}/${maxRetries + 1}: ${err.message}, retrying...`);
-        await sleep(Math.floor(2000 * Math.pow(1.8, attempt) + Math.random() * 1000));
+        const backoffMs = Math.floor(3000 * Math.pow(2, attempt) + Math.random() * 2000);
+        console.warn(`⚠️ [GAS Write] Error on attempt ${attempt + 1}/${maxRetries + 1}: ${err.message}, retrying in ${backoffMs}ms...`);
+        await sleep(backoffMs);
         continue;
       }
       console.warn(`❌ [GAS Write] Failed after ${maxRetries + 1} attempts: ${err.message}`);
@@ -290,7 +299,7 @@ export async function callGasAccountAges(gasUrl, secret, workspaceId, usernames)
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     redirect: 'follow',
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(60000),
   });
 
   if (!res.ok) {
