@@ -12,7 +12,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // 1. Extract and validate workspace_id from header or JSON body
   let workspaceId = request.headers.get('x-workspace-id')?.trim();
 
-  const text = await request.text();
+  let text = '';
+  try {
+    text = await request.text();
+  } catch {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: 'Failed to read request body',
+      }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
   if (text && text.trim().length > 0) {
     let body: Record<string, any>;
     try {

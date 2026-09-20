@@ -4,6 +4,7 @@ import type { APIRoute } from 'astro';
 import { dbClients, isKnownDefaultIngestSecret, isProductionEnv } from '../../../../server/db/clients';
 import { getEffectiveSecret, verifyIngestSecret } from '../../../../server/services/webhook-secrets';
 import { SORT_MODES } from '../../../../server/services/fastcron-service';
+import { validateSafeUrl } from '../../../../server/lib/ssrf-guard';
 
 /**
  * Server-Only Internal Daily Dispatch Endpoint (F1, X4, X5, X6).
@@ -326,6 +327,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   // 10. Forward to Target Channel Webhook with 8s Timeout
+  try {
+    validateSafeUrl(targetWebhookUrl.trim());
+  } catch (ssrfErr: any) {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: `Unsafe webhook URL: ${ssrfErr?.message || 'Blocked destination'}`,
+      }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
   try {
     const res = await fetch(targetWebhookUrl.trim(), {
       method: 'POST',
