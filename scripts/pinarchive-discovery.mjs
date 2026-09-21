@@ -264,7 +264,7 @@ function qualifies(pin, settings) {
 }
 
 // ── Ingest API Push Helper ──
-async function pushToIngest(workspaceId, username, pins, followerCount, accountMeta) {
+async function pushToIngest(workspaceId, username, pins, followerCount, accountMeta, accountId, skipRunLog) {
   const runType = IS_AUDIT_SWEEP ? 'audit_sweep' : 'backfill';
   return pushToIngestClient({
     workerUrl: PINORBIT_WORKER_URL,
@@ -276,6 +276,8 @@ async function pushToIngest(workspaceId, username, pins, followerCount, accountM
     trigger: runType,
     followerCount,
     accountMeta,
+    accountId,
+    skipRunLog,
   });
 }
 
@@ -719,7 +721,9 @@ async function main() {
           acc.username,
           batch,
           acc.follower_count,
-          { pins_count: knownPinIds.size, last_result: `discovery +${newPinsCount}` }
+          { pins_count: knownPinIds.size, last_result: `discovery +${newPinsCount}` },
+          acc.id,
+          true
         );
         if (res.ok) {
           pushedToIngest += res.pushed || batch.length;

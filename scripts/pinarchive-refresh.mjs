@@ -16,8 +16,8 @@ import { pushToIngest } from './lib/pa-client.mjs';
 const CFG = {
   SLEEP_MS_MIN: 2500,
   SLEEP_MS_MAX: 4000,
-  BATCH_SIZE: 12,
-  PUSH_SLEEP_MS: 3000,
+  BATCH_SIZE: 50,
+  PUSH_SLEEP_MS: 500,
   CIRCUIT_BREAKER: 3,
   CONCURRENCY: 3,
 };
@@ -113,7 +113,7 @@ async function fetchPinFromPinterest(pinId) {
   }
 }
 
-async function pushBatch(workspaceId, username, pins, followerCount, totalPins) {
+async function pushBatch(workspaceId, username, pins, followerCount, totalPins, accountId, skipRunLog, totalChanged) {
   return pushToIngest({
     workerUrl: PINORBIT_WORKER_URL,
     ingestSecret: PINARCHIVE_INGEST_SECRET,
@@ -124,6 +124,9 @@ async function pushBatch(workspaceId, username, pins, followerCount, totalPins) 
     trigger: 'refresh',
     followerCount,
     totalPins,
+    accountId,
+    skipRunLog,
+    pinsUpdated: totalChanged,
   });
 }
 
@@ -419,14 +422,24 @@ async function main() {
       console.log(`[PUSH] Pushing ${changedPins.length} changed pins for @${acc.username} in batches of ${CFG.BATCH_SIZE}...`);
       for (let i = 0; i < changedPins.length; i += CFG.BATCH_SIZE) {
         const batch = changedPins.slice(i, i + CFG.BATCH_SIZE);
-        const result = await pushBatch(acc.workspace_id, acc.username, batch, accountFollowerCount, allPins.length);
+        const isLastBatch = i + CFG.BATCH_SIZE >= changedPins.length;
+        const result = await pushBatch(
+          acc.workspace_id,
+          acc.username,
+          batch,
+          accountFollowerCount,
+          allPins.length,
+          acc.id,
+          !isLastBatch,
+          changedPins.length
+        );
         if (result.ok) {
           summary.pushed += result.pushed;
         } else {
           summary.errors.push(`push: ${result.error}`);
           if (result.terminal) break;
         }
-        if (i + CFG.BATCH_SIZE < changedPins.length) {
+        if (!isLastBatch) {
           await sleep(CFG.PUSH_SLEEP_MS);
         }
       }

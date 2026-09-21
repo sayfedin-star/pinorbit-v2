@@ -108,6 +108,10 @@ export async function pushToIngest({
   accountMeta = undefined,
   totalPins = undefined,
   signal = undefined,
+  accountId = undefined,
+  skipRunLog = undefined,
+  pinsUpdated = undefined,
+  pinsAdded = undefined,
 }) {
   if (!Array.isArray(pins) || pins.length === 0) {
     return { ok: true, pushed: 0 };
@@ -129,6 +133,10 @@ export async function pushToIngest({
     follower_count: typeof followerCount === 'number' ? followerCount : undefined,
     account_meta: effectiveMeta,
     pins,
+    ...(accountId ? { account_id: accountId } : {}),
+    ...(skipRunLog !== undefined ? { skip_run_log: skipRunLog } : {}),
+    ...(typeof pinsUpdated === 'number' ? { pins_updated: pinsUpdated } : {}),
+    ...(typeof pinsAdded === 'number' ? { pins_added: pinsAdded } : {}),
   };
 
   const effectiveSignal = signal || AbortSignal.timeout(20000);
