@@ -4,7 +4,7 @@
 // Jobs: per-workspace tracking in competitor_ingestion_jobs.
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
-import { aesKey, decryptCookieValue, resolveKek } from './lib/vault.mjs';
+import { aesKey, decryptCookieValue, resolveKek, getVaultCookie } from './lib/vault.mjs';
 
 // ── PROVEN headers (verbatim from working old script — Chrome 151) ──
 function getHeaders(username, activeCookie) {
@@ -31,31 +31,6 @@ function getHeaders(username, activeCookie) {
     Referer: `https://www.pinterest.com/${username}/`,
     cookie: activeCookie || '',
   };
-}
-
-// ── Cookie vault picker + one-time legacy import ──
-async function getVaultCookie(db, wsId, kek) {
-  const { data } = await db.from('pinterest_cookies').select('id, cookie_value')
-    .eq('workspace_id', wsId).eq('is_active', true)
-    .order('last_used_at', { ascending: true, nullsFirst: true }).limit(5);
-  for (const c of data || []) {
-    const plain = await decryptCookieValue(c.cookie_value, kek);
-    if (plain) {
-      await db.from('pinterest_cookies').update({ last_used_at: new Date().toISOString() }).eq('id', c.id);
-      return { id: c.id, plain };
-    }
-  }
-  // ONE-TIME legacy auto-import from env
-  const legacy = process.env.PINTEREST_COOKIE;
-  if (legacy && legacy.trim().length >= 20) {
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(kek, 'encrypt'), enc.encode(legacy.trim()));
-    const enc = `v1:${b64(iv)}:${b64(ct)}`;
-    await db.from('pinterest_cookies').insert({ workspace_id: wsId, cookie_value: enc, is_active: true });
-    console.log(`🔐 Legacy PINTEREST_COOKIE auto-imported into vault for ws ${wsId}. You may delete that GitHub secret.`);
-    return { id: 'legacy', plain: legacy.trim() };
-  }
-  return null;
 }
 
 // ── Self-heal: 401/403 on vault cookie → disable it and retry anonymously ──
@@ -124,6 +99,7 @@ async function processWorkspace(db, wsId, kek, options = {}) {
       if ((userRes.status === 401 || userRes.status === 403) && cookie.id !== 'legacy') {
         console.warn(`🚫 Cookie disabled for @${username} (HTTP ${userRes.status}) — retrying anonymously.`);
         await db.from('pinterest_cookies').update({ is_active: false }).eq('id', cookie.id);
+        cookie.plain = '';
         activeCookie = '';
         userRes = await pinterestFetch(userUrl, username, activeCookie);
       }
@@ -133,10 +109,10 @@ async function processWorkspace(db, wsId, kek, options = {}) {
         const userPayload = await userRes.json();
         const userData = userPayload?.resource_response?.data;
         if (userData) {
-          const profileViews = userData.profile_views ?? userData.monthly_views ?? userData.profile_reach ?? 0;
-          const profileReach = userData.profile_reach ?? userData.profile_views ?? userData.monthly_views ?? 0;
-          const followers = userData.follower_count || 0;
-          const pins = userData.pin_count || 0;
+          const profileViews = Number(userData.profile_views ?? userData.monthly_views ?? userData.profile_reach ?? 0) || 0;
+          const profileReach = Number(userData.profile_reach ?? userData.profile_views ?? userData.monthly_views ?? 0) || 0;
+          const followers = Number(userData.follower_count || 0) || 0;
+          const pins = Number(userData.pin_count || 0) || 0;
           const fullName = userData.full_name || username;
           const websiteUrl = userData.website_url || (userData.domain_url ? `https://${userData.domain_url}` : null);
           const domainVerified = !!userData.domain_verified;
@@ -172,6 +148,13 @@ async function processWorkspace(db, wsId, kek, options = {}) {
         const boardsUrl = resourceUrl(username, 'BoardsResource', optionsPayload);
         try {
           let boardsRes = await pinterestFetch(boardsUrl, username, activeCookie);
+          if ((boardsRes.status === 401 || boardsRes.status === 403) && activeCookie && cookie.id !== 'legacy') {
+            console.warn(`🚫 Cookie disabled during boards fetch for @${username} (HTTP ${boardsRes.status}) — retrying anonymously.`);
+            await db.from('pinterest_cookies').update({ is_active: false }).eq('id', cookie.id);
+            cookie.plain = '';
+            activeCookie = '';
+            boardsRes = await pinterestFetch(boardsUrl, username, activeCookie);
+          }
           if (!boardsRes.ok) {
             console.warn(`⚠️ BoardsResource HTTP ${boardsRes.status} on page ${pageCount} for @${username}. Stopping pagination.`);
             break;
@@ -189,20 +172,37 @@ async function processWorkspace(db, wsId, kek, options = {}) {
         }
       }
       if (allBoards.length > 0 && !options.dryRun) {
-        const boardsToUpsert = allBoards.map(b => {
+        // Deduplicate boards by board_id to prevent Postgres "ON CONFLICT DO UPDATE command cannot affect row a second time"
+        const seenBoardIds = new Set();
+        const uniqueBoards = [];
+        for (const b of allBoards) {
+          const bId = String(b.id || b.node_id || '').trim();
+          if (bId && bId !== 'undefined' && bId !== 'null' && !seenBoardIds.has(bId)) {
+            seenBoardIds.add(bId);
+            uniqueBoards.push(b);
+          }
+        }
+
+        const boardsToUpsert = uniqueBoards.map(b => {
           const boardUrl = b.url ? (b.url.startsWith('http') ? b.url : `https://www.pinterest.com${b.url}`) : `https://www.pinterest.com/${username}/`;
           const realCreatedAt = b.created_at ? new Date(b.created_at).toISOString() : now;
           const realLastPinnedAt = (b.board_order_modified_at || b.last_pinned_by_owner_at || b.last_pinned_at) ? new Date(b.board_order_modified_at || b.last_pinned_by_owner_at || b.last_pinned_at).toISOString() : now;
           return {
-            competitor_id: comp.id, board_id: String(b.id || b.node_id),
+            workspace_id: wsId,
+            competitor_id: comp.id, board_id: String(b.id || b.node_id).trim(),
             name: b.name || 'Untitled Board', description: b.description || '',
-            pin_count: b.pin_count || 0, follower_count: b.follower_count || 0,
+            pin_count: Number(b.pin_count || 0) || 0, follower_count: Number(b.follower_count || 0) || 0,
             url: boardUrl, board_created_at: realCreatedAt, last_pinned_at: realLastPinnedAt,
           };
         });
-        const { error: boardError } = await db.from('competitor_boards').upsert(boardsToUpsert, { onConflict: 'competitor_id, board_id' });
-        if (boardError) console.warn(`⚠️ Boards Upsert Warning for @${username}:`, boardError.message);
-        else console.log(`📋 Ingested ALL ${boardsToUpsert.length} Board(s) across ${pageCount} page(s) with REAL creation dates for @${username}.`);
+
+        // Upsert in safe chunks of 100 to prevent payload size limits
+        for (let i = 0; i < boardsToUpsert.length; i += 100) {
+          const chunk = boardsToUpsert.slice(i, i + 100);
+          const { error: boardError } = await db.from('competitor_boards').upsert(chunk, { onConflict: 'competitor_id, board_id' });
+          if (boardError) console.warn(`⚠️ Boards Upsert Warning for @${username} (chunk ${Math.floor(i / 100) + 1}):`, boardError.message);
+        }
+        console.log(`📋 Ingested ALL ${boardsToUpsert.length} unique Board(s) across ${pageCount} page(s) with REAL creation dates for @${username}.`);
       } else if (!allBoards.length) {
         console.log(`ℹ️ No public boards found for @${username}.`);
       }
@@ -237,6 +237,26 @@ async function main() {
   const DRY_RUN = process.env.DRY_RUN === 'true';
   if (DRY_RUN) console.log('⚠️ DRY_RUN mode — no writes will be performed.');
 
+  // Auto-recover stale jobs stuck in 'running' status for > 30 minutes
+  try {
+    const { data: cleaned } = await db.rpc('cleanup_stale_competitor_jobs', { p_interval_minutes: 30 });
+    if (cleaned && cleaned > 0) {
+      console.log(`🧹 Auto-healed ${cleaned} stale competitor ingestion job(s) older than 30 minutes.`);
+    }
+  } catch {
+    try {
+      const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      await db.from('competitor_ingestion_jobs')
+        .update({
+          status: 'failed',
+          error_message: 'Job timed out after 30 minutes in running status (auto-healed)',
+          completed_at: new Date().toISOString(),
+        })
+        .eq('status', 'running')
+        .lt('started_at', thirtyMinAgo);
+    } catch {}
+  }
+
   // Parse Scope & Inputs
   const targetScope = process.env.TARGET_SCOPE || 'All Active';
   const targetUsername = process.env.TARGET_USERNAME || '';
@@ -250,8 +270,25 @@ async function main() {
   if (targetWsId) {
     workspaces = [targetWsId];
   } else {
-    const { data: wsRows } = await db.from('competitors').select('workspace_id').eq('is_active', true);
+    let wsQuery = db.from('competitors').select('workspace_id');
+    if (!forceRun) {
+      wsQuery = wsQuery.eq('is_active', true);
+    }
+    const { data: wsRows } = await wsQuery;
     workspaces = [...new Set((wsRows || []).map(r => r.workspace_id))];
+  }
+
+  if (workspaces.length === 0) {
+    console.log('ℹ️ No active workspaces found to process.');
+    if (inputJobId) {
+      await db.from('competitor_ingestion_jobs').update({
+        status: 'completed',
+        items_processed: 0,
+        error_message: 'No active competitors found for this workspace.',
+        completed_at: new Date().toISOString(),
+      }).eq('id', inputJobId);
+    }
+    process.exit(0);
   }
 
   console.log(`🚀 Execution Scope: ${targetScope} | Workspaces: ${workspaces.length} | Competitors Filter: ${competitorIds.length ? competitorIds.length : 'All'} | DRY_RUN=${DRY_RUN} | FORCE=${forceRun}`);
@@ -260,9 +297,10 @@ async function main() {
   const isGhScheduled = (process.env.EVENT_NAME || process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'schedule';
   if (isGhScheduled) {
     try {
-      const p1Url = process.env.SCHEDULING_SUPABASE_URL || process.env.SUPABASE_URL || process.env.PUBLIC_SUPABASE_URL || '';
-      const p1Key = process.env.SCHEDULING_SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-      if (p1Url && p1Key) {
+      const p1Url = (process.env.SCHEDULING_SUPABASE_URL || '').trim();
+      const p1Key = (process.env.SCHEDULING_SUPABASE_SECRET_KEY || '').trim();
+      // STRICT CROSS-DB GUARD: Only query P1 if explicitly configured and distinctly NOT P2
+      if (p1Url && p1Key && p1Url !== SUPABASE_URL && !p1Url.includes('guycnhvwfzdzbpgsnavg')) {
         const p1Res = await fetch(`${p1Url}/rest/v1/workspaces?select=id,is_master&is_master=eq.true&limit=1`, {
           headers: { apikey: p1Key, Authorization: `Bearer ${p1Key}`, Accept: 'application/json' },
         });
@@ -277,6 +315,8 @@ async function main() {
             }
           }
         }
+      } else {
+        console.log('ℹ️ SCHEDULING_SUPABASE_URL not configured for P1; skipping master workspace kill-switch check.');
       }
     } catch (err) {
       // Non-blocking fallback
@@ -287,62 +327,81 @@ async function main() {
   let grandProcessed = 0;
 
   for (const wsId of workspaces) {
-    // Check per-workspace pipeline settings
-    const { data: wsPipe } = await db.from('competitor_pipeline_settings').select('is_enabled, github_schedule_enabled, dry_run').eq('workspace_id', wsId).maybeSingle();
-    const isGhScheduled = (process.env.EVENT_NAME || process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'schedule';
+    let wsJobId = (inputJobId && (targetWsId === wsId || workspaces.length === 1)) ? inputJobId : null;
 
-    if (isGhScheduled && wsPipe && wsPipe.github_schedule_enabled === false) {
-      console.log(`[SKIP] Workspace ${wsId.slice(0, 8)} GitHub Actions 02:00 UTC schedule is disabled (delegated to FastCron).`);
-      continue;
-    }
+    try {
+      // Check per-workspace pipeline settings
+      const { data: wsPipe } = await db.from('competitor_pipeline_settings').select('is_enabled, github_schedule_enabled, dry_run').eq('workspace_id', wsId).maybeSingle();
 
-    if (wsPipe && wsPipe.is_enabled === false && !forceRun) {
-      console.log(`[SKIP] Workspace ${wsId.slice(0, 8)} pipeline is disabled.`);
-      continue;
-    }
+      if (isGhScheduled && wsPipe && wsPipe.github_schedule_enabled === false) {
+        console.log(`[SKIP] Workspace ${wsId.slice(0, 8)} GitHub Actions 02:00 UTC schedule is disabled (delegated to FastCron).`);
+        continue;
+      }
 
-    let jobId = (inputJobId && (targetWsId === wsId || workspaces.length === 1)) ? inputJobId : null;
+      if (wsPipe && wsPipe.is_enabled === false && !forceRun) {
+        console.log(`[SKIP] Workspace ${wsId.slice(0, 8)} pipeline is disabled.`);
+        continue;
+      }
 
-    if (!jobId) {
-      const runTrigger = process.env.RUN_TRIGGER || (process.env.EVENT_NAME === 'schedule' ? 'cron' : 'manual');
-      const { data: job } = await db.from('competitor_ingestion_jobs').insert({
-        workspace_id: wsId,
-        competitor_id: competitorIds.length === 1 ? competitorIds[0] : null,
-        status: 'running',
-        trigger: runTrigger,
-        items_processed: 0,
-        started_at: new Date().toISOString(),
-      }).select('id').single();
-      if (job) jobId = job.id;
-    } else {
-      await db.from('competitor_ingestion_jobs').update({
-        status: 'running',
-        started_at: new Date().toISOString(),
-      }).eq('id', jobId);
-    }
+      if (!wsJobId) {
+        const rawTrigger = (process.env.RUN_TRIGGER || '').trim().toLowerCase();
+        const validTriggers = ['cron', 'manual', 'run_now', 'full'];
+        const runTrigger = validTriggers.includes(rawTrigger)
+          ? rawTrigger
+          : (isGhScheduled ? 'cron' : 'manual');
 
-    const r = await processWorkspace(db, wsId, kek, {
-      targetUsername,
-      competitorIds,
-      jobId,
-      forceRun,
-      dryRun: DRY_RUN,
-    });
+        const { data: job } = await db.from('competitor_ingestion_jobs').insert({
+          workspace_id: wsId,
+          competitor_id: competitorIds.length === 1 ? competitorIds[0] : null,
+          status: 'running',
+          trigger: runTrigger,
+          items_processed: 0,
+          started_at: new Date().toISOString(),
+        }).select('id').single();
+        if (job) wsJobId = job.id;
+      } else {
+        await db.from('competitor_ingestion_jobs').update({
+          status: 'running',
+          started_at: new Date().toISOString(),
+        }).eq('id', wsJobId);
+      }
 
-    if (jobId) {
-      await db.from('competitor_ingestion_jobs').update({
-        status: !r.ok || (r.processed === 0 && !DRY_RUN && competitorIds.length > 0) ? 'failed' : 'completed',
-        items_processed: DRY_RUN ? 0 : r.processed,
-        error_message: r.ok ? (r.errors.length ? r.errors.join(' | ').slice(0, 2000) : null) : r.error,
-        completed_at: new Date().toISOString(),
-      }).eq('id', jobId);
-    }
+      const effectiveDryRun = DRY_RUN || Boolean(wsPipe?.dry_run);
 
-    if (!r.ok) {
+      const r = await processWorkspace(db, wsId, kek, {
+        targetUsername,
+        competitorIds,
+        jobId: wsJobId,
+        forceRun,
+        dryRun: effectiveDryRun,
+      });
+
+      if (wsJobId) {
+        const isJobFailed = !r.ok || (r.processed === 0 && !effectiveDryRun && (competitorIds.length > 0 || r.errors.length > 0));
+        await db.from('competitor_ingestion_jobs').update({
+          status: isJobFailed ? 'failed' : 'completed',
+          items_processed: effectiveDryRun ? 0 : r.processed,
+          error_message: r.ok ? (r.errors.length ? r.errors.join(' | ').slice(0, 2000) : null) : r.error,
+          completed_at: new Date().toISOString(),
+        }).eq('id', wsJobId);
+      }
+
+      if (!r.ok) {
+        anyFatal = true;
+        console.error(`❌ ws ${wsId}: ${r.error}`);
+      }
+      grandProcessed += r.processed || 0;
+    } catch (wsErr) {
+      console.error(`❌ Workspace ${wsId} crashed:`, wsErr);
+      if (wsJobId) {
+        await db.from('competitor_ingestion_jobs').update({
+          status: 'failed',
+          error_message: `Workspace crash: ${wsErr?.message || String(wsErr)}`,
+          completed_at: new Date().toISOString(),
+        }).eq('id', wsJobId);
+      }
       anyFatal = true;
-      console.error(`❌ ws ${wsId}: ${r.error}`);
     }
-    grandProcessed += r.processed || 0;
   }
 
   console.log(`\n🎉 Competitor sync complete! (${grandProcessed} profile(s) across ${workspaces.length} workspace(s))`);

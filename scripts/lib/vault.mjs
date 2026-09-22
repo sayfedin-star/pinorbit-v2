@@ -77,6 +77,22 @@ export async function resolveKek(vaultDb) {
  * Selects the least-recently used active cookie for the workspace, decrypts it, and touches last_used_at.
  */
 export async function getVaultCookie(vaultDb, wsId, kek) {
+  // 1. Try atomic RPC first (FOR UPDATE SKIP LOCKED) to eliminate race hazards & reduce roundtrips
+  try {
+    const { data: rpcRows, error: rpcErr } = await vaultDb.rpc('pick_vault_cookie', {
+      p_workspace_id: wsId,
+    });
+    if (!rpcErr && Array.isArray(rpcRows) && rpcRows.length > 0) {
+      const plain = await decryptCookieValue(rpcRows[0].cookie_value, kek);
+      if (plain) {
+        return { id: rpcRows[0].id, plain };
+      }
+    }
+  } catch {
+    // Graceful fallback to direct query below
+  }
+
+  // 2. Direct query fallback
   const { data } = await vaultDb
     .from('pinterest_cookies')
     .select('id, cookie_value')
