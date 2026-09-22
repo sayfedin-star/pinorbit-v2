@@ -54,6 +54,8 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SCHEDULING_SUPABASE_URL: ${{ secrets.SCHEDULING_SUPABASE_URL || secrets.PINORBIT_SUPABASE_URL || '' }}
+      SCHEDULING_SUPABASE_SECRET_KEY: ${{ secrets.SCHEDULING_SUPABASE_SECRET_KEY || '' }}
       PINTEREST_COOKIE: ${{ secrets.PINTEREST_COOKIE }}
       WORKSPACE_ID: ${{ github.event.inputs.workspace_id || '' }}
       JOB_ID: ${{ github.event.inputs.job_id || '' }}

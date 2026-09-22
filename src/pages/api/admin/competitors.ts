@@ -21,8 +21,9 @@ async function guard(locals: any, explicitWs?: string, role: 'member' | 'admin' 
 
 // GET: list all (no id) OR detail with snapshots/boards (with id)
 export const GET: APIRoute = async ({ request, locals }) => {
-  const g = await guard(locals, undefined, 'member'); if (g.err) return g.err;
   const searchParams = new URL(request.url).searchParams;
+  const explicitWs = searchParams.get('workspace_id') || undefined;
+  const g = await guard(locals, explicitWs, 'member'); if (g.err) return g.err;
   const id = searchParams.get('id');
   const rawLite = searchParams.get('lite');
   const rawBoardsOnly = searchParams.get('boards_only');
@@ -52,25 +53,48 @@ export const GET: APIRoute = async ({ request, locals }) => {
 
     if (ids.length) {
       let snapsList: any[] = [];
-      try {
-        const snapsQuery = g.ok!.db.from('competitor_snapshots').select('competitor_id, profile_reach, profile_views, follower_count, pin_count, recorded_at');
-        if (snapsQuery && typeof snapsQuery.in === 'function') {
-          const { data } = await snapsQuery.in('competitor_id', ids).order('recorded_at', { ascending: false }).limit(1000);
-          snapsList = data || [];
-        } else {
-          const perComp = await Promise.all(ids.map(async (compId: string) => {
-            const { data } = await g.ok!.db.from('competitor_snapshots')
-              .select('competitor_id, profile_reach, profile_views, follower_count, pin_count, recorded_at')
-              .eq('competitor_id', compId)
-              .order('recorded_at', { ascending: false })
-              .limit(2);
-            return data || [];
-          }));
-          snapsList = perComp.flat();
+      let snapsRpcSuccess = false;
+      if (typeof g.ok!.db?.rpc === 'function') {
+        try {
+          const { data: rpcSnaps, error: rpcErr } = await g.ok!.db.rpc('get_latest_competitor_snapshots', {
+            p_competitor_ids: ids,
+          });
+          if (!rpcErr && Array.isArray(rpcSnaps)) {
+            snapsList = rpcSnaps;
+            snapsRpcSuccess = true;
+          } else if (rpcErr) {
+            console.warn('[AdminCompetitors] get_latest_competitor_snapshots RPC error, using fallback:', rpcErr.message);
+          }
+        } catch (e: any) {
+          console.warn('[AdminCompetitors] get_latest_competitor_snapshots threw error, using fallback:', e?.message);
         }
-      } catch (e: any) {
-        console.warn('[AdminCompetitors] Snapshots query failed:', e?.message);
-        snapsList = [];
+      }
+
+      if (!snapsRpcSuccess) {
+        try {
+          // Fallback: Query top 2 snapshots per competitor in batches of 25
+          const BATCH_SIZE = 25;
+          const results: any[] = [];
+          for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+            const chunk = ids.slice(i, i + BATCH_SIZE);
+            const chunkRes = await Promise.all(
+              chunk.map(async (compId: string) => {
+                const { data } = await g.ok!.db
+                  .from('competitor_snapshots')
+                  .select('competitor_id, profile_reach, profile_views, follower_count, pin_count, recorded_at')
+                  .eq('competitor_id', compId)
+                  .order('recorded_at', { ascending: false })
+                  .limit(2);
+                return data || [];
+              })
+            );
+            results.push(...chunkRes.flat());
+          }
+          snapsList = results;
+        } catch (e: any) {
+          console.warn('[AdminCompetitors] Snapshots fallback query failed:', e?.message);
+          snapsList = [];
+        }
       }
 
       const snapsByComp = new Map<string, any[]>();
@@ -115,15 +139,43 @@ export const GET: APIRoute = async ({ request, locals }) => {
         }
       }
 
-      try {
-        let bQuery = g.ok!.db.from('competitor_boards').select('competitor_id');
-        if (typeof (bQuery as any)?.eq === 'function') bQuery = (bQuery as any).eq('workspace_id', g.ok!.ws);
-        if (typeof (bQuery as any)?.in === 'function') bQuery = (bQuery as any).in('competitor_id', ids);
-        if (typeof (bQuery as any)?.range === 'function') bQuery = (bQuery as any).range(0, 999);
-        const bRes = await bQuery;
-        for (const b of (bRes?.data || []) as any[]) countMap[b.competitor_id] = (countMap[b.competitor_id] || 0) + 1;
-      } catch (e: any) {
-        console.warn('[AdminCompetitors] Boards count query failed:', e?.message);
+      let countMapPopulated = false;
+      if (typeof g.ok!.db?.rpc === 'function') {
+        try {
+          const { data: bData, error: bErr } = await g.ok!.db.rpc('get_competitor_board_counts', {
+            p_workspace_id: g.ok!.ws,
+          });
+          if (!bErr && Array.isArray(bData)) {
+            for (const b of bData) {
+              if (b.competitor_id) countMap[b.competitor_id] = Number(b.board_count || 0);
+            }
+            countMapPopulated = true;
+          } else if (bErr) {
+            console.warn('[AdminCompetitors] get_competitor_board_counts RPC error, using fallback:', bErr.message);
+          }
+        } catch (e: any) {
+          console.warn('[AdminCompetitors] get_competitor_board_counts threw error, using fallback:', e?.message);
+        }
+      }
+
+      if (!countMapPopulated) {
+        try {
+          // Fallback: Query boards in chunks of 100 to prevent 414 URI Too Long
+          const CHUNK_SIZE = 100;
+          for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+            const chunk = ids.slice(i, i + CHUNK_SIZE);
+            let bQuery = g.ok!.db.from('competitor_boards').select('competitor_id');
+            if (typeof (bQuery as any)?.eq === 'function') bQuery = (bQuery as any).eq('workspace_id', g.ok!.ws);
+            if (typeof (bQuery as any)?.in === 'function') bQuery = (bQuery as any).in('competitor_id', chunk);
+            if (typeof (bQuery as any)?.range === 'function') bQuery = (bQuery as any).range(0, 999);
+            const bRes = await bQuery;
+            for (const b of (bRes?.data || []) as any[]) {
+              countMap[b.competitor_id] = (countMap[b.competitor_id] || 0) + 1;
+            }
+          }
+        } catch (e: any) {
+          console.warn('[AdminCompetitors] Boards count fallback query failed:', e?.message);
+        }
       }
     }
 
@@ -146,7 +198,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
 
   const db = g.ok!.db;
   if (boardsOnly) {
-    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false });
+    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false, nullsFirst: false });
     const { data: boards, error: bErr } = await (typeof (boardsQuery as any)?.range === 'function'
       ? (boardsQuery as any).range(0, 999)
       : boardsQuery);
@@ -186,7 +238,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       strategy_age_days = Math.max(0, Math.floor(diffMs / 86400000));
     }
   } else {
-    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false });
+    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false, nullsFirst: false });
     const [snaps, boards, topPins] = await Promise.all([
       db.from('competitor_snapshots').select('*').eq('competitor_id', id).order('recorded_at', { ascending: false }).limit(100),
       (typeof (boardsQuery as any)?.range === 'function' ? (boardsQuery as any).range(0, 999) : boardsQuery),

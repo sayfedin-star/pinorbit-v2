@@ -9,10 +9,23 @@ import { listWorkspaceTokens } from '../../../../server/lib/token-resolver';
 import { getDispatchEndpointUrl } from './index';
 import { isMatchingCompetitorJob } from '../cron';
 
-export const POST: APIRoute = async ({ locals, request }) => {
+export const POST: APIRoute = async ({ locals, request }: any) => {
   const user = locals.user;
   const schedulingClient = locals.supabase;
-  const workspaceId = locals.activeWorkspaceId;
+  let qWs: string | null = null;
+  if (request) {
+    try {
+      qWs = new URL(request.url).searchParams.get('workspace_id');
+      if (!qWs && request.method === 'POST') {
+        const text = await request.clone().text();
+        if (text) {
+          const b = JSON.parse(text);
+          if (b?.workspace_id) qWs = b.workspace_id;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  const workspaceId = qWs || locals.activeWorkspaceId;
   const runtimeEnv = (locals as any)?.runtime?.env || (locals as any)?.runtimeEnv || {};
 
   if (!user || !schedulingClient || !workspaceId) {

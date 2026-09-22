@@ -11,13 +11,13 @@ import {
   formatPin,
   extractPinData,
 } from './lib/pinterest.mjs';
-import { pushToIngest } from './lib/pa-client.mjs';
+import { pushToIngest, fetchAllAccounts } from './lib/pa-client.mjs';
 
 const CFG = {
   SLEEP_MS_MIN: 2500,
   SLEEP_MS_MAX: 4000,
-  BATCH_SIZE: 12,
-  PUSH_SLEEP_MS: 3000,
+  BATCH_SIZE: 50,
+  PUSH_SLEEP_MS: 500,
   CIRCUIT_BREAKER: 3,
   CONCURRENCY: 3,
 };
@@ -28,10 +28,10 @@ const REFRESH_SHARD = Math.max(0, parseInt(process.env.REFRESH_SHARD || '0', 10)
 const { PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, PINORBIT_WORKER_URL, PINARCHIVE_INGEST_SECRET } = process.env;
 
 const REFRESH_WORKSPACE_ID = (process.env.REFRESH_WORKSPACE_ID || process.env.WORKSPACE_ID || process.env.WORKSPACE_FILTER || process.env.REFRESH_WORKSPACE_FILTER || '').trim();
-const REFRESH_USERNAME = (process.env.REFRESH_USERNAME || '').trim().toLowerCase();
+const REFRESH_USERNAME = (process.env.REFRESH_USERNAME || '').trim().toLowerCase().replace(/^@/, '');
 const REFRESH_USERNAMES = (process.env.REFRESH_USERNAMES || '')
   .split(',')
-  .map(s => s.trim().toLowerCase())
+  .map(s => s.trim().toLowerCase().replace(/^@/, ''))
   .filter(Boolean);
 const REFRESH_FORCE = (process.env.REFRESH_FORCE || process.env.FORCE_RUN || '').trim().toLowerCase() === 'true';
 
@@ -113,7 +113,7 @@ async function fetchPinFromPinterest(pinId) {
   }
 }
 
-async function pushBatch(workspaceId, username, pins, followerCount, totalPins) {
+async function pushBatch(workspaceId, username, pins, followerCount, totalPins, accountId, skipRunLog, totalChanged) {
   return pushToIngest({
     workerUrl: PINORBIT_WORKER_URL,
     ingestSecret: PINARCHIVE_INGEST_SECRET,
@@ -124,6 +124,9 @@ async function pushBatch(workspaceId, username, pins, followerCount, totalPins) 
     trigger: 'refresh',
     followerCount,
     totalPins,
+    accountId,
+    skipRunLog,
+    pinsUpdated: totalChanged,
   });
 }
 
@@ -171,7 +174,13 @@ async function main() {
     }
   }
 
-  let accounts = await supaQuery('pa_accounts', 'select=id,workspace_id,username,follower_count,status,ingest_enabled,last_run_at&order=username.asc');
+  const accountFilters = {
+    select: 'id,workspace_id,username,follower_count,status,ingest_enabled,last_run_at,interval_days',
+  };
+  if (REFRESH_WORKSPACE_ID) accountFilters.workspace = REFRESH_WORKSPACE_ID;
+  if (REFRESH_USERNAME) accountFilters.username = REFRESH_USERNAME;
+
+  let accounts = await fetchAllAccounts(supaQuery, accountFilters);
   if (!accounts.length) { console.log('No accounts found.'); return; }
 
   if (REFRESH_USERNAME) {
@@ -181,6 +190,11 @@ async function main() {
     const set = new Set(REFRESH_USERNAMES);
     accounts = accounts.filter(a => set.has(a.username.toLowerCase()));
     console.log(`Requested ${REFRESH_USERNAMES.length} account(s): ${accounts.length} matched in this workspace/shard scope`);
+  }
+
+  if (REFRESH_WORKSPACE_ID) {
+    accounts = accounts.filter(a => a.workspace_id === REFRESH_WORKSPACE_ID);
+    console.log(`Filtered by workspace ${REFRESH_WORKSPACE_ID}: ${accounts.length} account(s)`);
   }
 
   if (!accounts.length) { console.log('No matching accounts found.'); return; }
@@ -242,9 +256,6 @@ async function main() {
       continue;
     }
 
-    if (REFRESH_WORKSPACE_ID && acc.workspace_id !== REFRESH_WORKSPACE_ID) {
-      console.log(`[SKIP]${wsPrefix} ${acc.username}: outside requested workspace.`); continue;
-    }
     if (REFRESH_USERNAME && acc.username.toLowerCase() !== REFRESH_USERNAME) {
       console.log(`[SKIP]${wsPrefix} ${acc.username}: outside requested account.`); continue;
     }
@@ -419,14 +430,24 @@ async function main() {
       console.log(`[PUSH] Pushing ${changedPins.length} changed pins for @${acc.username} in batches of ${CFG.BATCH_SIZE}...`);
       for (let i = 0; i < changedPins.length; i += CFG.BATCH_SIZE) {
         const batch = changedPins.slice(i, i + CFG.BATCH_SIZE);
-        const result = await pushBatch(acc.workspace_id, acc.username, batch, accountFollowerCount, allPins.length);
+        const isLastBatch = i + CFG.BATCH_SIZE >= changedPins.length;
+        const result = await pushBatch(
+          acc.workspace_id,
+          acc.username,
+          batch,
+          accountFollowerCount,
+          allPins.length,
+          acc.id,
+          !isLastBatch,
+          changedPins.length
+        );
         if (result.ok) {
           summary.pushed += result.pushed;
         } else {
           summary.errors.push(`push: ${result.error}`);
           if (result.terminal) break;
         }
-        if (i + CFG.BATCH_SIZE < changedPins.length) {
+        if (!isLastBatch) {
           await sleep(CFG.PUSH_SLEEP_MS);
         }
       }

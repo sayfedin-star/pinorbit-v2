@@ -145,7 +145,7 @@ export const competitorsDb = {
       .select('*')
       .eq('competitor_id', competitorId)
       .eq('workspace_id', workspaceId)
-      .order('pin_count', { ascending: false });
+      .order('pin_count', { ascending: false, nullsFirst: false });
 
     if (error) throw error;
     return (data as CompetitorBoardRecord[]) || [];
@@ -157,15 +157,20 @@ export const competitorsDb = {
   async getCompetitorDailySnapshots(
     workspaceId: string,
     competitorId: string,
-    days: number = 30
+    days: number = 30,
+    prefetchedCompetitor?: CompetitorRecord | null
   ): Promise<CompetitorDailySnapshotRecord[]> {
     if (!workspaceId || !competitorId) {
       throw new Error('Tenant Boundary Violation: workspaceId and competitorId are required.');
     }
 
-    // Verify competitor belongs to workspace first
-    const competitor = await this.getCompetitor(workspaceId, competitorId);
-    if (!competitor) {
+    if (prefetchedCompetitor === undefined) {
+      // Verify competitor belongs to workspace first
+      const competitor = await this.getCompetitor(workspaceId, competitorId);
+      if (!competitor) {
+        throw new Error(`Forbidden: Competitor ${competitorId} not found in workspace ${workspaceId}.`);
+      }
+    } else if (!prefetchedCompetitor || prefetchedCompetitor.workspace_id !== workspaceId || prefetchedCompetitor.id !== competitorId) {
       throw new Error(`Forbidden: Competitor ${competitorId} not found in workspace ${workspaceId}.`);
     }
 
@@ -223,10 +228,14 @@ export const competitorsDb = {
     if (competitors.length === 0) return [];
 
     const client = dbClients.getCompetitors();
-    const rows = competitors.map(c => ({
-      ...c,
-      workspace_id: workspaceId,
-    }));
+    const dedupedMap = new Map<string, Partial<CompetitorRecord> & { username: string; workspace_id: string }>();
+    for (const c of competitors) {
+      if (!c?.username) continue;
+      const key = c.username.trim().toLowerCase();
+      const prev = dedupedMap.get(key) || {};
+      dedupedMap.set(key, { ...prev, ...c, username: key, workspace_id: workspaceId });
+    }
+    const rows = Array.from(dedupedMap.values());
 
     const CHUNK_SIZE = 500;
     const upsertedCompetitors: CompetitorRecord[] = [];

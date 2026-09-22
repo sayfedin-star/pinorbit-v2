@@ -118,10 +118,14 @@ export async function updateAccountsInterval(
   });
 }
 
-export async function deleteAccounts(accountIds: string[]): Promise<any> {
+export async function deleteAccounts(accountIds: string[], workspaceId?: string): Promise<any> {
+  const ws = workspaceId || getWorkspaceId();
   return fetchJson('/api/pinarchive/accounts-delete', {
     method: 'POST',
-    body: JSON.stringify({ account_ids: accountIds }),
+    body: JSON.stringify({
+      account_ids: accountIds,
+      workspace_id: ws,
+    }),
     timeoutMs: 10000,
   });
 }

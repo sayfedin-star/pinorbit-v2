@@ -29,10 +29,14 @@ export const competitorsService = {
   }> {
     await assertWorkspaceAccess(schedulingClient, workspaceId, userId);
 
-    const [competitor, boards, snapshots] = await Promise.all([
-      competitorsDb.getCompetitor(workspaceId, competitorId),
+    const competitor = await competitorsDb.getCompetitor(workspaceId, competitorId);
+    if (!competitor) {
+      return { competitor: null, boards: [], snapshots: [] };
+    }
+
+    const [boards, snapshots] = await Promise.all([
       competitorsDb.listCompetitorBoards(workspaceId, competitorId),
-      competitorsDb.getCompetitorDailySnapshots(workspaceId, competitorId, 30),
+      competitorsDb.getCompetitorDailySnapshots(workspaceId, competitorId, 30, competitor),
     ]);
 
     return { competitor, boards, snapshots };

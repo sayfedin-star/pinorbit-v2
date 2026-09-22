@@ -699,14 +699,36 @@ const cronDesc = rawExpr ? humanCron(rawExpr) : 'Configure automated scraping sc
   } from '../lib/ui-helpers';
 
   // ─── Server-only CRUD for Competitors (via admin endpoints) ───
-  async function getCompetitors() { return (await apiJSON('/api/admin/competitors')).competitors as any[]; }
-  async function getCompetitorDetails(id: string) { return apiJSON(`/api/admin/competitors?id=${encodeURIComponent(id)}`); }
-  async function addCompetitor(data: any) { return (await apiJSON('/api/admin/competitors', { method: 'POST', body: JSON.stringify(data) })).competitor; }
-  async function addBulkCompetitors(data: any) { return await apiJSON('/api/admin/competitors', { method: 'POST', body: JSON.stringify(data) }); }
-  async function updateCompetitor(id: string, data: any) { return (await apiJSON('/api/admin/competitors', { method: 'PATCH', body: JSON.stringify({ id, ...data }) })).competitor; }
-  async function deleteCompetitor(id: string) { await apiJSON('/api/admin/competitors', { method: 'DELETE', body: JSON.stringify({ id }) }); return true; }
+  async function getCompetitors() {
+    const ws = getActiveWorkspaceId();
+    const wsParam = ws ? `?workspace_id=${encodeURIComponent(ws)}` : '';
+    return (await apiJSON(`/api/admin/competitors${wsParam}`)).competitors as any[];
+  }
+  async function getCompetitorDetails(id: string) {
+    const ws = getActiveWorkspaceId();
+    const wsParam = ws ? `&workspace_id=${encodeURIComponent(ws)}` : '';
+    return apiJSON(`/api/admin/competitors?id=${encodeURIComponent(id)}${wsParam}`);
+  }
+  async function addCompetitor(data: any) {
+    const ws = getActiveWorkspaceId();
+    return (await apiJSON('/api/admin/competitors', { method: 'POST', body: JSON.stringify({ workspace_id: ws, ...data }) })).competitor;
+  }
+  async function addBulkCompetitors(data: any) {
+    const ws = getActiveWorkspaceId();
+    return await apiJSON('/api/admin/competitors', { method: 'POST', body: JSON.stringify({ workspace_id: ws, ...data }) });
+  }
+  async function updateCompetitor(id: string, data: any) {
+    const ws = getActiveWorkspaceId();
+    return (await apiJSON('/api/admin/competitors', { method: 'PATCH', body: JSON.stringify({ id, workspace_id: ws, ...data }) })).competitor;
+  }
+  async function deleteCompetitor(id: string) {
+    const ws = getActiveWorkspaceId();
+    await apiJSON('/api/admin/competitors', { method: 'DELETE', body: JSON.stringify({ id, workspace_id: ws }) });
+    return true;
+  }
   async function ingestDevToolsPayload(competitorId: string, payloadText: string) {
-    return apiJSON('/api/admin/competitors/ingest', { method: 'POST', body: JSON.stringify({ competitor_id: competitorId, payload: payloadText }) });
+    const ws = getActiveWorkspaceId();
+    return apiJSON('/api/admin/competitors/ingest', { method: 'POST', body: JSON.stringify({ competitor_id: competitorId, workspace_id: ws, payload: payloadText }) });
   }
 
   // ─── State ────────────────────────────────────────────────────────────────

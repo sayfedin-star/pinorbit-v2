@@ -5,6 +5,54 @@ import { dbClients, isKnownDefaultIngestSecret, isProductionEnv } from '../../..
 import { getEffectiveSecret, verifyIngestSecret } from '../../../../server/services/webhook-secrets';
 import { USERNAME_REGEX } from '../../../../lib/validation/pinterest';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const MAX_CACHE_ENTRIES = 500;
+const WS_SETTINGS_TTL_MS = 90_000; // 90 seconds (strict short TTL)
+const ACCOUNT_CACHE_TTL_MS = 90_000; // 90 seconds
+const ACCOUNT_UPSERT_THROTTLE_MS = 60_000; // 60 seconds
+
+interface CachedWsSettings {
+  ingest_enabled: boolean;
+  paused_account_policy: string;
+  max_batch_pins: number;
+  expiresAt: number;
+}
+
+interface CachedAccount {
+  id: string;
+  status: string;
+  ingest_enabled: boolean;
+  lastUpsertedAt: number;
+  expiresAt: number;
+}
+
+const wsSettingsCache = new Map<string, CachedWsSettings>();
+const accountCache = new Map<string, CachedAccount>();
+
+function pruneCache<T extends { expiresAt: number }>(cache: Map<string, T>) {
+  const now = Date.now();
+  for (const [key, item] of cache.entries()) {
+    if (now >= item.expiresAt) {
+      cache.delete(key);
+    }
+  }
+  if (cache.size > MAX_CACHE_ENTRIES) {
+    const excess = cache.size - MAX_CACHE_ENTRIES;
+    let count = 0;
+    for (const key of cache.keys()) {
+      cache.delete(key);
+      count++;
+      if (count >= excess) break;
+    }
+  }
+}
+
+export function _clearIngestCachesForTesting() {
+  wsSettingsCache.clear();
+  accountCache.clear();
+}
+
 /**
  * Server-Only Internal PinArchive Ingest Endpoint.
  *
@@ -42,8 +90,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
-
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   // 2. Validate workspace_id
   if (!payload || !payload.workspace_id || typeof payload.workspace_id !== 'string') {
@@ -105,19 +151,37 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
   }
 
   // 5. Ingest into Project 4 (PinArchive)
+  let resolvedAccountId: string | null = null;
   try {
     const pinArchive = dbClients.getPinArchive(runtimeEnv);
+    const isTestEnv = typeof process !== 'undefined' && Boolean(process.env.VITEST);
+    const useCache = !isTestEnv || runtimeEnv?.ENABLE_INGEST_CACHE === 'true';
 
-    // Gating 1: Load pa_workspace_settings (defaults when absent)
-    const { data: wsSettings } = await pinArchive
-      .from('pa_workspace_settings')
-      .select('ingest_enabled, paused_account_policy, max_batch_pins')
-      .eq('workspace_id', workspaceId)
-      .maybeSingle();
+    // Gating 1: Load pa_workspace_settings (cached with strict short TTL)
+    const now = Date.now();
+    let wsSettings = useCache ? wsSettingsCache.get(workspaceId) : undefined;
+    if (!wsSettings || now >= wsSettings.expiresAt) {
+      const { data: fetchedSettings, error: wsSettingsErr } = await pinArchive
+        .from('pa_workspace_settings')
+        .select('ingest_enabled, paused_account_policy, max_batch_pins')
+        .eq('workspace_id', workspaceId)
+        .maybeSingle();
 
-    const ingestEnabled = wsSettings?.ingest_enabled ?? true;
-    const pausedAccountPolicy = wsSettings?.paused_account_policy ?? 'reject';
-    const maxBatchPins = wsSettings?.max_batch_pins ?? 500;
+      wsSettings = {
+        ingest_enabled: fetchedSettings?.ingest_enabled ?? true,
+        paused_account_policy: fetchedSettings?.paused_account_policy ?? 'reject',
+        max_batch_pins: fetchedSettings?.max_batch_pins ?? 500,
+        expiresAt: now + WS_SETTINGS_TTL_MS,
+      };
+      if (useCache && !wsSettingsErr) {
+        wsSettingsCache.set(workspaceId, wsSettings);
+        pruneCache(wsSettingsCache);
+      }
+    }
+
+    const ingestEnabled = wsSettings.ingest_enabled;
+    const pausedAccountPolicy = wsSettings.paused_account_policy;
+    const maxBatchPins = wsSettings.max_batch_pins;
 
     // Gating 2: Workspace disabled -> 409
     if (!ingestEnabled) {
@@ -173,13 +237,36 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
       return tb - ta;
     });
 
-    // Gating 3: Fetch current pa_accounts row before upsert
-    const { data: existingAccount } = await pinArchive
-      .from('pa_accounts')
-      .select('id, status, ingest_enabled')
-      .eq('workspace_id', workspaceId)
-      .eq('username', username)
-      .maybeSingle();
+    // Gating 3: Fetch current pa_accounts row before upsert (Cached with throttled upsert)
+    const accountKey = `${workspaceId}:${username}`;
+    let cachedAccount = useCache ? accountCache.get(accountKey) : undefined;
+    if (cachedAccount && now >= cachedAccount.expiresAt) {
+      if (useCache) accountCache.delete(accountKey);
+      cachedAccount = undefined;
+    }
+
+    let existingAccount: { id: string; status: string; ingest_enabled: boolean } | null = null;
+
+    if (cachedAccount) {
+      existingAccount = {
+        id: cachedAccount.id,
+        status: cachedAccount.status,
+        ingest_enabled: cachedAccount.ingest_enabled,
+      };
+      resolvedAccountId = cachedAccount.id;
+    } else {
+      const { data: dbAccount } = await pinArchive
+        .from('pa_accounts')
+        .select('id, status, ingest_enabled')
+        .eq('workspace_id', workspaceId)
+        .eq('username', username)
+        .maybeSingle();
+
+      if (dbAccount) {
+        existingAccount = dbAccount;
+        resolvedAccountId = dbAccount.id;
+      }
+    }
 
     // Account ingest_enabled = false -> write NOTHING
     if (existingAccount && existingAccount.ingest_enabled === false) {
@@ -207,50 +294,85 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
     const promotedCount = pins.filter((p: any) => Boolean(p.promoted)).length;
 
-    // A) Upsert pa_accounts
-    const accountData: Record<string, any> = {
-      workspace_id: workspaceId,
-      username,
-      last_run_at: fetchedAt,
-    };
-    if (typeof account_meta.last_result === 'string' && /^(pages=|discovery)/i.test(account_meta.last_result.trim())) {
-      accountData.last_result = account_meta.last_result.trim();
-    }
-    if (payload.trigger === 'refresh') {
-      accountData.last_run_at = fetchedAt;
-    }
-    if (typeof payload.follower_count === 'number' && Number.isFinite(payload.follower_count)) {
-      accountData.follower_count = Math.max(0, Math.round(payload.follower_count));
-    }
-    if (payload.trigger !== 'refresh') {
-      if (typeof account_meta.pins_count === 'number' && Number.isFinite(account_meta.pins_count)) {
-        accountData.pins_count = Math.max(0, Math.round(account_meta.pins_count));
+    // A) Upsert pa_accounts (Throttled: skip if already upserted recently in same session)
+    let accountId: string;
+    const hasExplicitCursor = account_meta.backfill_cursor !== undefined;
+    const isStatusChanged = Boolean(
+      account_meta.status &&
+      cachedAccount &&
+      account_meta.status !== cachedAccount.status
+    );
+    const shouldSkipUpsert = Boolean(
+      !hasExplicitCursor &&
+      !isStatusChanged &&
+      useCache &&
+      cachedAccount &&
+      cachedAccount.id &&
+      UUID_REGEX.test(cachedAccount.id) &&
+      (now - cachedAccount.lastUpsertedAt < ACCOUNT_UPSERT_THROTTLE_MS)
+    );
+
+    if (shouldSkipUpsert && cachedAccount) {
+      accountId = cachedAccount.id;
+      resolvedAccountId = accountId;
+    } else {
+      const accountData: Record<string, any> = {
+        workspace_id: workspaceId,
+        username,
+        last_run_at: fetchedAt,
+      };
+      if (typeof account_meta.last_result === 'string' && /^(pages=|discovery)/i.test(account_meta.last_result.trim())) {
+        accountData.last_result = account_meta.last_result.trim();
       }
-      if (typeof account_meta.promoted_count === 'number' && Number.isFinite(account_meta.promoted_count)) {
-        accountData.promoted_count = Math.max(0, Math.round(account_meta.promoted_count));
+      if (payload.trigger === 'refresh') {
+        accountData.last_run_at = fetchedAt;
+      }
+      if (typeof payload.follower_count === 'number' && Number.isFinite(payload.follower_count)) {
+        accountData.follower_count = Math.max(0, Math.round(payload.follower_count));
+      }
+      if (payload.trigger !== 'refresh') {
+        if (typeof account_meta.pins_count === 'number' && Number.isFinite(account_meta.pins_count)) {
+          accountData.pins_count = Math.max(0, Math.round(account_meta.pins_count));
+        }
+        if (typeof account_meta.promoted_count === 'number' && Number.isFinite(account_meta.promoted_count)) {
+          accountData.promoted_count = Math.max(0, Math.round(account_meta.promoted_count));
+        }
+      }
+      if (account_meta.sheet_id) accountData.sheet_id = account_meta.sheet_id;
+
+      if (account_meta.status) accountData.status = account_meta.status;
+      if (account_meta.backfill_status) accountData.backfill_status = account_meta.backfill_status;
+      if (account_meta.backfill_cursor !== undefined) accountData.backfill_cursor = account_meta.backfill_cursor;
+      if (account_meta.next_run_at) accountData.next_run_at = account_meta.next_run_at;
+
+      const { data: accountRow, error: accErr } = await pinArchive
+        .from('pa_accounts')
+        .upsert(accountData, { onConflict: 'workspace_id,username' })
+        .select('id, workspace_id, username')
+        .single();
+
+      if (accErr || !accountRow) {
+        return new Response(
+          JSON.stringify({ success: false, error: `Account upsert failed: ${accErr?.message || 'Unknown error'}` }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      accountId = accountRow.id;
+      resolvedAccountId = accountId;
+
+      // Update account cache
+      if (useCache) {
+        accountCache.set(accountKey, {
+          id: accountId,
+          status: accountData.status || existingAccount?.status || 'active',
+          ingest_enabled: existingAccount?.ingest_enabled ?? true,
+          lastUpsertedAt: now,
+          expiresAt: now + ACCOUNT_CACHE_TTL_MS,
+        });
+        pruneCache(accountCache);
       }
     }
-    if (account_meta.sheet_id) accountData.sheet_id = account_meta.sheet_id;
-
-    if (account_meta.status) accountData.status = account_meta.status;
-    if (account_meta.backfill_status) accountData.backfill_status = account_meta.backfill_status;
-    if (account_meta.backfill_cursor !== undefined) accountData.backfill_cursor = account_meta.backfill_cursor;
-    if (account_meta.next_run_at) accountData.next_run_at = account_meta.next_run_at;
-
-    const { data: accountRow, error: accErr } = await pinArchive
-      .from('pa_accounts')
-      .upsert(accountData, { onConflict: 'workspace_id,username' })
-      .select('id, workspace_id, username')
-      .single();
-
-    if (accErr || !accountRow) {
-      return new Response(
-        JSON.stringify({ success: false, error: `Account upsert failed: ${accErr?.message || 'Unknown error'}` }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const accountId = accountRow.id;
     const pinIds = pins.map((p: any) => String(p.pin_id || p.id || '')).filter(Boolean);
 
     // Phase C1: Atomic Ingest Write Mode (pa_ingest_pin_batch active)
@@ -325,14 +447,22 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
       // Fetch existing pin metric & enrichment state in chunks of 100 to avoid URI 414 errors
       const existingPins: any[] = [];
       const FETCH_CHUNK_SIZE = 100;
+      const chunks: string[][] = [];
       for (let i = 0; i < pinIds.length; i += FETCH_CHUNK_SIZE) {
-        const chunk = pinIds.slice(i, i + FETCH_CHUNK_SIZE);
-        const { data, error } = await pinArchive
-          .from('pa_pins')
-          .select('id, pin_id, saves, repins, comments, share_count, reactions, archived_at, annotations, board_pin_count, board_last_modified_at, seo_category, canonical_pin_id, utm_link, image_signature, dominant_color, seo_alt_text, title, description, link, domain, board_name, board_id, created_at_pinterest, image_url, node_id, is_video, is_product, promoted, price, currency, site_name')
-          .eq('workspace_id', workspaceId)
-          .in('pin_id', chunk);
+        chunks.push(pinIds.slice(i, i + FETCH_CHUNK_SIZE));
+      }
 
+      const chunkResults = await Promise.all(
+        chunks.map(chunk =>
+          pinArchive
+            .from('pa_pins')
+            .select('id, pin_id, saves, repins, comments, share_count, reactions, archived_at, annotations, board_pin_count, board_last_modified_at, seo_category, canonical_pin_id, utm_link, image_signature, dominant_color, seo_alt_text, title, description, link, domain, board_name, board_id, created_at_pinterest, image_url, node_id, is_video, is_product, promoted, price, currency, site_name')
+            .eq('workspace_id', workspaceId)
+            .in('pin_id', chunk)
+        )
+      );
+
+      for (const { data, error } of chunkResults) {
         if (error) {
           console.error('[ingest] Error querying existing pins chunk:', error);
           throw error;
@@ -567,41 +697,43 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
       }
     }
 
-    // D) Insert pa_runs row
-    const triggerVal = (
-      ['cron', 'manual', 'backfill', 'refresh', 'audit_sweep'].includes(payload.trigger)
-        ? payload.trigger
-        : 'cron'
-    ) as 'cron' | 'manual' | 'backfill' | 'refresh' | 'audit_sweep';
-    const runRow = {
-      workspace_id: workspaceId,
-      account_id: accountId,
-      trigger: triggerVal,
-      started_at: fetchedAt,
-      finished_at: new Date().toISOString(),
-      pages_fetched: typeof payload.pages_fetched === 'number' ? payload.pages_fetched : 1,
-      pins_added: pinsAddedCount,
-      pins_updated: pinsUpdatedCount,
-      pins_promoted: promotedCount,
-      status: 'completed',
-      message: payload.run_id ? String(payload.run_id) : null,
-    };
+    // D) Insert pa_runs row (Skipped for intermediate batches when skip_run_log is true)
+    let insertedRunId: string | null = payload.run_id ? String(payload.run_id) : null;
+    if (payload.skip_run_log !== true) {
+      const triggerVal = (
+        ['cron', 'manual', 'backfill', 'refresh', 'audit_sweep'].includes(payload.trigger)
+          ? payload.trigger
+          : 'cron'
+      ) as 'cron' | 'manual' | 'backfill' | 'refresh' | 'audit_sweep';
+      const runRow = {
+        workspace_id: workspaceId,
+        account_id: accountId,
+        trigger: triggerVal,
+        started_at: fetchedAt,
+        finished_at: new Date().toISOString(),
+        pages_fetched: typeof payload.pages_fetched === 'number' ? payload.pages_fetched : 1,
+        pins_added: typeof payload.pins_added === 'number' ? payload.pins_added : pinsAddedCount,
+        pins_updated: typeof payload.pins_updated === 'number' ? payload.pins_updated : pinsUpdatedCount,
+        pins_promoted: typeof payload.pins_promoted === 'number' ? payload.pins_promoted : promotedCount,
+        status: 'completed',
+        message: payload.run_id ? String(payload.run_id) : null,
+      };
 
-    let insertedRunId: string | null = null;
-    try {
-      const insertResult: any = pinArchive.from('pa_runs').insert(runRow);
-      if (insertResult && typeof insertResult.select === 'function') {
-        const { data: insertedRun, error: runErr } = await insertResult.select('id').maybeSingle();
-        if (runErr) {
-          console.warn('[PinArchive Ingest] Could not record pa_runs row:', runErr.message);
+      try {
+        const insertResult: any = pinArchive.from('pa_runs').insert(runRow);
+        if (insertResult && typeof insertResult.select === 'function') {
+          const { data: insertedRun, error: runErr } = await insertResult.select('id').maybeSingle();
+          if (runErr) {
+            console.warn('[PinArchive Ingest] Could not record pa_runs row:', runErr.message);
+          } else {
+            insertedRunId = insertedRun?.id || insertedRunId;
+          }
         } else {
-          insertedRunId = insertedRun?.id || null;
+          await insertResult;
         }
-      } else {
-        await insertResult;
+      } catch (runErr: any) {
+        console.warn('[PinArchive Ingest] pa_runs insert caught error:', runErr?.message || runErr);
       }
-    } catch (runErr: any) {
-      console.warn('[PinArchive Ingest] pa_runs insert caught error:', runErr?.message || runErr);
     }
 
     const responseData: Record<string, any> = {
@@ -623,6 +755,32 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
+    try {
+      if (workspaceId && UUID_REGEX.test(workspaceId)) {
+        const pinArchive = dbClients.getPinArchive(runtimeEnv);
+        if (pinArchive && typeof pinArchive.from === 'function') {
+          const runRow: Record<string, any> = {
+            workspace_id: workspaceId,
+            trigger: (
+              ['cron', 'manual', 'backfill', 'refresh', 'audit_sweep'].includes(payload?.trigger)
+                ? payload.trigger
+                : 'cron'
+            ),
+            started_at: payload?.fetched_at || new Date().toISOString(),
+            finished_at: new Date().toISOString(),
+            status: 'failed',
+            message: String(err?.message || err).slice(0, 1000),
+          };
+          if (resolvedAccountId && UUID_REGEX.test(resolvedAccountId)) {
+            runRow.account_id = resolvedAccountId;
+          }
+          await pinArchive.from('pa_runs').insert(runRow);
+        }
+      }
+    } catch (runErr) {
+      console.warn('[PinArchive Ingest] Could not record failed pa_runs entry:', runErr);
+    }
+
     return new Response(
       JSON.stringify({ success: false, error: `Internal processing error: ${err.message || 'Unknown'}` }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

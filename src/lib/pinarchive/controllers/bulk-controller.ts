@@ -449,7 +449,8 @@ export class BulkController {
       confirmBtn.textContent = 'Deleting…';
 
       try {
-        await executeBulkDelete(this.pendingDeleteIds);
+        const wsId = getWorkspaceId();
+        await executeBulkDelete(this.pendingDeleteIds, wsId);
         toast(`Deleted ${this.pendingDeleteIds.length} account(s)`);
         this.closeDeleteAccountsModal();
         this.state.selectedAccounts.clear();

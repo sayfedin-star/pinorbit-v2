@@ -11,7 +11,7 @@ const json = (o: any, s = 200) => new Response(JSON.stringify(o), { status: s, h
 
 export const POST: APIRoute = async ({ request, locals }) => {
   let body: any = {}; try { body = JSON.parse(await request.text() || '{}'); } catch { return json({ error: 'Invalid JSON' }, 400); }
-  const user = locals.user, schedulingClient = locals.supabase, ws = locals.activeWorkspaceId;
+  const user = locals.user, schedulingClient = locals.supabase, ws = body.workspace_id || locals.activeWorkspaceId;
   if (!user || !schedulingClient || !ws) return json({ error: 'Unauthorized' }, 401);
   try { await assertWorkspaceAccess(schedulingClient, ws, user.id, 'admin'); }
   catch (e: any) { return json({ error: e.message || 'Forbidden' }, errorStatus(e)); }
@@ -54,15 +54,33 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   if (parsed.type === 'user_boards' && parsed.boardsData) {
-    const rows = parsed.boardsData.map((bd: any) => ({
-      workspace_id: ws,
-      competitor_id: comp.data.id, board_id: bd.board_id, name: bd.name,
-      description: bd.description || '', url: bd.url || '', pin_count: Number(bd.pin_count || 0),
-      follower_count: Number(bd.follower_count || 0),
-      board_created_at: bd.board_created_at ? new Date(bd.board_created_at).toISOString() : null,
-      last_pinned_at: bd.last_pinned_at ? new Date(bd.last_pinned_at).toISOString() : null,
-    }));
-    if (rows.length) await db.from('competitor_boards').upsert(rows, { onConflict: 'competitor_id,board_id' });
+    const seenBoardIds = new Set<string>();
+    const rows: any[] = [];
+    for (const bd of parsed.boardsData) {
+      const bId = String(bd.board_id || '').trim();
+      if (bId && !seenBoardIds.has(bId)) {
+        seenBoardIds.add(bId);
+        rows.push({
+          workspace_id: ws,
+          competitor_id: comp.data.id,
+          board_id: bId,
+          name: bd.name || 'Untitled Board',
+          description: bd.description || '',
+          url: bd.url || '',
+          pin_count: Number(bd.pin_count || 0),
+          follower_count: Number(bd.follower_count || 0),
+          board_created_at: bd.board_created_at ? new Date(bd.board_created_at).toISOString() : null,
+          last_pinned_at: bd.last_pinned_at ? new Date(bd.last_pinned_at).toISOString() : null,
+        });
+      }
+    }
+
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const { error: bErr } = await db.from('competitor_boards').upsert(chunk, { onConflict: 'competitor_id,board_id' });
+      if (bErr) throw bErr;
+    }
     return json({ success: true, type: parsed.type, message: `${rows.length} boards ingested.` });
   }
   return json({ success: false, message: 'No actionable data in payload' }, 400);

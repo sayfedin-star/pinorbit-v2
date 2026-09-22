@@ -444,7 +444,7 @@ export async function getCompetitors(workspaceId?: string): Promise<Competitor[]
  * Fetch detailed information for a single competitor including snapshots and boards.
  * Routes to /api/admin/competitors?id=... in browser context or falls back to mock data.
  */
-export async function getCompetitorDetails(competitorId: string): Promise<{
+export async function getCompetitorDetails(competitorId: string, workspaceId?: string): Promise<{
   competitor: Competitor | null;
   snapshots: CompetitorSnapshot[];
   boards: CompetitorBoard[];
@@ -471,7 +471,9 @@ export async function getCompetitorDetails(competitorId: string): Promise<{
 
   try {
     if (typeof window !== 'undefined') {
-      const res = await fetch(`/api/admin/competitors?id=${encodeURIComponent(competitorId)}`, {
+      const ws = workspaceId || (typeof localStorage !== 'undefined' ? (localStorage.getItem('active_workspace_id') || localStorage.getItem('po_active_workspace_id')) : null);
+      const wsParam = ws ? `&workspace_id=${encodeURIComponent(ws)}` : '';
+      const res = await fetch(`/api/admin/competitors?id=${encodeURIComponent(competitorId)}${wsParam}`, {
         headers: { 'Content-Type': 'application/json' },
       });
       if (res.ok) {
