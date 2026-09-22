@@ -11,7 +11,7 @@ const json = (o: any, s = 200) => new Response(JSON.stringify(o), { status: s, h
 
 export const POST: APIRoute = async ({ request, locals }) => {
   let body: any = {}; try { body = JSON.parse(await request.text() || '{}'); } catch { return json({ error: 'Invalid JSON' }, 400); }
-  const user = locals.user, schedulingClient = locals.supabase, ws = locals.activeWorkspaceId;
+  const user = locals.user, schedulingClient = locals.supabase, ws = body.workspace_id || locals.activeWorkspaceId;
   if (!user || !schedulingClient || !ws) return json({ error: 'Unauthorized' }, 401);
   try { await assertWorkspaceAccess(schedulingClient, ws, user.id, 'admin'); }
   catch (e: any) { return json({ error: e.message || 'Forbidden' }, errorStatus(e)); }

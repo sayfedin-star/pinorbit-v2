@@ -145,7 +145,7 @@ export const competitorsDb = {
       .select('*')
       .eq('competitor_id', competitorId)
       .eq('workspace_id', workspaceId)
-      .order('pin_count', { ascending: false });
+      .order('pin_count', { ascending: false, nullsFirst: false });
 
     if (error) throw error;
     return (data as CompetitorBoardRecord[]) || [];
@@ -157,15 +157,20 @@ export const competitorsDb = {
   async getCompetitorDailySnapshots(
     workspaceId: string,
     competitorId: string,
-    days: number = 30
+    days: number = 30,
+    prefetchedCompetitor?: CompetitorRecord | null
   ): Promise<CompetitorDailySnapshotRecord[]> {
     if (!workspaceId || !competitorId) {
       throw new Error('Tenant Boundary Violation: workspaceId and competitorId are required.');
     }
 
-    // Verify competitor belongs to workspace first
-    const competitor = await this.getCompetitor(workspaceId, competitorId);
-    if (!competitor) {
+    if (prefetchedCompetitor === undefined) {
+      // Verify competitor belongs to workspace first
+      const competitor = await this.getCompetitor(workspaceId, competitorId);
+      if (!competitor) {
+        throw new Error(`Forbidden: Competitor ${competitorId} not found in workspace ${workspaceId}.`);
+      }
+    } else if (!prefetchedCompetitor || prefetchedCompetitor.workspace_id !== workspaceId || prefetchedCompetitor.id !== competitorId) {
       throw new Error(`Forbidden: Competitor ${competitorId} not found in workspace ${workspaceId}.`);
     }
 

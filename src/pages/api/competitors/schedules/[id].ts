@@ -14,16 +14,8 @@ import { validateCronExpression, getDispatchEndpointUrl } from './index';
 export const PATCH: APIRoute = async ({ params, request, locals }) => {
   const user = locals.user;
   const schedulingClient = locals.supabase;
-  const workspaceId = locals.activeWorkspaceId;
   const runtimeEnv = (locals as any)?.runtime?.env || (locals as any)?.runtimeEnv || {};
   const id = params.id;
-
-  if (!user || !schedulingClient || !workspaceId || !id) {
-    return new Response(JSON.stringify({ success: false, error: 'Unauthorized or missing ID' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
 
   let body: any = {};
   try {
@@ -32,6 +24,15 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
   } catch {
     return new Response(JSON.stringify({ success: false, error: 'Invalid JSON payload' }), {
       status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const workspaceId = body.workspace_id || locals.activeWorkspaceId;
+
+  if (!user || !schedulingClient || !workspaceId || !id) {
+    return new Response(JSON.stringify({ success: false, error: 'Unauthorized or missing ID' }), {
+      status: 401,
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -182,10 +183,16 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
 };
 
 // ── DELETE: Delete Schedule ───────────────────────────────────────────────────
-export const DELETE: APIRoute = async ({ params, locals }) => {
+export const DELETE: APIRoute = async ({ params, request, locals }: any) => {
   const user = locals.user;
   const schedulingClient = locals.supabase;
-  const workspaceId = locals.activeWorkspaceId;
+  let qWs: string | null = null;
+  if (request) {
+    try {
+      qWs = new URL(request.url).searchParams.get('workspace_id');
+    } catch { /* ignore */ }
+  }
+  const workspaceId = qWs || locals.activeWorkspaceId;
   const runtimeEnv = (locals as any)?.runtime?.env || (locals as any)?.runtimeEnv || {};
   const id = params.id;
 

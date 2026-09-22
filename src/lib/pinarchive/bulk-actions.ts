@@ -37,9 +37,10 @@ export async function executeBulkInterval(
 }
 
 export async function executeBulkDelete(
-  accountIds: string[]
+  accountIds: string[],
+  workspaceId?: string
 ): Promise<any> {
-  return deleteAccounts(accountIds);
+  return deleteAccounts(accountIds, workspaceId);
 }
 
 export async function executeBulkDiscovery(
@@ -86,18 +87,21 @@ export async function executeBulkSendToCompetitors(
 
   const compIds = (json.competitors || []).map((c: any) => c.id).filter(Boolean);
   if (compIds.length > 0) {
-    // Fire-and-forget background scraper dispatch
-    fetchJson('/api/admin/competitor-ops', {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'dispatch',
-        workspace_id: workspaceId,
-        ids: compIds,
-        trigger: 'pinarchive_bulk_send',
-        force: true,
-      }),
-      timeoutMs: 8000,
-    }).catch(console.warn);
+    try {
+      await fetchJson('/api/admin/competitor-ops', {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'dispatch',
+          workspace_id: workspaceId,
+          ids: compIds,
+          trigger: 'pinarchive_bulk_send',
+          force: true,
+        }),
+        timeoutMs: 8000,
+      });
+    } catch (dispatchErr) {
+      console.warn('[PinArchive] Competitor ops dispatch warning:', dispatchErr);
+    }
   }
 
   return json;

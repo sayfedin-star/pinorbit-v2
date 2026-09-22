@@ -205,10 +205,16 @@ export async function resolveTargetToken(
 }
 
 // ── GET Handler: Lists Competitors FastCron Jobs & Tokens ─────────────────────
-export const GET: APIRoute = async ({ locals }) => {
+export const GET: APIRoute = async ({ locals, request }: any) => {
   const user = locals.user;
   const schedulingClient = locals.supabase;
-  const workspaceId = locals.activeWorkspaceId;
+  let qWs: string | null = null;
+  if (request) {
+    try {
+      qWs = new URL(request.url).searchParams.get('workspace_id');
+    } catch { /* ignore */ }
+  }
+  const workspaceId = qWs || locals.activeWorkspaceId;
   const runtimeEnv = (locals as any)?.runtime?.env || (locals as any)?.runtimeEnv || {};
 
   if (!user || !schedulingClient || !workspaceId) {

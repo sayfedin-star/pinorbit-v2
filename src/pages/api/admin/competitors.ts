@@ -21,8 +21,9 @@ async function guard(locals: any, explicitWs?: string, role: 'member' | 'admin' 
 
 // GET: list all (no id) OR detail with snapshots/boards (with id)
 export const GET: APIRoute = async ({ request, locals }) => {
-  const g = await guard(locals, undefined, 'member'); if (g.err) return g.err;
   const searchParams = new URL(request.url).searchParams;
+  const explicitWs = searchParams.get('workspace_id') || undefined;
+  const g = await guard(locals, explicitWs, 'member'); if (g.err) return g.err;
   const id = searchParams.get('id');
   const rawLite = searchParams.get('lite');
   const rawBoardsOnly = searchParams.get('boards_only');
@@ -53,21 +54,26 @@ export const GET: APIRoute = async ({ request, locals }) => {
     if (ids.length) {
       let snapsList: any[] = [];
       try {
-        const snapsQuery = g.ok!.db.from('competitor_snapshots').select('competitor_id, profile_reach, profile_views, follower_count, pin_count, recorded_at');
-        if (snapsQuery && typeof snapsQuery.in === 'function') {
-          const { data } = await snapsQuery.in('competitor_id', ids).order('recorded_at', { ascending: false }).limit(1000);
-          snapsList = data || [];
-        } else {
-          const perComp = await Promise.all(ids.map(async (compId: string) => {
-            const { data } = await g.ok!.db.from('competitor_snapshots')
-              .select('competitor_id, profile_reach, profile_views, follower_count, pin_count, recorded_at')
-              .eq('competitor_id', compId)
-              .order('recorded_at', { ascending: false })
-              .limit(2);
-            return data || [];
-          }));
-          snapsList = perComp.flat();
+        // Query top 2 snapshots per competitor using index (competitor_id, recorded_at DESC)
+        // Chunk concurrent queries in batches of 25 to avoid connection pool exhaustion
+        const BATCH_SIZE = 25;
+        const results: any[] = [];
+        for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+          const chunk = ids.slice(i, i + BATCH_SIZE);
+          const chunkRes = await Promise.all(
+            chunk.map(async (compId: string) => {
+              const { data } = await g.ok!.db
+                .from('competitor_snapshots')
+                .select('competitor_id, profile_reach, profile_views, follower_count, pin_count, recorded_at')
+                .eq('competitor_id', compId)
+                .order('recorded_at', { ascending: false })
+                .limit(2);
+              return data || [];
+            })
+          );
+          results.push(...chunkRes.flat());
         }
+        snapsList = results;
       } catch (e: any) {
         console.warn('[AdminCompetitors] Snapshots query failed:', e?.message);
         snapsList = [];
@@ -146,7 +152,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
 
   const db = g.ok!.db;
   if (boardsOnly) {
-    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false });
+    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false, nullsFirst: false });
     const { data: boards, error: bErr } = await (typeof (boardsQuery as any)?.range === 'function'
       ? (boardsQuery as any).range(0, 999)
       : boardsQuery);
@@ -186,7 +192,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       strategy_age_days = Math.max(0, Math.floor(diffMs / 86400000));
     }
   } else {
-    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false });
+    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false, nullsFirst: false });
     const [snaps, boards, topPins] = await Promise.all([
       db.from('competitor_snapshots').select('*').eq('competitor_id', id).order('recorded_at', { ascending: false }).limit(100),
       (typeof (boardsQuery as any)?.range === 'function' ? (boardsQuery as any).range(0, 999) : boardsQuery),

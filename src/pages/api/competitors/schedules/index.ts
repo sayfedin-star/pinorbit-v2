@@ -60,10 +60,16 @@ export function validateCronExpression(expr?: string | null): { valid: boolean; 
 }
 
 // ── GET: List Competitor Multi-Schedules & Discover Remote FastCron Jobs ─────
-export const GET: APIRoute = async ({ locals }) => {
+export const GET: APIRoute = async ({ request, locals }: any) => {
   const user = locals.user;
   const schedulingClient = locals.supabase;
-  const workspaceId = locals.activeWorkspaceId;
+  let qWs: string | null = null;
+  if (request) {
+    try {
+      qWs = new URL(request.url).searchParams.get('workspace_id');
+    } catch { /* ignore */ }
+  }
+  const workspaceId = qWs || locals.activeWorkspaceId;
   const runtimeEnv = (locals as any)?.runtime?.env || (locals as any)?.runtimeEnv || {};
 
   if (!user || !schedulingClient || !workspaceId) {
@@ -252,15 +258,7 @@ export const GET: APIRoute = async ({ locals }) => {
 export const POST: APIRoute = async ({ request, locals }) => {
   const user = locals.user;
   const schedulingClient = locals.supabase;
-  const workspaceId = locals.activeWorkspaceId;
   const runtimeEnv = (locals as any)?.runtime?.env || (locals as any)?.runtimeEnv || {};
-
-  if (!user || !schedulingClient || !workspaceId) {
-    return new Response(JSON.stringify({ success: false, error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
 
   let body: any = {};
   try {
@@ -269,6 +267,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
   } catch {
     return new Response(JSON.stringify({ success: false, error: 'Invalid JSON payload' }), {
       status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const workspaceId = body.workspace_id || locals.activeWorkspaceId;
+
+  if (!user || !schedulingClient || !workspaceId) {
+    return new Response(JSON.stringify({ success: false, error: 'Unauthorized' }), {
+      status: 401,
       headers: { 'Content-Type': 'application/json' },
     });
   }

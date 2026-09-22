@@ -199,7 +199,7 @@ async function processWorkspace(db, wsId, kek, options = {}) {
         // Upsert in safe chunks of 100 to prevent payload size limits
         for (let i = 0; i < boardsToUpsert.length; i += 100) {
           const chunk = boardsToUpsert.slice(i, i + 100);
-          const { error: boardError } = await db.from('competitor_boards').upsert(chunk, { onConflict: 'competitor_id, board_id' });
+          const { error: boardError } = await db.from('competitor_boards').upsert(chunk, { onConflict: 'competitor_id,board_id' });
           if (boardError) console.warn(`⚠️ Boards Upsert Warning for @${username} (chunk ${Math.floor(i / 100) + 1}):`, boardError.message);
         }
         console.log(`📋 Ingested ALL ${boardsToUpsert.length} unique Board(s) across ${pageCount} page(s) with REAL creation dates for @${username}.`);

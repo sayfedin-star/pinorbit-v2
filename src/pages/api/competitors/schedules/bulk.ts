@@ -11,15 +11,7 @@ import { getDispatchEndpointUrl } from './index';
 export const POST: APIRoute = async ({ request, locals }) => {
   const user = locals.user;
   const schedulingClient = locals.supabase;
-  const workspaceId = locals.activeWorkspaceId;
   const runtimeEnv = (locals as any)?.runtime?.env || (locals as any)?.runtimeEnv || {};
-
-  if (!user || !schedulingClient || !workspaceId) {
-    return new Response(JSON.stringify({ success: false, error: 'Unauthorized or missing workspace' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
 
   let body: any = {};
   try {
@@ -28,6 +20,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
   } catch {
     return new Response(JSON.stringify({ success: false, error: 'Invalid JSON payload' }), {
       status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const workspaceId = body.workspace_id || locals.activeWorkspaceId;
+
+  if (!user || !schedulingClient || !workspaceId) {
+    return new Response(JSON.stringify({ success: false, error: 'Unauthorized or missing workspace' }), {
+      status: 401,
       headers: { 'Content-Type': 'application/json' },
     });
   }

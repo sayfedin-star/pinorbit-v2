@@ -598,6 +598,7 @@ import Layout from '../../layouts/Layout.astro';
   import { parsePinterestPayload } from '../../lib/competitors';
   import type { Competitor, CompetitorBoard, CompetitorSnapshot, CompetitorDeltaStats } from '../../lib/types';
   import { formatNumber } from '../../lib/ui-helpers';
+  import { getActiveWorkspaceId } from '../../lib/workspaces';
 
   const escHtml = (s: any) => String(s ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m] as string));
 
@@ -609,21 +610,28 @@ import Layout from '../../layouts/Layout.astro';
     return d as any;
   }
   async function getCompetitorLite(id: string) {
-    return apiJSON(`/api/admin/competitors?id=${encodeURIComponent(id)}&lite=1`);
+    const ws = getActiveWorkspaceId();
+    const wsParam = ws ? `&workspace_id=${encodeURIComponent(ws)}` : '';
+    return apiJSON(`/api/admin/competitors?id=${encodeURIComponent(id)}&lite=1${wsParam}`);
   }
   async function getCompetitorBoardsOnly(id: string) {
-    return apiJSON(`/api/admin/competitors?id=${encodeURIComponent(id)}&boards_only=1`);
+    const ws = getActiveWorkspaceId();
+    const wsParam = ws ? `&workspace_id=${encodeURIComponent(ws)}` : '';
+    return apiJSON(`/api/admin/competitors?id=${encodeURIComponent(id)}&boards_only=1${wsParam}`);
   }
   async function deleteCompetitor(id: string) {
-    await apiJSON('/api/admin/competitors', { method: 'DELETE', body: JSON.stringify({ id }) });
+    const ws = getActiveWorkspaceId();
+    await apiJSON('/api/admin/competitors', { method: 'DELETE', body: JSON.stringify({ id, workspace_id: ws }) });
     return true;
   }
   async function deleteCompetitorSnapshot(snapshotId: string) {
-    await apiJSON('/api/admin/competitors/snapshot', { method: 'DELETE', body: JSON.stringify({ snapshot_id: snapshotId }) });
+    const ws = getActiveWorkspaceId();
+    await apiJSON('/api/admin/competitors/snapshot', { method: 'DELETE', body: JSON.stringify({ snapshot_id: snapshotId, workspace_id: ws }) });
     return true;
   }
   async function ingestDevToolsPayload(competitorId: string, payloadText: string) {
-    return apiJSON('/api/admin/competitors/ingest', { method: 'POST', body: JSON.stringify({ competitor_id: competitorId, payload: payloadText }) });
+    const ws = getActiveWorkspaceId();
+    return apiJSON('/api/admin/competitors/ingest', { method: 'POST', body: JSON.stringify({ competitor_id: competitorId, workspace_id: ws, payload: payloadText }) });
   }
 
   // Get Competitor ID from URL Search Params
