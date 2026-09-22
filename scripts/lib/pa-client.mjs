@@ -396,3 +396,94 @@ export async function fetchAllAccounts(supaQueryFn, filters = {}, pageSize = 100
   return allAccounts;
 }
 
+/**
+ * Deterministic Greedy Bin-Packing (Longest Processing Time First) for matrix runner sharding.
+ *
+ * Balances workload across shard runners based on account weights (pins_count).
+ * - Defensively extracts weight: Number.isFinite(p) && p > 0 ? p : 0
+ * - Deterministic comparator: pins_count DESC, tie-breaker id.localeCompare
+ * - Assigns active accounts to the shard with minimal accumulated pins
+ * - Distributes inactive accounts evenly by fewest accounts count
+ * - Returns accounts for targetShard (safe for targetShard out-of-range or active.length < shardCount)
+ *
+ * @param {any[]} accounts - List of accounts fetched from database
+ * @param {number} shardCount - Number of shards (runners) in matrix
+ * @param {number} targetShard - Shard index to return (0-based)
+ * @returns {any[]} Accounts assigned to targetShard
+ */
+export function partitionAccountsLPT(accounts, shardCount = 1, targetShard = 0) {
+  if (!Array.isArray(accounts) || accounts.length === 0) return [];
+  const count = Math.max(1, parseInt(shardCount, 10) || 1);
+  const target = Math.max(0, Math.min(count - 1, parseInt(targetShard, 10) || 0));
+
+  if (count === 1) return [...accounts];
+
+  const getWeight = (acc) => {
+    const p = acc?.pins_count;
+    if (typeof p === 'number' && Number.isFinite(p) && p > 0) return p;
+    if (typeof p === 'string' && p.trim() !== '') {
+      const parsed = parseInt(p.trim(), 10);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    return 0;
+  };
+
+  const active = [];
+  const inactive = [];
+
+  for (const acc of accounts) {
+    if (!acc || typeof acc !== 'object') continue;
+    const isPaused = ['paused', 'cookie_expired', 'error'].includes(acc.status);
+    const isIngestDisabled = acc.ingest_enabled === false;
+    if (isPaused || isIngestDisabled) {
+      inactive.push(acc);
+    } else {
+      active.push(acc);
+    }
+  }
+
+  // Deterministic LPT sort: pins_count DESC, then id ASC for tie-breaking
+  active.sort((a, b) => {
+    const diff = getWeight(b) - getWeight(a);
+    if (diff !== 0) return diff;
+    return String(a?.id || '').localeCompare(String(b?.id || ''));
+  });
+
+  const shards = Array.from({ length: count }, (_, i) => ({
+    shardId: i,
+    accounts: [],
+    totalPins: 0,
+  }));
+
+  // Assign active accounts to shard with minimal totalPins
+  for (const acc of active) {
+    let minShard = shards[0];
+    for (let i = 1; i < count; i++) {
+      if (shards[i].totalPins < minShard.totalPins) {
+        minShard = shards[i];
+      } else if (
+        shards[i].totalPins === minShard.totalPins &&
+        shards[i].accounts.length < minShard.accounts.length
+      ) {
+        minShard = shards[i];
+      }
+    }
+    minShard.accounts.push(acc);
+    minShard.totalPins += getWeight(acc);
+  }
+
+  // Distribute inactive accounts round-robin by shard with fewest total accounts
+  inactive.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+  for (const acc of inactive) {
+    let minShard = shards[0];
+    for (let i = 1; i < count; i++) {
+      if (shards[i].accounts.length < minShard.accounts.length) {
+        minShard = shards[i];
+      }
+    }
+    minShard.accounts.push(acc);
+  }
+
+  return shards[target].accounts;
+}
+

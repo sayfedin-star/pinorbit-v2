@@ -6,6 +6,7 @@ import {
   writeToGas,
   resolveMonotonicOldestPin,
   fetchAllAccounts,
+  partitionAccountsLPT,
 } from '../../../scripts/lib/pa-client.mjs';
 import {
   aesKey,
@@ -365,8 +366,137 @@ describe('PinArchive Script Library & Pagination Suite (Phase 6d)', () => {
         idea_id: '987654321',
         url: 'https://www.pinterest.com/ideas/diy-crafts/987654321/',
       });
-      expect(formatted.reactions.type_1).toBe(10);
-      expect(formatted.reactions.type_2).toBe(3);
+      expect((formatted.reactions as any).type_1).toBe(10);
+      expect((formatted.reactions as any).type_2).toBe(3);
+    });
+  });
+
+  describe('4. Deterministic Greedy Bin-Packing (LPT) Sharding Suite', () => {
+    it('returns empty array when accounts input is empty or invalid', () => {
+      expect(partitionAccountsLPT([], 4, 0)).toEqual([]);
+      expect(partitionAccountsLPT(null as any, 4, 0)).toEqual([]);
+      expect(partitionAccountsLPT(undefined as any, 4, 0)).toEqual([]);
+    });
+
+    it('returns all accounts when shardCount is 1', () => {
+      const mockAccounts = [
+        { id: 'acc-1', username: 'user1', pins_count: 100, status: 'active', ingest_enabled: true },
+        { id: 'acc-2', username: 'user2', pins_count: 200, status: 'active', ingest_enabled: true },
+      ];
+      expect(partitionAccountsLPT(mockAccounts, 1, 0)).toEqual(mockAccounts);
+    });
+
+    it('clamps targetShard safely when out of bounds', () => {
+      const mockAccounts = [
+        { id: 'acc-1', username: 'user1', pins_count: 100, status: 'active', ingest_enabled: true },
+      ];
+      // targetShard 10 clamped to 3 (shardCount - 1)
+      const res = partitionAccountsLPT(mockAccounts, 4, 10);
+      expect(Array.isArray(res)).toBe(true);
+    });
+
+    it('handles boundary condition when active accounts < shardCount', () => {
+      const mockAccounts = [
+        { id: 'acc-1', username: 'user1', pins_count: 500, status: 'active', ingest_enabled: true },
+        { id: 'acc-2', username: 'user2', pins_count: 300, status: 'active', ingest_enabled: true },
+      ];
+      const shard0 = partitionAccountsLPT(mockAccounts, 4, 0);
+      const shard1 = partitionAccountsLPT(mockAccounts, 4, 1);
+      const shard2 = partitionAccountsLPT(mockAccounts, 4, 2);
+      const shard3 = partitionAccountsLPT(mockAccounts, 4, 3);
+
+      expect(shard0.length).toBe(1);
+      expect((shard0[0] as any).username).toBe('user1');
+      expect(shard1.length).toBe(1);
+      expect((shard1[0] as any).username).toBe('user2');
+      expect(shard2).toEqual([]);
+      expect(shard3).toEqual([]);
+    });
+
+    it('safely handles null, undefined, 0, negative, and string pins_count without NaN', () => {
+      const mockAccounts = [
+        { id: 'acc-1', username: 'user1', pins_count: null, status: 'active', ingest_enabled: true },
+        { id: 'acc-2', username: 'user2', pins_count: undefined, status: 'active', ingest_enabled: true },
+        { id: 'acc-3', username: 'user3', pins_count: 0, status: 'active', ingest_enabled: true },
+        { id: 'acc-4', username: 'user4', pins_count: -10, status: 'active', ingest_enabled: true },
+        { id: 'acc-5', username: 'user5', pins_count: '1500', status: 'active', ingest_enabled: true },
+        { id: 'acc-6', username: 'user6', pins_count: 'invalid', status: 'active', ingest_enabled: true },
+      ];
+      const shard0: any[] = partitionAccountsLPT(mockAccounts, 4, 0);
+      const shard1: any[] = partitionAccountsLPT(mockAccounts, 4, 1);
+      const shard2: any[] = partitionAccountsLPT(mockAccounts, 4, 2);
+      const shard3: any[] = partitionAccountsLPT(mockAccounts, 4, 3);
+
+      const all = [...shard0, ...shard1, ...shard2, ...shard3];
+      expect(all.length).toBe(6);
+      expect(new Set(all.map(a => a.id)).size).toBe(6);
+      // user5 (1500 pins) should be in shard0 as it's the largest
+      expect(shard0.some(a => a.username === 'user5')).toBe(true);
+    });
+
+    it('guarantees deterministic, 1-to-1 partitioning across all shards with zero duplicates or drops', () => {
+      const mockAccounts = Array.from({ length: 30 }, (_, i) => ({
+        id: `00000000-0000-0000-0000-${String(i).padStart(12, '0')}`,
+        username: `user_${i}`,
+        pins_count: (i * 37) % 500,
+        status: i % 5 === 0 ? 'paused' : 'active',
+        ingest_enabled: i % 7 !== 0,
+      }));
+
+      const shards: any[][] = [0, 1, 2, 3].map(s => partitionAccountsLPT(mockAccounts, 4, s));
+      const totalAssigned = shards.flat();
+
+      expect(totalAssigned.length).toBe(mockAccounts.length);
+      const uniqueIds = new Set(totalAssigned.map(a => a.id));
+      expect(uniqueIds.size).toBe(mockAccounts.length);
+    });
+
+    it('balances workload and eliminates straggler skew (P4 simulation)', () => {
+      // Simulate P4 accounts with one giant account (2000 pins) and medium/small accounts
+      const p4Accounts = [
+        { id: 'acc-giant', username: 'recipestower', pins_count: 1984, status: 'active', ingest_enabled: true },
+        { id: 'acc-m1', username: 'ragonuregaso', pins_count: 443, status: 'active', ingest_enabled: true },
+        { id: 'acc-m2', username: 'charandcoall', pins_count: 384, status: 'active', ingest_enabled: true },
+        { id: 'acc-m3', username: 'emmataste_', pins_count: 372, status: 'active', ingest_enabled: true },
+        { id: 'acc-m4', username: 'everydayeatskitchen', pins_count: 338, status: 'active', ingest_enabled: true },
+        { id: 'acc-m5', username: 'crispandgreenb', pins_count: 317, status: 'active', ingest_enabled: true },
+        { id: 'acc-m6', username: 'golikgfould', pins_count: 299, status: 'active', ingest_enabled: true },
+        { id: 'acc-m7', username: 'wifesrecipesbyme', pins_count: 291, status: 'active', ingest_enabled: true },
+        { id: 'acc-m8', username: 'vieauogondimy', pins_count: 255, status: 'active', ingest_enabled: true },
+        { id: 'acc-s1', username: 'ladleandbowl', pins_count: 243, status: 'active', ingest_enabled: true },
+        { id: 'acc-s2', username: 'whispe_sad', pins_count: 239, status: 'active', ingest_enabled: true },
+        { id: 'acc-s3', username: 'athleticlift', pins_count: 229, status: 'active', ingest_enabled: true },
+        { id: 'acc-s4', username: 'yarosesovik', pins_count: 228, status: 'active', ingest_enabled: true },
+        { id: 'acc-s5', username: 'hamdaymarot', pins_count: 184, status: 'active', ingest_enabled: true },
+        { id: 'acc-s6', username: 'cicisafriajit', pins_count: 164, status: 'active', ingest_enabled: true },
+        { id: 'acc-s7', username: 'sycksesalmamd2lu9', pins_count: 161, status: 'active', ingest_enabled: true },
+        { id: 'acc-s8', username: 'roseisabelle555', pins_count: 148, status: 'active', ingest_enabled: true },
+        { id: 'acc-s9', username: 'rikkibgutch', pins_count: 144, status: 'active', ingest_enabled: true },
+        { id: 'acc-s10', username: 'cicisentiafarida', pins_count: 142, status: 'active', ingest_enabled: true },
+        { id: 'acc-s11', username: 'cicidulurajis', pins_count: 139, status: 'active', ingest_enabled: true },
+        { id: 'acc-s12', username: 'stelbftwinn', pins_count: 131, status: 'active', ingest_enabled: true },
+        { id: 'acc-s13', username: 'amelia192819', pins_count: 129, status: 'active', ingest_enabled: true },
+        { id: 'acc-s14', username: 'zollinsadru', pins_count: 126, status: 'active', ingest_enabled: true },
+        { id: 'acc-s15', username: 'ciciputrilestariningsih', pins_count: 91, status: 'active', ingest_enabled: true },
+        { id: 'acc-s16', username: 'suzanneknox21', pins_count: 71, status: 'active', ingest_enabled: true },
+        { id: 'acc-s17', username: 'denisevigliottarecipes', pins_count: 70, status: 'active', ingest_enabled: true },
+        { id: 'acc-s18', username: 'cindymay3977', pins_count: 64, status: 'active', ingest_enabled: true },
+        { id: 'acc-s19', username: 'aliciacastillooo25', pins_count: 58, status: 'active', ingest_enabled: true },
+        { id: 'acc-s20', username: 'oneyaaron5800722', pins_count: 37, status: 'active', ingest_enabled: true },
+      ];
+
+      const shards: any[][] = [0, 1, 2, 3].map(s => partitionAccountsLPT(p4Accounts, 4, s));
+      const pinsPerShard: number[] = shards.map(list => list.reduce((sum: number, a: any) => sum + (a.pins_count || 0), 0));
+
+      const totalPins = pinsPerShard.reduce((a, b) => a + b, 0);
+      const avgPins = totalPins / 4;
+
+      // Under LPT, no shard deviates by more than 10% from the average
+      for (const shardTotal of pinsPerShard) {
+        const diffFromAvg = Math.abs(shardTotal - avgPins);
+        const percentDiff = (diffFromAvg / avgPins) * 100;
+        expect(percentDiff).toBeLessThan(10);
+      }
     });
   });
 });

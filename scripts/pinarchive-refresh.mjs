@@ -11,15 +11,15 @@ import {
   formatPin,
   extractPinData,
 } from './lib/pinterest.mjs';
-import { pushToIngest, fetchAllAccounts } from './lib/pa-client.mjs';
+import { pushToIngest, fetchAllAccounts, partitionAccountsLPT } from './lib/pa-client.mjs';
 
 const CFG = {
-  SLEEP_MS_MIN: 2500,
-  SLEEP_MS_MAX: 4000,
+  SLEEP_MS_MIN: 1500,
+  SLEEP_MS_MAX: 2500,
   BATCH_SIZE: 50,
   PUSH_SLEEP_MS: 500,
   CIRCUIT_BREAKER: 3,
-  CONCURRENCY: 3,
+  CONCURRENCY: 4,
 };
 
 const SHARD_COUNT = Math.max(1, parseInt(process.env.SHARD_COUNT || '1', 10) || 1);
@@ -175,7 +175,7 @@ async function main() {
   }
 
   const accountFilters = {
-    select: 'id,workspace_id,username,follower_count,status,ingest_enabled,last_run_at,interval_days',
+    select: 'id,workspace_id,username,follower_count,status,ingest_enabled,last_run_at,interval_days,pins_count',
   };
   if (REFRESH_WORKSPACE_ID) accountFilters.workspace = REFRESH_WORKSPACE_ID;
   if (REFRESH_USERNAME) accountFilters.username = REFRESH_USERNAME;
@@ -215,11 +215,11 @@ async function main() {
   }
   console.log('');
 
-  // Distribute accounts across shard matrix when processing multi-account workspaces
+  // Distribute accounts across shard matrix using Greedy Bin-Packing (LPT) based on pins_count
   const isTargetedRun = Boolean(REFRESH_USERNAME || REFRESH_USERNAMES.length > 0);
   const shardedAccounts = isTargetedRun
     ? accounts
-    : accounts.filter((_, idx) => idx % SHARD_COUNT === REFRESH_SHARD);
+    : partitionAccountsLPT(accounts, SHARD_COUNT, REFRESH_SHARD);
 
   console.log(`Found ${accounts.length} account(s) total — processing ${shardedAccounts.length} in shard ${REFRESH_SHARD + 1}/${SHARD_COUNT}\n`);
   const summary = { refreshed: 0, updated: 0, pushed: 0, errors: [] };
