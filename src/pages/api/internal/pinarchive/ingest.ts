@@ -151,6 +151,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   // 5. Ingest into Project 4 (PinArchive)
+  let resolvedAccountId: string | null = null;
   try {
     const pinArchive = dbClients.getPinArchive(runtimeEnv);
     const isTestEnv = typeof process !== 'undefined' && Boolean(process.env.VITEST);
@@ -252,6 +253,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         status: cachedAccount.status,
         ingest_enabled: cachedAccount.ingest_enabled,
       };
+      resolvedAccountId = cachedAccount.id;
     } else {
       const { data: dbAccount } = await pinArchive
         .from('pa_accounts')
@@ -262,6 +264,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
       if (dbAccount) {
         existingAccount = dbAccount;
+        resolvedAccountId = dbAccount.id;
       }
     }
 
@@ -311,6 +314,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     if (shouldSkipUpsert && cachedAccount) {
       accountId = cachedAccount.id;
+      resolvedAccountId = accountId;
     } else {
       const accountData: Record<string, any> = {
         workspace_id: workspaceId,
@@ -355,6 +359,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
 
       accountId = accountRow.id;
+      resolvedAccountId = accountId;
 
       // Update account cache
       if (useCache) {
@@ -442,14 +447,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
       // Fetch existing pin metric & enrichment state in chunks of 100 to avoid URI 414 errors
       const existingPins: any[] = [];
       const FETCH_CHUNK_SIZE = 100;
+      const chunks: string[][] = [];
       for (let i = 0; i < pinIds.length; i += FETCH_CHUNK_SIZE) {
-        const chunk = pinIds.slice(i, i + FETCH_CHUNK_SIZE);
-        const { data, error } = await pinArchive
-          .from('pa_pins')
-          .select('id, pin_id, saves, repins, comments, share_count, reactions, archived_at, annotations, board_pin_count, board_last_modified_at, seo_category, canonical_pin_id, utm_link, image_signature, dominant_color, seo_alt_text, title, description, link, domain, board_name, board_id, created_at_pinterest, image_url, node_id, is_video, is_product, promoted, price, currency, site_name')
-          .eq('workspace_id', workspaceId)
-          .in('pin_id', chunk);
+        chunks.push(pinIds.slice(i, i + FETCH_CHUNK_SIZE));
+      }
 
+      const chunkResults = await Promise.all(
+        chunks.map(chunk =>
+          pinArchive
+            .from('pa_pins')
+            .select('id, pin_id, saves, repins, comments, share_count, reactions, archived_at, annotations, board_pin_count, board_last_modified_at, seo_category, canonical_pin_id, utm_link, image_signature, dominant_color, seo_alt_text, title, description, link, domain, board_name, board_id, created_at_pinterest, image_url, node_id, is_video, is_product, promoted, price, currency, site_name')
+            .eq('workspace_id', workspaceId)
+            .in('pin_id', chunk)
+        )
+      );
+
+      for (const { data, error } of chunkResults) {
         if (error) {
           console.error('[ingest] Error querying existing pins chunk:', error);
           throw error;
@@ -742,6 +755,32 @@ export const POST: APIRoute = async ({ request, locals }) => {
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
+    try {
+      if (workspaceId && UUID_REGEX.test(workspaceId)) {
+        const pinArchive = dbClients.getPinArchive(runtimeEnv);
+        if (pinArchive && typeof pinArchive.from === 'function') {
+          const runRow: Record<string, any> = {
+            workspace_id: workspaceId,
+            trigger: (
+              ['cron', 'manual', 'backfill', 'refresh', 'audit_sweep'].includes(payload?.trigger)
+                ? payload.trigger
+                : 'cron'
+            ),
+            started_at: payload?.fetched_at || new Date().toISOString(),
+            finished_at: new Date().toISOString(),
+            status: 'failed',
+            message: String(err?.message || err).slice(0, 1000),
+          };
+          if (resolvedAccountId && UUID_REGEX.test(resolvedAccountId)) {
+            runRow.account_id = resolvedAccountId;
+          }
+          await pinArchive.from('pa_runs').insert(runRow);
+        }
+      }
+    } catch (runErr) {
+      console.warn('[PinArchive Ingest] Could not record failed pa_runs entry:', runErr);
+    }
+
     return new Response(
       JSON.stringify({ success: false, error: `Internal processing error: ${err.message || 'Unknown'}` }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

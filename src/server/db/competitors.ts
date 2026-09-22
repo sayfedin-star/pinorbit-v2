@@ -228,10 +228,14 @@ export const competitorsDb = {
     if (competitors.length === 0) return [];
 
     const client = dbClients.getCompetitors();
-    const rows = competitors.map(c => ({
-      ...c,
-      workspace_id: workspaceId,
-    }));
+    const dedupedMap = new Map<string, Partial<CompetitorRecord> & { username: string; workspace_id: string }>();
+    for (const c of competitors) {
+      if (!c?.username) continue;
+      const key = c.username.trim().toLowerCase();
+      const prev = dedupedMap.get(key) || {};
+      dedupedMap.set(key, { ...prev, ...c, username: key, workspace_id: workspaceId });
+    }
+    const rows = Array.from(dedupedMap.values());
 
     const CHUNK_SIZE = 500;
     const upsertedCompetitors: CompetitorRecord[] = [];

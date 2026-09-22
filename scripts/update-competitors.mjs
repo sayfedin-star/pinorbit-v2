@@ -119,13 +119,21 @@ async function processWorkspace(db, wsId, kek, options = {}) {
           const lastPinAt = userData.last_pin_save_time ? new Date(userData.last_pin_save_time).toISOString() : null;
 
           if (!options.dryRun) {
-            await db.from('competitors').update({
-              full_name: fullName, profile_reach: profileReach, profile_views: profileViews,
-              follower_count: followers, pin_count: pins, website_url: websiteUrl,
-              domain_verified: domainVerified, last_pin_at: lastPinAt, last_checked_at: now,
-            }).eq('id', comp.id);
-            await db.from('competitor_snapshots').insert({ competitor_id: comp.id, profile_reach: profileReach, profile_views: profileViews, follower_count: followers, pin_count: pins, recorded_at: now });
-            await db.from('competitor_daily_snapshots').upsert({ competitor_id: comp.id, snapshot_date: now.slice(0, 10), profile_reach: profileReach, profile_views: profileViews, follower_count: followers, pin_count: pins }, { onConflict: 'competitor_id,snapshot_date' });
+            await Promise.all([
+              db.from('competitors').update({
+                full_name: fullName, profile_reach: profileReach, profile_views: profileViews,
+                follower_count: followers, pin_count: pins, website_url: websiteUrl,
+                domain_verified: domainVerified, last_pin_at: lastPinAt, last_checked_at: now,
+              }).eq('id', comp.id),
+              db.from('competitor_snapshots').insert({
+                competitor_id: comp.id, profile_reach: profileReach, profile_views: profileViews,
+                follower_count: followers, pin_count: pins, recorded_at: now
+              }),
+              db.from('competitor_daily_snapshots').upsert({
+                competitor_id: comp.id, snapshot_date: now.slice(0, 10), profile_reach: profileReach,
+                profile_views: profileViews, follower_count: followers, pin_count: pins
+              }, { onConflict: 'competitor_id,snapshot_date' })
+            ]);
           }
           console.log(`✅ Profile Updated -> Reach: ${profileReach.toLocaleString()}, Views: ${profileViews.toLocaleString()}, Followers: ${followers.toLocaleString()}, Pins: ${pins.toLocaleString()}`);
         } else {
