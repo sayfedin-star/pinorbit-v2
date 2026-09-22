@@ -160,17 +160,28 @@ export const GET: APIRoute = async ({ request, locals }) => {
 
       if (!countMapPopulated) {
         try {
-          // Fallback: Query boards in chunks of 100 to prevent 414 URI Too Long
+          // Fallback: Query boards in chunks of 100 with pagination to avoid PostgREST row limits
           const CHUNK_SIZE = 100;
           for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
             const chunk = ids.slice(i, i + CHUNK_SIZE);
-            let bQuery = g.ok!.db.from('competitor_boards').select('competitor_id');
-            if (typeof (bQuery as any)?.eq === 'function') bQuery = (bQuery as any).eq('workspace_id', g.ok!.ws);
-            if (typeof (bQuery as any)?.in === 'function') bQuery = (bQuery as any).in('competitor_id', chunk);
-            if (typeof (bQuery as any)?.range === 'function') bQuery = (bQuery as any).range(0, 999);
-            const bRes = await bQuery;
-            for (const b of (bRes?.data || []) as any[]) {
-              countMap[b.competitor_id] = (countMap[b.competitor_id] || 0) + 1;
+            let offset = 0;
+            const B_BATCH = 1000;
+            while (true) {
+              let bQuery = g.ok!.db.from('competitor_boards').select('competitor_id');
+              if (typeof (bQuery as any)?.eq === 'function') bQuery = (bQuery as any).eq('workspace_id', g.ok!.ws);
+              if (typeof (bQuery as any)?.in === 'function') bQuery = (bQuery as any).in('competitor_id', chunk);
+              const hasRange = typeof (bQuery as any)?.range === 'function';
+              const bRes = await (hasRange ? (bQuery as any).range(offset, offset + B_BATCH - 1) : bQuery);
+              if (bRes?.error) {
+                console.warn('[AdminCompetitors] Boards count fallback query error:', bRes.error.message);
+                break;
+              }
+              const rows = bRes?.data || [];
+              for (const b of rows as any[]) {
+                countMap[b.competitor_id] = (countMap[b.competitor_id] || 0) + 1;
+              }
+              if (!hasRange || rows.length < B_BATCH || offset >= 50000) break;
+              offset += rows.length;
             }
           }
         } catch (e: any) {
@@ -197,14 +208,34 @@ export const GET: APIRoute = async ({ request, locals }) => {
   }
 
   const db = g.ok!.db;
+
+  const fetchAllBoardsForCompetitor = async (competitorId: string, workspaceId: string): Promise<{ data: any[]; error: any }> => {
+    const allBoards: any[] = [];
+    let bOffset = 0;
+    const B_PAGE = 1000;
+    while (true) {
+      let bQuery = db
+        .from('competitor_boards')
+        .select('*')
+        .eq('competitor_id', competitorId)
+        .eq('workspace_id', workspaceId)
+        .order('pin_count', { ascending: false, nullsFirst: false });
+
+      const hasRange = typeof (bQuery as any)?.range === 'function';
+      const bRes = await (hasRange ? (bQuery as any).range(bOffset, bOffset + B_PAGE - 1) : bQuery);
+      if (bRes?.error) return { data: allBoards, error: bRes.error };
+      const rows = bRes?.data || [];
+      allBoards.push(...rows);
+      if (!hasRange || rows.length < B_PAGE || allBoards.length >= 10000) break;
+      bOffset += rows.length;
+    }
+    return { data: allBoards, error: null };
+  };
+
   if (boardsOnly) {
-    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false, nullsFirst: false });
-    const { data: boards, error: bErr } = await (typeof (boardsQuery as any)?.range === 'function'
-      ? (boardsQuery as any).range(0, 999)
-      : boardsQuery);
+    const { data: allBoards, error: bErr } = await fetchAllBoardsForCompetitor(id, g.ok!.ws);
     if (bErr) return json({ error: bErr.message }, 500);
-    const boardsArr = boards || [];
-    return json({ success: true, truncated: boardsArr.length >= 1000, boards: boardsArr });
+    return json({ success: true, truncated: allBoards.length >= 10000, boards: allBoards });
   }
 
   const comp = await db.from('competitors').select('*').eq('id', id).eq('workspace_id', g.ok!.ws).maybeSingle();
@@ -238,14 +269,16 @@ export const GET: APIRoute = async ({ request, locals }) => {
       strategy_age_days = Math.max(0, Math.floor(diffMs / 86400000));
     }
   } else {
-    const boardsQuery = db.from('competitor_boards').select('*').eq('competitor_id', id).eq('workspace_id', g.ok!.ws).order('pin_count', { ascending: false, nullsFirst: false });
-    const [snaps, boards, topPins] = await Promise.all([
+    const [snaps, boardsRes, topPins] = await Promise.all([
       db.from('competitor_snapshots').select('*').eq('competitor_id', id).order('recorded_at', { ascending: false }).limit(100),
-      (typeof (boardsQuery as any)?.range === 'function' ? (boardsQuery as any).range(0, 999) : boardsQuery),
+      fetchAllBoardsForCompetitor(id, g.ok!.ws),
       db.from('competitor_top_pins').select('*').eq('competitor_id', id).order('save_count', { ascending: false }).limit(10),
     ]);
+    if (boardsRes.error) {
+      console.warn('[AdminCompetitors] Error fetching boards in detail route:', boardsRes.error.message);
+    }
     snapsList = (snaps.data || []).slice().reverse();
-    boardsList = boards.data || [];
+    boardsList = boardsRes.data || [];
     topPinsList = topPins.data || [];
   }
 

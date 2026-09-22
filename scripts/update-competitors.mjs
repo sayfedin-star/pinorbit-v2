@@ -55,6 +55,21 @@ const resourceUrl = (username, resource, options) =>
 // ── Main: per-workspace processing ──
 async function processWorkspace(db, wsId, kek, options = {}) {
   const now = new Date().toISOString();
+  const parseIsoSafe = (val, fallback = null) => {
+    if (val === null || val === undefined) return fallback;
+    if (typeof val === 'string' && val.trim() === '') return fallback;
+    try {
+      const num = typeof val === 'number' ? val : (typeof val === 'string' && /^\d+$/.test(val.trim()) ? Number(val.trim()) : null);
+      if (num !== null && Number.isFinite(num)) {
+        const d = new Date(num < 1e11 ? num * 1000 : num);
+        return isNaN(d.getTime()) ? fallback : d.toISOString();
+      }
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? fallback : d.toISOString();
+    } catch {
+      return fallback;
+    }
+  };
   const cookie = await getVaultCookie(db, wsId, kek);
   if (!cookie) {
     return { ok: false, error: 'No Pinterest cookie available in vault for this workspace' };
@@ -116,7 +131,7 @@ async function processWorkspace(db, wsId, kek, options = {}) {
           const fullName = userData.full_name || username;
           const websiteUrl = userData.website_url || (userData.domain_url ? `https://${userData.domain_url}` : null);
           const domainVerified = !!userData.domain_verified;
-          const lastPinAt = userData.last_pin_save_time ? new Date(userData.last_pin_save_time).toISOString() : null;
+          const lastPinAt = parseIsoSafe(userData.last_pin_save_time, null);
 
           if (!options.dryRun) {
             await Promise.all([
@@ -141,9 +156,10 @@ async function processWorkspace(db, wsId, kek, options = {}) {
         }
       }
 
-      // ── STEP 2: Boards (bookmark pagination, up to 20 pages) ──
+      // ── STEP 2: Boards (bookmark pagination, up to 100 pages / 5000 boards) ──
       let allBoards = []; let bookmark = null; let hasMore = true; let pageCount = 0;
-      const maxPages = 20;
+      const envMax = process.env.MAX_BOARDS_PAGES ? parseInt(process.env.MAX_BOARDS_PAGES, 10) : null;
+      const maxPages = Number.isFinite(envMax) && envMax > 0 ? envMax : 100;
       while (hasMore && pageCount < maxPages) {
         pageCount++;
         const optionsPayload = {
@@ -172,8 +188,13 @@ async function processWorkspace(db, wsId, kek, options = {}) {
           const boardsList = responseData?.data || [];
           allBoards.push(...boardsList.filter(b => b.type === 'board' || !b.type));
           const nextBookmark = responseData?.bookmark;
-          if (nextBookmark && nextBookmark !== '-end-' && boardsList.length > 0) bookmark = nextBookmark;
-          else hasMore = false;
+          if (nextBookmark && nextBookmark !== '-end-' && nextBookmark !== bookmark && boardsList.length > 0) {
+            bookmark = nextBookmark;
+            // Pacing delay (250–500ms) between pages to protect IP against rapid-fire requests
+            await new Promise(r => setTimeout(r, 250 + Math.random() * 250));
+          } else {
+            hasMore = false;
+          }
         } catch (err) {
           console.error(`❌ Error fetching boards page ${pageCount} for @${username}:`, err.message);
           break;
@@ -184,7 +205,7 @@ async function processWorkspace(db, wsId, kek, options = {}) {
         const seenBoardIds = new Set();
         const uniqueBoards = [];
         for (const b of allBoards) {
-          const bId = String(b.id || b.node_id || '').trim();
+          const bId = String(b?.id ?? b?.node_id ?? '').trim();
           if (bId && bId !== 'undefined' && bId !== 'null' && !seenBoardIds.has(bId)) {
             seenBoardIds.add(bId);
             uniqueBoards.push(b);
@@ -193,11 +214,12 @@ async function processWorkspace(db, wsId, kek, options = {}) {
 
         const boardsToUpsert = uniqueBoards.map(b => {
           const boardUrl = b.url ? (b.url.startsWith('http') ? b.url : `https://www.pinterest.com${b.url}`) : `https://www.pinterest.com/${username}/`;
-          const realCreatedAt = b.created_at ? new Date(b.created_at).toISOString() : now;
-          const realLastPinnedAt = (b.board_order_modified_at || b.last_pinned_by_owner_at || b.last_pinned_at) ? new Date(b.board_order_modified_at || b.last_pinned_by_owner_at || b.last_pinned_at).toISOString() : now;
+          const realCreatedAt = parseIsoSafe(b.created_at, null);
+          const rawLastPinned = b.board_order_modified_at || b.last_pinned_by_owner_at || b.last_pinned_at;
+          const realLastPinnedAt = parseIsoSafe(rawLastPinned, null);
           return {
             workspace_id: wsId,
-            competitor_id: comp.id, board_id: String(b.id || b.node_id).trim(),
+            competitor_id: comp.id, board_id: String(b?.id ?? b?.node_id ?? '').trim(),
             name: b.name || 'Untitled Board', description: b.description || '',
             pin_count: Number(b.pin_count || 0) || 0, follower_count: Number(b.follower_count || 0) || 0,
             url: boardUrl, board_created_at: realCreatedAt, last_pinned_at: realLastPinnedAt,
