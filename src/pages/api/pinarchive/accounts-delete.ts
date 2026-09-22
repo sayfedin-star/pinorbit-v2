@@ -42,50 +42,61 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return json({ success: false, error: e.message || 'Forbidden: Admin access required' }, errorStatus(e));
   }
 
-  const accountIds = body.account_ids;
-  if (!Array.isArray(accountIds) || accountIds.length === 0) {
+  const rawAccountIds = body.account_ids;
+  if (!Array.isArray(rawAccountIds) || rawAccountIds.length === 0) {
     return json({ success: false, error: 'account_ids must be a non-empty array of UUIDs.' }, 400);
   }
 
-  for (const id of accountIds) {
+  for (const id of rawAccountIds) {
     if (typeof id !== 'string' || !UUID_REGEX.test(id)) {
       return json({ success: false, error: `Invalid account identifier format: ${id}` }, 400);
     }
   }
 
+  const accountIds = Array.from(new Set(rawAccountIds));
+
   try {
     const db = dbClients.getPinArchive(locals.runtime?.env);
 
-    // 1. Count accounts to be deleted
-    const { count, error: countErr } = await db
-      .from('pa_accounts')
-      .select('id', { count: 'exact', head: true })
-      .eq('workspace_id', wsCtx.workspaceId)
-      .in('id', accountIds);
+    // 1. Count accounts to be deleted in safe chunks of 100
+    let totalCount = 0;
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < accountIds.length; i += CHUNK_SIZE) {
+      const chunk = accountIds.slice(i, i + CHUNK_SIZE);
+      const { count, error: countErr } = await db
+        .from('pa_accounts')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', wsCtx.workspaceId)
+        .in('id', chunk);
 
-    if (countErr) {
-      return json({ success: false, error: countErr.message }, 500);
+      if (countErr) {
+        return json({ success: false, error: countErr.message }, 500);
+      }
+      totalCount += (count || 0);
     }
 
-    if (!count || count === 0) {
+    if (totalCount === 0) {
       return json({ success: true, deleted: 0, message: 'No matching accounts found in workspace.' });
     }
 
     // 2. Delete accounts (FK cascades handle pa_pins, pa_pin_metrics, pa_runs)
     // Y5 deferred: GAS v2.6.3 will add delete_account handler; UI Pause guard (v1.2) is active
-    const { error: delErr } = await db
-      .from('pa_accounts')
-      .delete()
-      .eq('workspace_id', wsCtx.workspaceId)
-      .in('id', accountIds);
+    for (let i = 0; i < accountIds.length; i += CHUNK_SIZE) {
+      const chunk = accountIds.slice(i, i + CHUNK_SIZE);
+      const { error: delErr } = await db
+        .from('pa_accounts')
+        .delete()
+        .eq('workspace_id', wsCtx.workspaceId)
+        .in('id', chunk);
 
-    if (delErr) {
-      return json({ success: false, error: delErr.message }, 500);
+      if (delErr) {
+        return json({ success: false, error: delErr.message }, 500);
+      }
     }
 
     return json({
       success: true,
-      deleted: count,
+      deleted: totalCount,
     });
   } catch (e: any) {
     return json({ success: false, error: e.message || 'Internal Server Error' }, 500);

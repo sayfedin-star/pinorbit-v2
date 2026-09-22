@@ -362,17 +362,20 @@ export function resolveMonotonicOldestPin(baselineIso, candidateIso) {
 export async function fetchAllAccounts(supaQueryFn, filters = {}, pageSize = 1000) {
   const allAccounts = [];
   let lastId = null;
+  const selectClause = filters.select
+    ? (filters.select.split(',').map(s => s.trim()).includes('id') ? filters.select : `id,${filters.select}`)
+    : 'id,workspace_id,username,oldest_pin_at,pins_count';
 
   while (true) {
-    let params = `select=id,workspace_id,username,oldest_pin_at,pins_count&order=id.asc&limit=${pageSize}`;
+    let params = `select=${selectClause}&order=id.asc&limit=${pageSize}`;
     if (filters.workspace) {
-      params += `&workspace_id=eq.${filters.workspace}`;
+      params += `&workspace_id=eq.${encodeURIComponent(filters.workspace)}`;
     }
     if (filters.username) {
-      params += `&username=eq.${filters.username.toLowerCase().replace(/^@/, '')}`;
+      params += `&username=eq.${encodeURIComponent(filters.username.toLowerCase().replace(/^@/, ''))}`;
     }
     if (lastId) {
-      params += `&id=gt.${lastId}`;
+      params += `&id=gt.${encodeURIComponent(lastId)}`;
     }
 
     const batch = await supaQueryFn('pa_accounts', params);
@@ -383,7 +386,11 @@ export async function fetchAllAccounts(supaQueryFn, filters = {}, pageSize = 100
     if (batch.length < pageSize) {
       break;
     }
-    lastId = batch[batch.length - 1].id;
+    const nextLastId = batch[batch.length - 1]?.id;
+    if (!nextLastId || nextLastId === lastId) {
+      break;
+    }
+    lastId = nextLastId;
   }
 
   return allAccounts;

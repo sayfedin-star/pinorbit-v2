@@ -39,16 +39,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return json({ success: false, error: 'ingest_enabled must be a boolean.' }, 400);
   }
 
-  const accountIds = body.account_ids;
-  if (!Array.isArray(accountIds) || accountIds.length === 0) {
+  const rawAccountIds = body.account_ids;
+  if (!Array.isArray(rawAccountIds) || rawAccountIds.length === 0) {
     return json({ success: false, error: 'account_ids must be a non-empty array of UUIDs.' }, 400);
   }
 
-  for (const id of accountIds) {
+  for (const id of rawAccountIds) {
     if (typeof id !== 'string' || !UUID_REGEX.test(id)) {
       return json({ success: false, error: `Invalid account identifier format: ${id}` }, 400);
     }
   }
+
+  const accountIds = Array.from(new Set(rawAccountIds));
 
   let wsCtx;
   try {
@@ -61,21 +63,27 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const db = dbClients.getPinArchive(locals.runtime?.env);
 
     const newStatus = body.ingest_enabled ? 'active' : 'paused';
-    const updateQuery: any = db
-      .from('pa_accounts')
-      .update({
-        ingest_enabled: body.ingest_enabled,
-        status: newStatus,
-      })
-      .eq('workspace_id', wsCtx.workspaceId)
-      .in('id', accountIds);
-    const { data, error, count } = await updateQuery.select('id', { count: 'exact' });
+    let updatedCount = 0;
+    const CHUNK_SIZE = 100;
 
-    if (error) {
-      return json({ success: false, error: error.message }, 500);
+    for (let i = 0; i < accountIds.length; i += CHUNK_SIZE) {
+      const chunk = accountIds.slice(i, i + CHUNK_SIZE);
+      const updateQuery: any = db
+        .from('pa_accounts')
+        .update({
+          ingest_enabled: body.ingest_enabled,
+          status: newStatus,
+        })
+        .eq('workspace_id', wsCtx.workspaceId)
+        .in('id', chunk);
+      const { data, error, count } = await updateQuery.select('id', { count: 'exact' });
+
+      if (error) {
+        return json({ success: false, error: error.message }, 500);
+      }
+
+      updatedCount += count !== null && count !== undefined ? count : (data?.length || 0);
     }
-
-    const updatedCount = count !== null && count !== undefined ? count : (data?.length || 0);
 
     return json({
       success: true,

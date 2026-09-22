@@ -21,7 +21,7 @@ import path from 'path';
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { aesKey, decryptCookieValue, resolveKek, getVaultCookie } from './lib/vault.mjs';
-import { writeToGas, pushToIngest as pushToIngestClient } from './lib/pa-client.mjs';
+import { writeToGas, pushToIngest as pushToIngestClient, fetchAllAccounts } from './lib/pa-client.mjs';
 
 const CFG = {
   PAGE_SIZE: 50,
@@ -46,10 +46,10 @@ const {
 } = process.env;
 
 const DISCOVERY_WORKSPACE_ID = (process.env.DISCOVERY_WORKSPACE_ID || process.env.WORKSPACE_ID || process.env.WORKSPACE_FILTER || process.env.DISCOVERY_WORKSPACE_FILTER || '').trim();
-const DISCOVERY_USERNAME = (process.env.DISCOVERY_USERNAME || process.env.USERNAME || '').trim().toLowerCase();
+const DISCOVERY_USERNAME = (process.env.DISCOVERY_USERNAME || process.env.USERNAME || '').trim().toLowerCase().replace(/^@/, '');
 const DISCOVERY_USERNAMES = (process.env.DISCOVERY_USERNAMES || process.env.USERNAMES || '')
   .split(',')
-  .map(s => s.trim().toLowerCase())
+  .map(s => s.trim().toLowerCase().replace(/^@/, ''))
   .filter(Boolean);
 const IS_AUDIT_SWEEP = (process.env.AUDIT_SWEEP || '').trim().toLowerCase() === 'true';
 const FORCE_RUN = (process.env.FORCE_RUN || process.env.DISCOVERY_FORCE || '').trim().toLowerCase() === 'true';
@@ -413,11 +413,14 @@ async function main() {
     }
   }
 
-  // Load accounts from P4
-  let accounts = await supaQuery(
-    'pa_accounts',
-    'select=id,workspace_id,username,follower_count,status,ingest_enabled,interval_days,next_run_at,last_run_at,backfill_status,backfill_cursor,pins_count,oldest_pin_at&order=username.asc'
-  );
+  // Load accounts from P4 via keyset cursor pagination
+  const accountFilters = {
+    select: 'id,workspace_id,username,follower_count,status,ingest_enabled,interval_days,next_run_at,last_run_at,backfill_status,backfill_cursor,pins_count,oldest_pin_at',
+  };
+  if (DISCOVERY_WORKSPACE_ID) accountFilters.workspace = DISCOVERY_WORKSPACE_ID;
+  if (DISCOVERY_USERNAME) accountFilters.username = DISCOVERY_USERNAME;
+
+  let accounts = await fetchAllAccounts(supaQuery, accountFilters);
   if (!accounts.length) {
     console.log('No accounts found in database.');
     return;
@@ -554,7 +557,7 @@ async function main() {
       while (true) {
         const rows = await supaQuery(
           'pa_pins',
-          `select=pin_id&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}&limit=${PAGE_CHUNK}&offset=${offset}`
+          `select=pin_id&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}&order=pin_id.asc&limit=${PAGE_CHUNK}&offset=${offset}`
         );
         if (!Array.isArray(rows) || rows.length === 0) break;
         for (const r of rows) {
