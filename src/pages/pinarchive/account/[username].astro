@@ -1592,6 +1592,9 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
         } else if (currentSort === 'delta_7d') {
           activePace = '7d';
           updatePaceButtonsUI();
+        } else {
+          activePace = 'all';
+          updatePaceButtonsUI();
         }
         currentPage = 1;
         loadAccountPins();

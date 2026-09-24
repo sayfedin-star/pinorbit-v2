@@ -317,5 +317,85 @@ describe('PinArchive Account Growth Pace Suite', () => {
       const counterText = `${linkedIdeas.length} linked ideas · ${visualTags.length} visual tags`;
       expect(counterText).toBe('9 linked ideas · 7 visual tags');
     });
+
+    it('sets activePace to all when selecting non-delta sorts in dropdown', () => {
+      let activePace: '24h' | '3d' | '7d' | 'all' = '24h';
+      let currentSort = 'delta_saves';
+
+      const handleDropdownSortChange = (newSort: string) => {
+        currentSort = newSort;
+        if (currentSort === 'delta_saves') {
+          activePace = '24h';
+        } else if (currentSort === 'delta_3d') {
+          activePace = '3d';
+        } else if (currentSort === 'delta_7d') {
+          activePace = '7d';
+        } else {
+          activePace = 'all';
+        }
+      };
+
+      handleDropdownSortChange('saves');
+      expect(activePace).toBe('all');
+
+      handleDropdownSortChange('velocity');
+      expect(activePace).toBe('all');
+
+      handleDropdownSortChange('delta_3d');
+      expect(activePace).toBe('3d');
+
+      handleDropdownSortChange('delta_saves');
+      expect(activePace).toBe('24h');
+    });
+
+    it('deduplicates annotations case-insensitively and handles diverse URL formats safely', () => {
+      const rawAnnotations = [
+        { name: 'Potato Shepard Pie', url: '/ideas/potato/123/', idea_id: '123' },
+        { name: 'potato shepard pie', url: '/ideas/potato/123/', idea_id: '123' }, // duplicate (case variant)
+        { name: 'Full Url Idea', url: 'https://www.pinterest.com/ideas/full/456/', idea_id: null },
+        { name: 'Visual Tag One', url: null, idea_id: null },
+        { name: 'Visual Tag One', url: null, idea_id: null }, // duplicate
+      ];
+
+      const linkedIdeas: Array<{ name: string; url: string }> = [];
+      const visualTags: Array<{ name: string }> = [];
+      const seenNames = new Set<string>();
+
+      rawAnnotations.forEach((a: any) => {
+        const name = typeof a === 'string' ? a.trim() : String(a?.name || '').trim();
+        if (!name) return;
+        const lower = name.toLowerCase();
+        if (seenNames.has(lower)) return;
+        seenNames.add(lower);
+
+        const url = typeof a === 'object' && a?.url ? String(a.url).trim() : null;
+        const ideaId = typeof a === 'object' && a?.idea_id ? String(a.idea_id).trim() : null;
+
+        if (url || ideaId) {
+          let fullUrl = '';
+          if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+            fullUrl = url;
+          } else if (url && url.startsWith('/')) {
+            fullUrl = `https://www.pinterest.com${url}`;
+          } else if (url) {
+            fullUrl = `https://www.pinterest.com/${url}`;
+          } else if (ideaId) {
+            fullUrl = `https://www.pinterest.com/ideas/${encodeURIComponent(name)}/${encodeURIComponent(ideaId)}/`;
+          } else {
+            fullUrl = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(name)}`;
+          }
+          linkedIdeas.push({ name, url: fullUrl });
+        } else {
+          visualTags.push({ name });
+        }
+      });
+
+      expect(linkedIdeas.length).toBe(2);
+      expect(linkedIdeas[0].url).toBe('https://www.pinterest.com/ideas/potato/123/');
+      expect(linkedIdeas[1].url).toBe('https://www.pinterest.com/ideas/full/456/');
+      expect(visualTags.length).toBe(1);
+      expect(visualTags[0].name).toBe('Visual Tag One');
+    });
   });
 });
+

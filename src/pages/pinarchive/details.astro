@@ -1017,19 +1017,26 @@ import Layout from '../../layouts/Layout.astro';
         
         const linkedIdeas: Array<{ name: string; url: string; idea_id?: string | null }> = [];
         const visualTags: Array<{ name: string }> = [];
+        const seenNames = new Set<string>();
 
         rawAnnotations.forEach((a: any) => {
           const name = typeof a === 'string' ? a.trim() : String(a?.name || '').trim();
           if (!name) return;
+          const lower = name.toLowerCase();
+          if (seenNames.has(lower)) return;
+          seenNames.add(lower);
+
           const url = typeof a === 'object' && a?.url ? String(a.url).trim() : null;
           const ideaId = typeof a === 'object' && a?.idea_id ? String(a.idea_id).trim() : null;
 
           if (url || ideaId) {
             let fullUrl = '';
-            if (url && url.startsWith('/')) {
-              fullUrl = `https://www.pinterest.com${url}`;
-            } else if (url && (url.startsWith('https://www.pinterest.com/') || url.startsWith('https://pinterest.com/'))) {
+            if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
               fullUrl = url;
+            } else if (url && url.startsWith('/')) {
+              fullUrl = `https://www.pinterest.com${url}`;
+            } else if (url) {
+              fullUrl = `https://www.pinterest.com/${url}`;
             } else if (ideaId) {
               fullUrl = `https://www.pinterest.com/ideas/${encodeURIComponent(name)}/${encodeURIComponent(ideaId)}/`;
             } else {
