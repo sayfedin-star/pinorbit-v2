@@ -296,7 +296,12 @@ export function renderPinCardHtml(p: any, options: PinCardRenderOptions = {}): s
       if (!name) return '';
       let targetUrl = '';
       if (typeof a === 'object' && a?.url) {
-        targetUrl = `https://www.pinterest.com${a.url.startsWith('/') ? a.url : '/' + a.url}`;
+        const u = String(a.url).trim();
+        if (u.startsWith('https://') || u.startsWith('http://')) {
+          targetUrl = u.startsWith('http://') ? 'https://' + u.slice(7) : u;
+        } else {
+          targetUrl = `https://www.pinterest.com${u.startsWith('/') ? u : '/' + u}`;
+        }
       } else if (typeof a === 'object' && a?.idea_id) {
         targetUrl = `https://www.pinterest.com/ideas/${encodeURIComponent(name)}/${a.idea_id}/`;
       } else {
@@ -436,7 +441,12 @@ export function renderPinCardHtml(p: any, options: PinCardRenderOptions = {}): s
     if (!name) return '';
     let targetUrl = '';
     if (typeof a === 'object' && a?.url) {
-      targetUrl = `https://www.pinterest.com${a.url.startsWith('/') ? a.url : '/' + a.url}`;
+      const u = String(a.url).trim();
+      if (u.startsWith('https://') || u.startsWith('http://')) {
+        targetUrl = u.startsWith('http://') ? 'https://' + u.slice(7) : u;
+      } else {
+        targetUrl = `https://www.pinterest.com${u.startsWith('/') ? u : '/' + u}`;
+      }
     } else if (typeof a === 'object' && a?.idea_id) {
       targetUrl = `https://www.pinterest.com/ideas/${encodeURIComponent(name)}/${a.idea_id}/`;
     } else {

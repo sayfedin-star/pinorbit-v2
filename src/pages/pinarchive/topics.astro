@@ -821,7 +821,8 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
   }
 
   function initTopics() {
-    const topicName = new URLSearchParams(window.location.search).get('name')?.trim();
+    const urlParams = new URLSearchParams(window.location.search);
+    const topicName = (urlParams.get('name') || urlParams.get('q'))?.trim();
     if (topicName) {
       loadClusterDetail(topicName);
 
@@ -887,7 +888,8 @@ import SectionHeader from '../../components/ui/SectionHeader.astro';
     const refreshBtn = document.getElementById('refresh-topics-btn');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => {
-        const currentName = new URLSearchParams(window.location.search).get('name')?.trim() || cachedTopicName;
+        const qParams = new URLSearchParams(window.location.search);
+        const currentName = (qParams.get('name') || qParams.get('q'))?.trim() || cachedTopicName;
         if (currentName) loadClusterDetail(currentName);
         else loadClusterList();
       });

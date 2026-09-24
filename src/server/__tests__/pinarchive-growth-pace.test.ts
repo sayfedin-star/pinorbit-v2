@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GET as pinsHandler } from '../../pages/api/pinarchive/pins';
+import { renderPinCardHtml } from '../../lib/pinarchive/pin-card-render';
 
 const { mockWsId, mockAccId, mockUser, mockPinArchiveClient } = vi.hoisted(() => ({
   mockWsId: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
@@ -396,6 +397,30 @@ describe('PinArchive Account Growth Pace Suite', () => {
       expect(visualTags.length).toBe(1);
       expect(visualTags[0].name).toBe('Visual Tag One');
     });
+
+    it('renderPinCardHtml generates valid URLs without duplicating pinterest.com for absolute links', () => {
+      const pin = {
+        id: 'test-pin-1',
+        pin_id: '123456789',
+        title: 'Test Pin',
+        saves: 100,
+        repins: 20,
+        annotations: [
+          { name: 'Absolute URL Tag', url: 'https://www.pinterest.com/ideas/my-idea/999/' },
+          { name: 'Relative URL Tag', url: '/ideas/other-idea/888/' },
+        ],
+      };
+
+      const htmlAccount = renderPinCardHtml(pin, { viewMode: 'account' });
+      expect(htmlAccount).toContain('href="https://www.pinterest.com/ideas/my-idea/999/"');
+      expect(htmlAccount).not.toContain('pinterest.com/https://');
+      expect(htmlAccount).toContain('href="https://www.pinterest.com/ideas/other-idea/888/"');
+
+      const htmlTopics = renderPinCardHtml(pin, { viewMode: 'topics' });
+      expect(htmlTopics).toContain('href="https://www.pinterest.com/ideas/my-idea/999/"');
+      expect(htmlTopics).not.toContain('pinterest.com/https://');
+    });
   });
 });
+
 
