@@ -813,7 +813,7 @@ import Layout from '../../layouts/Layout.astro';
     });
   }
 
-  async function loadPinDetail() {
+  async function loadPinDetail(retries = 2) {
     const urlParams = new URLSearchParams(window.location.search);
     const pinId = urlParams.get('id');
 

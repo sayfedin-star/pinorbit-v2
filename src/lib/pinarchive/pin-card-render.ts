@@ -114,7 +114,7 @@ export function renderAnomalyBadge(anomaly?: string | null): string {
   return '';
 }
 
-export function renderDeltaBadge(delta: number, metric: 'saves' | 'repins'): string {
+export function renderDeltaBadge(delta: number, _metric?: 'saves' | 'repins'): string {
   if (delta === 0) return '';
   const isPos = delta > 0;
   const color = isPos ? 'text-emerald-500 bg-emerald-500/10' : 'text-rose-500 bg-rose-500/10';
