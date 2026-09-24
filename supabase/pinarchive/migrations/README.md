@@ -8,6 +8,7 @@
 | 12 | 20260910040000_update_pa_topic_pins_limit.sql | Add pagination, total_count, and dual-indexed @> to pa_topic_pins | 20260910010000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
 | 13 | 20260910020000_add_pg_trgm_pa_pins_title_idx.sql | Enable pg_trgm in extensions and create GIN trigram index on pa_pins (title) | 20260910040000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
 | 14 | 20260910030000_create_pa_account_stats_delta.sql | Summary table pa_account_stats with O(1) delta trigger, init trigger, and fast sums RPC | 20260910020000 | Apply via Supabase MCP / SQL Editor (Project kuuugffvyokywtgmdrfk) |
+| 15 | 20260924000000_fix_pa_account_pins_page_from_clause.sql | Fix missing FROM numbered n in pa_account_pins_page lateral CTE and add DISTINCT ON deduplication in pa_ingest_pin_batch | 20260922000001 | Applied via Supabase MCP (Project kuuugffvyokywtgmdrfk) |
 
 
 

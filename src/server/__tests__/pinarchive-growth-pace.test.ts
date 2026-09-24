@@ -252,5 +252,70 @@ describe('PinArchive Account Growth Pace Suite', () => {
       // all pace: p1 and p2 have saves > 0
       expect(filterChanged(pins, 'all').map((p) => p.id)).toEqual(['p1', 'p2']);
     });
+
+    it('re-aligns currentSort when clicking active pace if currentSort was divergent', () => {
+      let activePace: '24h' | '3d' | '7d' | 'all' = '24h';
+      let currentSort = 'saves'; // Desynchronized state (e.g. user selected Total Saves from dropdown)
+      let headerSort: { sort: string; asc: boolean } | null = null;
+      let loaded = false;
+
+      const handlePaceClick = (tf: '24h' | '3d' | '7d' | 'all') => {
+        const targetSort = tf === '24h' ? 'delta_saves' : tf === '3d' ? 'delta_3d' : tf === '7d' ? 'delta_7d' : 'saves';
+        if (tf === activePace && currentSort === targetSort && !headerSort) return;
+        activePace = tf;
+        headerSort = null;
+        currentSort = targetSort;
+        loaded = true;
+      };
+
+      // Clicking 24h when currentSort is 'saves' SHOULD NOT return early; it must re-align to delta_saves
+      handlePaceClick('24h');
+      expect(currentSort).toBe('delta_saves');
+      expect(loaded).toBe(true);
+
+      // Clicking 24h again when already aligned SHOULD return early
+      loaded = false;
+      handlePaceClick('24h');
+      expect(loaded).toBe(false);
+    });
+
+    it('classifies annotations into true linked ideas vs visual recognition tags', () => {
+      const rawAnnotations = [
+        { name: 'Easy Dinner Recipes Shepards Pie', url: '/ideas/easy-dinner-recipes-shepards-pie/945637318053/', idea_id: '945637318053' },
+        { name: 'Potato Shepherd\'s Pie', url: '/ideas/potato-shepherd\'s-pie/926241892080/', idea_id: '926241892080' },
+        { name: 'Shepherds Pie Recipe Baked Potato', url: '/ideas/shepherds-pie-recipe-baked-potato/937964544073/', idea_id: '937964544073' },
+        { name: 'How To Make Shepherd\'s Pie Twice Baked Potatoes', url: '/answers/how-to-make-shepherd\'s-pie-twice-baked-potatoes/912403973169/', idea_id: null },
+        { name: 'Easy Shepherd\'s Pie Dish', url: '/ideas/easy-shepherd\'s-pie-dish/917569127062/', idea_id: '917569127062' },
+        { name: 'Shepherd\'s Pie On Baked Potato', url: '/ideas/shepherd\'s-pie-on-baked-potato/911903621151/', idea_id: '911903621151' },
+        { name: 'Shepherds Pie Potato', url: '/ideas/shepherds-pie-potato/944459893890/', idea_id: '944459893890' },
+        { name: 'Baked Potatoes Shepherds Pie', url: '/ideas/baked-potatoes-shepherds-pie/911298721619/', idea_id: '911298721619' },
+        { name: 'Shepard Pie Baked Potato Recipe', url: '/ideas/shepard-pie-baked-potato-recipe/925302907269/', idea_id: '925302907269' },
+        { name: 'Easy Shepard’s Pie', url: null, idea_id: null },
+        { name: 'Baked Potatoes Ground Beef', url: null, idea_id: null },
+        { name: 'Shepard’s Pie Recipe', url: null, idea_id: null },
+        { name: 'One-pot Shepherd\'s Pie Dish', url: null, idea_id: null },
+        { name: 'How To Make Shepherd\'s Pie In A Potato', url: null, idea_id: null },
+        { name: 'Shepherd Pie Baked Potato', url: null, idea_id: null },
+        { name: 'Easy Shepherd\'s Pie Meal', url: null, idea_id: null },
+      ];
+
+      const linkedIdeas: any[] = [];
+      const visualTags: any[] = [];
+
+      rawAnnotations.forEach((a) => {
+        if (a.url || a.idea_id) {
+          linkedIdeas.push(a);
+        } else {
+          visualTags.push(a);
+        }
+      });
+
+      expect(linkedIdeas.length).toBe(9);
+      expect(visualTags.length).toBe(7);
+      expect(rawAnnotations.length).toBe(16);
+
+      const counterText = `${linkedIdeas.length} linked ideas · ${visualTags.length} visual tags`;
+      expect(counterText).toBe('9 linked ideas · 7 visual tags');
+    });
   });
 });

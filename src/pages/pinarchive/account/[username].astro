@@ -314,13 +314,13 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
           <div class="flex items-center gap-1.5 bg-background border border-border rounded-xl px-2.5 py-1.5 shadow-xs">
             <label for="account-pins-sort" class="text-xs font-semibold text-muted-foreground whitespace-nowrap">Sort:</label>
             <select id="account-pins-sort" class="bg-transparent text-xs font-medium text-foreground focus:outline-none cursor-pointer">
-              <option value="saves" selected>Total Saves</option>
+              <option value="delta_saves" selected>Δ 24h Growth</option>
+              <option value="delta_3d">Δ 3d Growth</option>
+              <option value="delta_7d">Δ 7d Growth</option>
+              <option value="saves">Total Saves</option>
               <option value="repins">Total Repins</option>
               <option value="velocity">Velocity (Saves/Day)</option>
               <option value="share_count">Total Shares</option>
-              <option value="delta_saves">Δ 24h Growth</option>
-              <option value="delta_3d">Δ 3d Growth</option>
-              <option value="delta_7d">Δ 7d Growth</option>
               <option value="newest">Newest on Pinterest</option>
             </select>
           </div>
@@ -525,7 +525,7 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
   let accountId = '';
   let workspaceId = '';
   let username = '';
-  let currentSort = 'saves';
+  let currentSort = 'delta_saves';
   let headerSort: { sort: string; asc: boolean } | null = null;
   let activePace: '24h' | '3d' | '7d' | 'all' = '24h';
   let currentLimit = 50;
@@ -1441,7 +1441,8 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
     document.querySelectorAll<HTMLButtonElement>('#account-timeframe-controls [data-timeframe]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const tf = (btn.getAttribute('data-timeframe') || '24h') as '24h' | '3d' | '7d' | 'all';
-        if (tf === activePace) return;
+        const targetSort = tf === '24h' ? 'delta_saves' : tf === '3d' ? 'delta_3d' : tf === '7d' ? 'delta_7d' : 'saves';
+        if (tf === activePace && currentSort === targetSort && !headerSort) return;
         activePace = tf;
         updatePaceButtonsUI();
 
@@ -1450,10 +1451,7 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
         updateHeaderSortIcons();
 
         // Auto align sort
-        if (activePace === '24h') currentSort = 'delta_saves';
-        else if (activePace === '3d') currentSort = 'delta_3d';
-        else if (activePace === '7d') currentSort = 'delta_7d';
-        else currentSort = 'saves';
+        currentSort = targetSort;
 
         const sortSelect = document.getElementById('account-pins-sort') as HTMLSelectElement | null;
         if (sortSelect) sortSelect.value = currentSort;
@@ -1585,6 +1583,16 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
         headerSort = null;
         updateHeaderSortIcons();
         currentSort = sortSelect.value;
+        if (currentSort === 'delta_saves') {
+          activePace = '24h';
+          updatePaceButtonsUI();
+        } else if (currentSort === 'delta_3d') {
+          activePace = '3d';
+          updatePaceButtonsUI();
+        } else if (currentSort === 'delta_7d') {
+          activePace = '7d';
+          updatePaceButtonsUI();
+        }
         currentPage = 1;
         loadAccountPins();
       });

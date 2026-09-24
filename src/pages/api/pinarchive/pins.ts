@@ -138,10 +138,10 @@ export const GET: APIRoute = async ({ request, locals }) => {
           total = rows.length > 0 ? Number(rows[0].total_count || 0) : 0;
           rpcSucceeded = true;
         } else if (error) {
-          console.warn('[pins:mode=page] RPC pa_account_pins_page returned error, using fallback query:', error.message);
+          console.error('[pins:mode=page] RPC pa_account_pins_page returned error, using fallback query:', error.message, { sort, stage: stageFilter, accountId });
         }
       } catch (rpcErr: any) {
-        console.warn('[pins:mode=page] RPC pa_account_pins_page threw error, using fallback query:', rpcErr?.message || rpcErr);
+        console.error('[pins:mode=page] RPC pa_account_pins_page threw error, using fallback query:', rpcErr?.message || rpcErr, { sort, stage: stageFilter, accountId });
       }
 
       if (!rpcSucceeded) {
