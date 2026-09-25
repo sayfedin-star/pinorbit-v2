@@ -84,25 +84,30 @@ export function normalizeAnnotation(ann: any): PinAnnotation | null {
 }
 
 function dedupeAndNormalize(list: any[]): PinAnnotation[] {
-  const result: PinAnnotation[] = [];
-  const seen = new Set<string>();
+  const map = new Map<string, PinAnnotation>();
   for (const a of list) {
     const norm = normalizeAnnotation(a);
     if (norm) {
       const lower = norm.name.toLowerCase();
-      if (!seen.has(lower)) {
-        seen.add(lower);
-        result.push(norm);
+      const existing = map.get(lower);
+      if (!existing) {
+        map.set(lower, norm);
+      } else {
+        if (!existing.idea_id && norm.idea_id) existing.idea_id = norm.idea_id;
+        if (!existing.url && norm.url) existing.url = norm.url;
+        if (norm.name[0] === norm.name[0].toUpperCase() && existing.name[0] !== existing.name[0].toUpperCase()) {
+          existing.name = norm.name;
+        }
       }
     }
   }
-  return result;
+  return Array.from(map.values());
 }
 
 /**
  * Merges incoming annotations with existing annotations:
  * 1. Adopts incoming list as the authoritative set of active tags (prunes retired tags).
- * 2. If incoming is undefined, retains existing annotations (case-insensitive deduplication).
+ * 2. If incoming is undefined or null, retains existing annotations (case-insensitive deduplication).
  * 3. Two-writer contract: If incoming is empty array [] (e.g. GAS push with annotations: []),
  *    preserves existing enriched annotations instead of wiping them out.
  * 4. Inherits existing idea_id and url if incoming lacks them (enrichment preservation).
@@ -112,13 +117,13 @@ export function mergeAnnotationsLatest(
   incoming: any[] | undefined | null,
   existing: any[] | undefined | null
 ): PinAnnotation[] | undefined {
-  if (incoming === undefined) {
-    if (existing === undefined) return undefined;
+  if (incoming === undefined || incoming === null) {
+    if (existing === undefined || existing === null) return undefined;
     if (!Array.isArray(existing)) return [];
     return dedupeAndNormalize(existing);
   }
 
-  if (incoming === null || !Array.isArray(incoming)) return [];
+  if (!Array.isArray(incoming)) return [];
 
   // Two-writer contract: If incoming is empty array [] (e.g. GAS push with annotations: []),
   // do NOT wipe out existing workflow annotations.
@@ -136,23 +141,22 @@ export function mergeAnnotationsLatest(
       const norm = normalizeAnnotation(a);
       if (norm) {
         const lower = norm.name.toLowerCase();
-        if (!existingMap.has(lower)) {
+        const prev = existingMap.get(lower);
+        if (!prev) {
           existingMap.set(lower, norm);
+        } else {
+          if (!prev.idea_id && norm.idea_id) prev.idea_id = norm.idea_id;
+          if (!prev.url && norm.url) prev.url = norm.url;
         }
       }
     }
   }
 
+  const dedupedIncoming = dedupeAndNormalize(incoming);
   const result: PinAnnotation[] = [];
-  const seenLower = new Set<string>();
 
-  for (const item of incoming) {
-    const norm = normalizeAnnotation(item);
-    if (!norm) continue;
+  for (const norm of dedupedIncoming) {
     const lower = norm.name.toLowerCase();
-    if (seenLower.has(lower)) continue;
-    seenLower.add(lower);
-
     const prev = existingMap.get(lower);
     result.push({
       name: norm.name,
@@ -528,8 +532,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
           }
           if (p.annotations !== undefined) {
             row.annotations = Array.isArray(p.annotations)
-              ? p.annotations.map(normalizeAnnotation).filter(Boolean)
-              : (normalizeAnnotation(p.annotations) ? [normalizeAnnotation(p.annotations)] : []);
+              ? dedupeAndNormalize(p.annotations)
+              : (normalizeAnnotation(p.annotations) ? [normalizeAnnotation(p.annotations)!] : []);
           }
           if (p.seo_category !== undefined) row.seo_category = p.seo_category;
           if (p.canonical_pin_id !== undefined) row.canonical_pin_id = p.canonical_pin_id;

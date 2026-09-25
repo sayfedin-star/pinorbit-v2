@@ -95,12 +95,21 @@ export function formatPin(pin) {
     const rawName = typeof item?.name === 'string' ? item.name.trim() : '';
     if (rawName) {
       const lower = rawName.toLowerCase();
-      if (!annotationsMap.has(lower)) {
+      const ideaId = item.idea_id ?? item.ideaId ?? (String(item.url || '').match(/\/ideas\/[^/]+\/(\d+)/)?.[1] || null);
+      const url = item.url || null;
+      const existing = annotationsMap.get(lower);
+      if (!existing) {
         annotationsMap.set(lower, {
           name: rawName,
-          idea_id: item.idea_id ?? item.ideaId ?? (String(item.url || '').match(/\/ideas\/[^/]+\/(\d+)/)?.[1] || null),
-          url: item.url || null,
+          idea_id: ideaId,
+          url: url,
         });
+      } else {
+        if (!existing.idea_id && ideaId) existing.idea_id = ideaId;
+        if (!existing.url && url) existing.url = url;
+        if (rawName[0] === rawName[0].toUpperCase() && existing.name[0] !== existing.name[0].toUpperCase()) {
+          existing.name = rawName;
+        }
       }
     }
   }
@@ -110,6 +119,29 @@ export function formatPin(pin) {
       const lower = rawName.toLowerCase();
       if (!annotationsMap.has(lower)) {
         annotationsMap.set(lower, { name: rawName, idea_id: null, url: null });
+      }
+    }
+  }
+  if (annotationsMap.size === 0 && Array.isArray(pin?.annotations)) {
+    for (const item of pin.annotations) {
+      if (typeof item === 'string' && item.trim()) {
+        const rawName = item.trim();
+        const lower = rawName.toLowerCase();
+        if (!annotationsMap.has(lower)) {
+          annotationsMap.set(lower, { name: rawName, idea_id: null, url: null });
+        }
+      } else if (typeof item === 'object' && item && item.name) {
+        const rawName = String(item.name).trim();
+        const lower = rawName.toLowerCase();
+        const ideaId = item.idea_id ?? item.ideaId ?? (String(item.url || '').match(/\/ideas\/[^/]+\/(\d+)/)?.[1] || null);
+        const url = item.url || null;
+        const existing = annotationsMap.get(lower);
+        if (!existing) {
+          annotationsMap.set(lower, { name: rawName, idea_id: ideaId, url });
+        } else {
+          if (!existing.idea_id && ideaId) existing.idea_id = ideaId;
+          if (!existing.url && url) existing.url = url;
+        }
       }
     }
   }

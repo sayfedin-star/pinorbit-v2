@@ -207,5 +207,24 @@ describe('PinArchive Ingest Annotations Logic', () => {
         url: null,
       });
     });
+
+    it('preserves existing annotations when incoming is null (unset / omitted)', () => {
+      const existing = [
+        { name: 'Dinner Ideas', idea_id: '123', url: '/ideas/dinner/123/' },
+      ];
+      const result = mergeAnnotationsLatest(null, existing);
+      expect(result).toEqual(existing);
+    });
+
+    it('merges enrichment across duplicate incoming annotations when earlier occurrence has nulls', () => {
+      const incoming = [
+        { name: 'Healthy Food', idea_id: null, url: null },
+        { name: 'healthy food', idea_id: '999', url: '/ideas/healthy/999/' },
+      ];
+      const result = mergeAnnotationsLatest(incoming, []);
+      expect(result).toEqual([
+        { name: 'Healthy Food', idea_id: '999', url: '/ideas/healthy/999/' },
+      ]);
+    });
   });
 });

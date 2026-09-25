@@ -110,7 +110,7 @@ BEGIN
               END AS name_val
             ) nv
             WHERE nv.name_val IS NOT NULL AND trim(nv.name_val) <> ''
-            ORDER BY lower(trim(nv.name_val)), (CASE WHEN jsonb_typeof(e) = 'object' AND e->>'url' IS NOT NULL THEN 1 ELSE 0 END) DESC
+            ORDER BY lower(trim(nv.name_val)), (CASE WHEN jsonb_typeof(e) = 'object' AND e->>'idea_id' IS NOT NULL THEN 1 ELSE 0 END) DESC, (CASE WHEN jsonb_typeof(e) = 'object' AND e->>'url' IS NOT NULL THEN 1 ELSE 0 END) DESC
           ) cleaned
         )
       ELSE '[]'::jsonb
@@ -326,6 +326,7 @@ BEGIN
                 END
               ) t
               WHERE lower(trim(t->>'name')) = lower(trim(e->>'name'))
+              ORDER BY (t->>'idea_id' IS NOT NULL) DESC, (t->>'url' IS NOT NULL) DESC
               LIMIT 1
             ) prev ON true
           )

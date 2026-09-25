@@ -112,7 +112,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     };
 
     const boardMap = new Map<string, { name: string; pins: number; sum_saves: number }>();
-    const cooccurringMap = new Map<string, Set<string>>();
+    const cooccurringMap = new Map<string, { displayName: string; pins: Set<string> }>();
 
     for (const p of rawPins) {
       const s = Number(p.saves || 0);
@@ -149,13 +149,16 @@ export const GET: APIRoute = async ({ request, locals }) => {
       const annotations = Array.isArray(p.annotations) ? p.annotations : [];
       for (const ann of annotations) {
         const annName = typeof ann === 'string' ? ann.trim() : (ann?.name ? String(ann.name).trim() : '');
-        if (!annName || annName === name) continue;
-        let set = cooccurringMap.get(annName);
-        if (!set) {
-          set = new Set<string>();
-          cooccurringMap.set(annName, set);
+        if (!annName || annName.toLowerCase() === name.toLowerCase()) continue;
+        const normKey = annName.toLowerCase();
+        let entry = cooccurringMap.get(normKey);
+        if (!entry) {
+          entry = { displayName: annName, pins: new Set<string>() };
+          cooccurringMap.set(normKey, entry);
+        } else if (annName[0] === annName[0].toUpperCase() && entry.displayName[0] !== entry.displayName[0].toUpperCase()) {
+          entry.displayName = annName;
         }
-        set.add(pinId);
+        entry.pins.add(pinId);
       }
     }
 
@@ -242,8 +245,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const accounts = Array.from(accountTallyMap.values()).sort((a, b) => b.sum_saves - a.sum_saves);
 
     // Top 15 co-occurring keywords
-    const cooccurring = Array.from(cooccurringMap.entries())
-      .map(([annName, set]) => ({ name: annName, pins: set.size }))
+    const cooccurring = Array.from(cooccurringMap.values())
+      .map((entry) => ({ name: entry.displayName, pins: entry.pins.size }))
       .sort((a, b) => b.pins - a.pins)
       .slice(0, 15);
 

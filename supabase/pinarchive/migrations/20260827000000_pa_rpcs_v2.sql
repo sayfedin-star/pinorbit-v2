@@ -56,26 +56,28 @@ BEGIN
       AND (p_board IS NULL OR trim(p_board) = '' OR p.board_name = trim(p_board))
   ),
   cleaned AS (
-    SELECT
+    SELECT DISTINCT ON (lower(trim(raw_topic_name)), pin_id)
       trim(raw_topic_name) AS topic_name,
+      lower(trim(raw_topic_name)) AS norm_topic_name,
       pin_id,
       saves
     FROM extracted
     WHERE raw_topic_name IS NOT NULL AND trim(raw_topic_name) <> ''
+    ORDER BY lower(trim(raw_topic_name)), pin_id, (CASE WHEN raw_topic_name ~ '^[A-Z]' THEN 1 ELSE 0 END) DESC
   ),
   aggregated AS (
     SELECT
-      c.topic_name AS name,
-      count(DISTINCT c.pin_id)::bigint AS pins,
+      (array_agg(c.topic_name ORDER BY (CASE WHEN c.topic_name ~ '^[A-Z]' THEN 1 ELSE 0 END) DESC))[1] AS name,
+      count(*)::bigint AS pins,
       coalesce(sum(c.saves), 0)::numeric AS sum_saves,
       CASE
-        WHEN count(DISTINCT c.pin_id) > 0 THEN (coalesce(sum(c.saves), 0) / count(DISTINCT c.pin_id))::bigint
+        WHEN count(*) > 0 THEN (coalesce(sum(c.saves), 0) / count(*))::bigint
         ELSE 0::bigint
       END AS avg_saves
     FROM cleaned c
     WHERE (p_search IS NULL OR trim(p_search) = '' OR c.topic_name ILIKE '%' || trim(p_search) || '%')
-    GROUP BY c.topic_name
-    HAVING count(DISTINCT c.pin_id) >= coalesce(p_min_pins, 1)
+    GROUP BY c.norm_topic_name
+    HAVING count(*) >= coalesce(p_min_pins, 1)
   ),
   counted AS (
     SELECT

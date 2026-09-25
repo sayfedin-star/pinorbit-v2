@@ -394,6 +394,26 @@ async function main() {
                   break;
                 }
               }
+              if (!annotationsChanged) {
+                // Enrichment parity check: detect if fresh brings idea_id or url that existing lacks
+                const existingMap = new Map();
+                for (const a of existingAnnList) {
+                  const n = (typeof a === 'string' ? a.trim() : String(a?.name || '').trim()).toLowerCase();
+                  if (n && !existingMap.has(n)) existingMap.set(n, a);
+                }
+                for (const f of freshAnnList) {
+                  const n = (typeof f === 'string' ? f.trim() : String(f?.name || '').trim()).toLowerCase();
+                  const prev = existingMap.get(n);
+                  const fIdea = typeof f === 'object' && f ? f.idea_id : null;
+                  const fUrl = typeof f === 'object' && f ? f.url : null;
+                  const prevIdea = typeof prev === 'object' && prev ? prev.idea_id : null;
+                  const prevUrl = typeof prev === 'object' && prev ? prev.url : null;
+                  if ((fIdea && !prevIdea) || (fUrl && !prevUrl)) {
+                    annotationsChanged = true;
+                    break;
+                  }
+                }
+              }
             }
           }
 
@@ -408,13 +428,23 @@ async function main() {
           const freshReactionsTotal = typeof fresh.reactions?.total === 'number' ? fresh.reactions.total : null;
           const reactionsAdvanced = freshReactionsTotal !== null && freshReactionsTotal > oldReactionsTotal;
 
+          const enrichmentAdvancement =
+            (Boolean(fresh.canonical_pin_id) && fresh.canonical_pin_id !== p.canonical_pin_id) ||
+            (Boolean(fresh.seo_category) && fresh.seo_category !== p.seo_category) ||
+            (Boolean(fresh.seo_alt_text) && fresh.seo_alt_text !== p.seo_alt_text) ||
+            (typeof fresh.board_pin_count === 'number' && fresh.board_pin_count !== p.board_pin_count) ||
+            (Boolean(fresh.board_last_modified_at) && fresh.board_last_modified_at !== p.board_last_modified_at) ||
+            (Boolean(fresh.image_signature) && fresh.image_signature !== p.image_signature) ||
+            (Boolean(fresh.dominant_color) && fresh.dominant_color !== p.dominant_color);
+
           if (
             fresh.saves !== oldSaves ||
             fresh.repins !== oldRepins ||
             (fresh.share_count !== undefined && fresh.share_count !== oldShares) ||
             (fresh.comments !== undefined && fresh.comments !== oldComments) ||
             reactionsAdvanced ||
-            annotationsChanged
+            annotationsChanged ||
+            enrichmentAdvancement
           ) {
             const changedItem = {
               pin_id: pinId,
@@ -430,6 +460,11 @@ async function main() {
             if (fresh.board_id) changedItem.board_id = fresh.board_id;
             if (fresh.canonical_pin_id) changedItem.canonical_pin_id = fresh.canonical_pin_id;
             if (fresh.seo_category) changedItem.seo_category = fresh.seo_category;
+            if (fresh.seo_alt_text) changedItem.seo_alt_text = fresh.seo_alt_text;
+            if (typeof fresh.board_pin_count === 'number') changedItem.board_pin_count = fresh.board_pin_count;
+            if (fresh.board_last_modified_at) changedItem.board_last_modified_at = fresh.board_last_modified_at;
+            if (fresh.image_signature) changedItem.image_signature = fresh.image_signature;
+            if (fresh.dominant_color) changedItem.dominant_color = fresh.dominant_color;
             if (freshReactionsTotal !== null && freshReactionsTotal >= oldReactionsTotal && freshReactionsTotal > 0) {
               changedItem.reactions = fresh.reactions;
             } else if (oldReactionsTotal > 0) {
@@ -437,7 +472,7 @@ async function main() {
             } else if (fresh.reactions && Object.keys(fresh.reactions).length > 0) {
               changedItem.reactions = fresh.reactions;
             }
-            if (annotationsChanged && freshAnnList.length > 0) {
+            if ((annotationsChanged || freshAnnList.length > 0) && freshAnnList.length > 0) {
               changedItem.annotations = freshAnnList;
             }
             if (typeof fresh.share_count === 'number' && fresh.share_count > 0) {
