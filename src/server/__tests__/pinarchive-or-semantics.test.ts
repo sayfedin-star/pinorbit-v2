@@ -371,13 +371,10 @@ describe('PinArchive Phase R2: OR Semantics & Enrichment-Preserving Merge Suite'
         url: 'https://www.pinterest.com/ideas/keto-breakfast/998877/',
       });
 
-      // Low Carb Diet from DB was also preserved
+      // Low Carb Diet was retired on Pinterest, so it is pruned
       const lowCarbAnnotation = savedPin.annotations.find((a: any) => a.name === 'Low Carb Diet');
-      expect(lowCarbAnnotation).toEqual({
-        name: 'Low Carb Diet',
-        idea_id: '112233',
-        url: 'https://www.pinterest.com/ideas/low-carb-diet/112233/',
-      });
+      expect(lowCarbAnnotation).toBeUndefined();
+      expect(savedPin.annotations).toHaveLength(2);
 
       // Healthy Recipes was added
       const healthyAnnotation = savedPin.annotations.find((a: any) => a.name === 'Healthy Recipes');
