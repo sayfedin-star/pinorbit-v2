@@ -529,7 +529,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           if (p.annotations !== undefined) {
             row.annotations = Array.isArray(p.annotations)
               ? p.annotations.map(normalizeAnnotation).filter(Boolean)
-              : p.annotations;
+              : (normalizeAnnotation(p.annotations) ? [normalizeAnnotation(p.annotations)] : []);
           }
           if (p.seo_category !== undefined) row.seo_category = p.seo_category;
           if (p.canonical_pin_id !== undefined) row.canonical_pin_id = p.canonical_pin_id;

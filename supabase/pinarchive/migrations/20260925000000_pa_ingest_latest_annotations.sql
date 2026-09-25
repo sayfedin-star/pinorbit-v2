@@ -89,7 +89,7 @@ BEGIN
     r.share_count,
     r.archived_at,
     CASE
-      WHEN r.annotations IS NOT NULL AND r.annotations <> '[]'::jsonb THEN
+      WHEN r.annotations IS NOT NULL AND jsonb_typeof(r.annotations) = 'array' AND r.annotations <> '[]'::jsonb THEN
         (
           SELECT coalesce(jsonb_agg(
             jsonb_build_object(
@@ -155,7 +155,7 @@ BEGIN
     seo_alt_text text
   )
   WHERE r.pin_id IS NOT NULL AND trim(r.pin_id) <> ''
-  ORDER BY r.pin_id;
+  ORDER BY r.pin_id, coalesce(r.saves, 0) DESC;
 
   SELECT count(*)::int INTO v_unique_incoming_count FROM temp_incoming_pins;
 
@@ -283,7 +283,7 @@ BEGIN
         ELSE pa_pins.reactions
       END,
       annotations = CASE
-        WHEN excluded.annotations IS NOT NULL AND excluded.annotations <> '[]'::jsonb THEN
+        WHEN excluded.annotations IS NOT NULL AND jsonb_typeof(excluded.annotations) = 'array' AND excluded.annotations <> '[]'::jsonb THEN
           (
             SELECT coalesce(jsonb_agg(
               jsonb_build_object(
@@ -297,7 +297,13 @@ BEGIN
               SELECT
                 t->>'idea_id' AS idea_id,
                 t->>'url' AS url
-              FROM jsonb_array_elements(coalesce(pa_pins.annotations, '[]'::jsonb)) t
+              FROM jsonb_array_elements(
+                CASE
+                  WHEN pa_pins.annotations IS NOT NULL AND jsonb_typeof(pa_pins.annotations) = 'array'
+                  THEN pa_pins.annotations
+                  ELSE '[]'::jsonb
+                END
+              ) t
               WHERE lower(trim(t->>'name')) = lower(trim(e->>'name'))
               LIMIT 1
             ) prev ON true

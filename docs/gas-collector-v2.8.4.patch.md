@@ -113,7 +113,9 @@ function buildRow_(obj, map, width) {
       val = obj.annotations.map(a => (typeof a === 'string' ? a.trim() : String(a?.name || '').trim())).filter(Boolean).join(', ');
     }
     if (Array.isArray(val)) val = val.join(', ');
-    row[(map[h] || 1) - 1] = (val !== undefined && val !== null ? val : '');
+    if (map && map[h]) {
+      row[map[h] - 1] = (val !== undefined && val !== null ? val : '');
+    }
   });
   return row;
 }
@@ -505,6 +507,11 @@ function handleSheetWrite_(p) {
 
         r.first_seen_at = getF_(existRow, map, 'first_seen_at') || nowHuman;
         r.last_updated_at = nowHuman;
+        if (!r.archived_at) r.archived_at = getF_(existRow, map, 'archived_at') || '';
+        const existingTags = getF_(existRow, map, 'tags') || '';
+        if (r.tags === undefined && (!Array.isArray(r.annotations) || r.annotations.length === 0)) {
+          r.tags = existingTags;
+        }
         const built = buildRow_(r, map, width);
         existingRows[idx] = built;
         updatedIndices.push(idx);
