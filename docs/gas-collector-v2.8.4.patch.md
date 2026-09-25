@@ -118,7 +118,7 @@ function buildRow_(obj, map, width) {
   return row;
 }
 
-const getF_(row, map, h) => {
+const getF_ = (row, map, h) => {
   const idx = map && map[h];
   return idx ? row[idx - 1] : '';
 };
