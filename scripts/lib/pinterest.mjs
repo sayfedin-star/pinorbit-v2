@@ -92,17 +92,25 @@ export function formatPin(pin) {
 
   const annotationsMap = new Map();
   for (const item of Array.isArray(withLinks) ? withLinks : []) {
-    if (item?.name && !annotationsMap.has(item.name)) {
-      annotationsMap.set(item.name, {
-        name: item.name,
-        idea_id: String(item.url || '').match(/\/ideas\/[^/]+\/(\d+)/)?.[1] || null,
-        url: item.url || null,
-      });
+    const rawName = typeof item?.name === 'string' ? item.name.trim() : '';
+    if (rawName) {
+      const lower = rawName.toLowerCase();
+      if (!annotationsMap.has(lower)) {
+        annotationsMap.set(lower, {
+          name: rawName,
+          idea_id: item.idea_id ?? item.ideaId ?? (String(item.url || '').match(/\/ideas\/[^/]+\/(\d+)/)?.[1] || null),
+          url: item.url || null,
+        });
+      }
     }
   }
   for (const name of Array.isArray(visual) ? visual : []) {
-    if (typeof name === 'string' && name.trim() && !annotationsMap.has(name)) {
-      annotationsMap.set(name, { name, idea_id: null, url: null });
+    if (typeof name === 'string' && name.trim()) {
+      const rawName = name.trim();
+      const lower = rawName.toLowerCase();
+      if (!annotationsMap.has(lower)) {
+        annotationsMap.set(lower, { name: rawName, idea_id: null, url: null });
+      }
     }
   }
   const annotations = Array.from(annotationsMap.values());

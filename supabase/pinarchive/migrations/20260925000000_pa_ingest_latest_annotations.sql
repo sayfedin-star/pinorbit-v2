@@ -258,10 +258,15 @@ BEGIN
     FROM temp_incoming_pins tip
     ORDER BY tip.pin_id ASC
     ON CONFLICT (workspace_id, pin_id) DO UPDATE SET
-      saves = excluded.saves,
-      repins = excluded.repins,
-      comments = excluded.comments,
-      velocity = excluded.velocity,
+      -- Preserve monotonic max for lifetime cumulative metrics
+      saves = GREATEST(coalesce(excluded.saves, 0), coalesce(pa_pins.saves, 0)),
+      repins = GREATEST(coalesce(excluded.repins, 0), coalesce(pa_pins.repins, 0)),
+      comments = GREATEST(coalesce(excluded.comments, 0), coalesce(pa_pins.comments, 0)),
+      velocity = CASE
+        WHEN excluded.saves >= pa_pins.saves AND excluded.velocity > 0 THEN excluded.velocity
+        WHEN pa_pins.velocity > 0 THEN pa_pins.velocity
+        ELSE excluded.velocity
+      END,
       title = coalesce(excluded.title, pa_pins.title),
       description = coalesce(excluded.description, pa_pins.description),
       link = coalesce(excluded.link, pa_pins.link),
