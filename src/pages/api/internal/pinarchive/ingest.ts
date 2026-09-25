@@ -53,6 +53,121 @@ export function _clearIngestCachesForTesting() {
   accountCache.clear();
 }
 
+export interface PinAnnotation {
+  name: string;
+  idea_id?: string | null;
+  url?: string | null;
+}
+
+/**
+ * Normalizes an annotation entry (string or object) to a standard object { name, idea_id, url }.
+ * Trims whitespace and filters out empty names.
+ */
+export function normalizeAnnotation(ann: any): PinAnnotation | null {
+  if (!ann) return null;
+  if (typeof ann === 'string') {
+    const trimmed = ann.trim();
+    return trimmed ? { name: trimmed, idea_id: null, url: null } : null;
+  }
+  if (typeof ann === 'object') {
+    const rawName = typeof ann.name === 'string' ? ann.name.trim() : '';
+    if (!rawName) return null;
+    const trimmedId = ann.idea_id !== undefined && ann.idea_id !== null ? String(ann.idea_id).trim() : null;
+    const trimmedUrl = ann.url !== undefined && ann.url !== null ? String(ann.url).trim() : null;
+    return {
+      name: rawName,
+      idea_id: trimmedId || null,
+      url: trimmedUrl || null,
+    };
+  }
+  return null;
+}
+
+function dedupeAndNormalize(list: any[]): PinAnnotation[] {
+  const map = new Map<string, PinAnnotation>();
+  for (const a of list) {
+    const norm = normalizeAnnotation(a);
+    if (norm) {
+      const lower = norm.name.toLowerCase();
+      const existing = map.get(lower);
+      if (!existing) {
+        map.set(lower, norm);
+      } else {
+        if (!existing.idea_id && norm.idea_id) existing.idea_id = norm.idea_id;
+        if (!existing.url && norm.url) existing.url = norm.url;
+        if (norm.name[0] === norm.name[0].toUpperCase() && existing.name[0] !== existing.name[0].toUpperCase()) {
+          existing.name = norm.name;
+        }
+      }
+    }
+  }
+  return Array.from(map.values());
+}
+
+/**
+ * Merges incoming annotations with existing annotations:
+ * 1. Adopts incoming list as the authoritative set of active tags (prunes retired tags).
+ * 2. If incoming is undefined or null, retains existing annotations (case-insensitive deduplication).
+ * 3. Two-writer contract: If incoming is empty array [] (e.g. GAS push with annotations: []),
+ *    preserves existing enriched annotations instead of wiping them out.
+ * 4. Inherits existing idea_id and url if incoming lacks them (enrichment preservation).
+ * 5. Normalizes casing and deduplicates case-insensitively, preserving incoming display casing.
+ */
+export function mergeAnnotationsLatest(
+  incoming: any[] | undefined | null,
+  existing: any[] | undefined | null
+): PinAnnotation[] | undefined {
+  if (incoming === undefined || incoming === null) {
+    if (existing === undefined || existing === null) return undefined;
+    if (!Array.isArray(existing)) return [];
+    return dedupeAndNormalize(existing);
+  }
+
+  if (!Array.isArray(incoming)) return [];
+
+  // Two-writer contract: If incoming is empty array [] (e.g. GAS push with annotations: []),
+  // do NOT wipe out existing workflow annotations.
+  if (incoming.length === 0) {
+    if (existing && Array.isArray(existing) && existing.length > 0) {
+      return dedupeAndNormalize(existing);
+    }
+    return [];
+  }
+
+  // Index existing annotations by lowercase name
+  const existingMap = new Map<string, PinAnnotation>();
+  if (Array.isArray(existing)) {
+    for (const a of existing) {
+      const norm = normalizeAnnotation(a);
+      if (norm) {
+        const lower = norm.name.toLowerCase();
+        const prev = existingMap.get(lower);
+        if (!prev) {
+          existingMap.set(lower, norm);
+        } else {
+          if (!prev.idea_id && norm.idea_id) prev.idea_id = norm.idea_id;
+          if (!prev.url && norm.url) prev.url = norm.url;
+        }
+      }
+    }
+  }
+
+  const dedupedIncoming = dedupeAndNormalize(incoming);
+  const result: PinAnnotation[] = [];
+
+  for (const norm of dedupedIncoming) {
+    const lower = norm.name.toLowerCase();
+    const prev = existingMap.get(lower);
+    result.push({
+      name: norm.name,
+      idea_id: norm.idea_id || prev?.idea_id || null,
+      url: norm.url || prev?.url || null,
+    });
+  }
+
+  return result;
+}
+
 /**
  * Server-Only Internal PinArchive Ingest Endpoint.
  *
@@ -214,18 +329,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
       if (!prev) {
         dedupedMap.set(pid, p);
       } else {
-        const prevAnn = Array.isArray(prev.annotations) ? prev.annotations : [];
-        const curAnn = Array.isArray(p.annotations) ? p.annotations : [];
-        const mergedAnnotations = [...prevAnn, ...curAnn];
-        dedupedMap.set(pid, {
+        const mergedAnnotations = mergeAnnotationsLatest(p.annotations, prev.annotations);
+        const merged: any = {
           ...prev,
           ...p,
           saves: Math.max(Number(p.saves || 0), Number(prev.saves || 0)),
           repins: Math.max(Number(p.repins || 0), Number(prev.repins || 0)),
           comments: Math.max(Number(p.comments || 0), Number(prev.comments || 0)),
           share_count: Math.max(Number(p.share_count || 0), Number(prev.share_count || 0)),
-          annotations: mergedAnnotations.length > 0 ? mergedAnnotations : (Array.isArray(p.annotations) ? p.annotations : prev.annotations),
-        });
+        };
+        if (mergedAnnotations !== undefined) {
+          merged.annotations = mergedAnnotations;
+        } else if (prev.annotations !== undefined) {
+          merged.annotations = prev.annotations;
+        }
+        dedupedMap.set(pid, merged);
       }
     }
     const rawPins = Array.from(dedupedMap.values());
@@ -412,7 +530,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
           if (p.reactions !== undefined && p.reactions !== null && typeof p.reactions === 'object' && Object.keys(p.reactions).length > 0) {
             row.reactions = p.reactions;
           }
-          if (p.annotations !== undefined) row.annotations = p.annotations;
+          if (p.annotations !== undefined) {
+            row.annotations = Array.isArray(p.annotations)
+              ? dedupeAndNormalize(p.annotations)
+              : (normalizeAnnotation(p.annotations) ? [normalizeAnnotation(p.annotations)!] : []);
+          }
           if (p.seo_category !== undefined) row.seo_category = p.seo_category;
           if (p.canonical_pin_id !== undefined) row.canonical_pin_id = p.canonical_pin_id;
           if (p.seo_alt_text !== undefined) row.seo_alt_text = p.seo_alt_text;
@@ -559,21 +681,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
           pinsAddedCount++;
         }
 
-        // 1. Annotation merge (by name — url/idea_id NEVER lost)
-        const mergedByName = new Map<string, any>();
-        for (const a of (existing?.annotations || [])) {
-          if (a?.name) mergedByName.set(a.name, a);
-        }
-        for (const a of (p.annotations || [])) {
-          if (a?.name) {
-            const prev = mergedByName.get(a.name) || {};
-            mergedByName.set(a.name, {
-              name: a.name,
-              idea_id: a.idea_id ?? prev.idea_id ?? null,
-              url: a.url ?? prev.url ?? null,
-            });
-          }
-        }
+        // 1. Annotation merge (by name — url/idea_id NEVER lost, latest tags adopted)
+        const mergedAnn = mergeAnnotationsLatest(p.annotations, existing?.annotations);
 
         return {
           workspace_id: workspaceId,
@@ -593,18 +702,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
           price: p.price ?? (existing as any)?.price ?? null,
           currency: p.currency || (existing as any)?.currency || null,
           site_name: p.site_name || (existing as any)?.site_name || null,
-          saves: Number(p.saves || 0),
-          repins: Number(p.repins || 0),
-          comments: Number(p.comments || 0),
+          saves: Math.max(Number(p.saves || 0), Number(existing?.saves || 0)),
+          repins: Math.max(Number(p.repins || 0), Number(existing?.repins || 0)),
+          comments: Math.max(Number(p.comments || 0), Number(existing?.comments || 0)),
           reactions: p.reactions ?? existing?.reactions ?? {},
-          velocity: Number(p.velocity || 0),
+          velocity: (Number(p.saves || 0) >= Number(existing?.saves || 0) && Number(p.velocity || 0) > 0)
+            ? Number(p.velocity || 0)
+            : (Number(existing?.velocity || 0) > 0 ? Number(existing?.velocity || 0) : Number(p.velocity || 0)),
           promoted: p.promoted !== undefined ? Boolean(p.promoted) : (existing?.promoted ?? false),
           last_updated_at: fetchedAt,
           share_count: p.share_count === undefined ? (existing?.share_count ?? 0) : Number(p.share_count || 0),
 
           // Preserved Enrichment & Direct Qualified Ingestion
           archived_at: existing?.archived_at || (p.archived_at !== undefined ? p.archived_at : fetchedAt),
-          annotations: Array.from(mergedByName.values()),
+          annotations: mergedAnn ?? (existing?.annotations || []),
           board_pin_count: p.board_pin_count ?? existing?.board_pin_count ?? null,
           board_last_modified_at: p.board_last_modified_at ?? existing?.board_last_modified_at ?? null,
           seo_category: p.seo_category ?? existing?.seo_category ?? null,

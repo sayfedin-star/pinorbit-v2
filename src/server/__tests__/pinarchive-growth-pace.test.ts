@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GET as pinsHandler } from '../../pages/api/pinarchive/pins';
+import { renderPinCardHtml } from '../../lib/pinarchive/pin-card-render';
 
 const { mockWsId, mockAccId, mockUser, mockPinArchiveClient } = vi.hoisted(() => ({
   mockWsId: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
@@ -252,5 +253,174 @@ describe('PinArchive Account Growth Pace Suite', () => {
       // all pace: p1 and p2 have saves > 0
       expect(filterChanged(pins, 'all').map((p) => p.id)).toEqual(['p1', 'p2']);
     });
+
+    it('re-aligns currentSort when clicking active pace if currentSort was divergent', () => {
+      let activePace: '24h' | '3d' | '7d' | 'all' = '24h';
+      let currentSort = 'saves'; // Desynchronized state (e.g. user selected Total Saves from dropdown)
+      let headerSort: { sort: string; asc: boolean } | null = null;
+      let loaded = false;
+
+      const handlePaceClick = (tf: '24h' | '3d' | '7d' | 'all') => {
+        const targetSort = tf === '24h' ? 'delta_saves' : tf === '3d' ? 'delta_3d' : tf === '7d' ? 'delta_7d' : 'saves';
+        if (tf === activePace && currentSort === targetSort && !headerSort) return;
+        activePace = tf;
+        headerSort = null;
+        currentSort = targetSort;
+        loaded = true;
+      };
+
+      // Clicking 24h when currentSort is 'saves' SHOULD NOT return early; it must re-align to delta_saves
+      handlePaceClick('24h');
+      expect(currentSort).toBe('delta_saves');
+      expect(loaded).toBe(true);
+
+      // Clicking 24h again when already aligned SHOULD return early
+      loaded = false;
+      handlePaceClick('24h');
+      expect(loaded).toBe(false);
+    });
+
+    it('classifies annotations into true linked ideas vs visual recognition tags', () => {
+      const rawAnnotations = [
+        { name: 'Easy Dinner Recipes Shepards Pie', url: '/ideas/easy-dinner-recipes-shepards-pie/945637318053/', idea_id: '945637318053' },
+        { name: 'Potato Shepherd\'s Pie', url: '/ideas/potato-shepherd\'s-pie/926241892080/', idea_id: '926241892080' },
+        { name: 'Shepherds Pie Recipe Baked Potato', url: '/ideas/shepherds-pie-recipe-baked-potato/937964544073/', idea_id: '937964544073' },
+        { name: 'How To Make Shepherd\'s Pie Twice Baked Potatoes', url: '/answers/how-to-make-shepherd\'s-pie-twice-baked-potatoes/912403973169/', idea_id: null },
+        { name: 'Easy Shepherd\'s Pie Dish', url: '/ideas/easy-shepherd\'s-pie-dish/917569127062/', idea_id: '917569127062' },
+        { name: 'Shepherd\'s Pie On Baked Potato', url: '/ideas/shepherd\'s-pie-on-baked-potato/911903621151/', idea_id: '911903621151' },
+        { name: 'Shepherds Pie Potato', url: '/ideas/shepherds-pie-potato/944459893890/', idea_id: '944459893890' },
+        { name: 'Baked Potatoes Shepherds Pie', url: '/ideas/baked-potatoes-shepherds-pie/911298721619/', idea_id: '911298721619' },
+        { name: 'Shepard Pie Baked Potato Recipe', url: '/ideas/shepard-pie-baked-potato-recipe/925302907269/', idea_id: '925302907269' },
+        { name: 'Easy Shepard’s Pie', url: null, idea_id: null },
+        { name: 'Baked Potatoes Ground Beef', url: null, idea_id: null },
+        { name: 'Shepard’s Pie Recipe', url: null, idea_id: null },
+        { name: 'One-pot Shepherd\'s Pie Dish', url: null, idea_id: null },
+        { name: 'How To Make Shepherd\'s Pie In A Potato', url: null, idea_id: null },
+        { name: 'Shepherd Pie Baked Potato', url: null, idea_id: null },
+        { name: 'Easy Shepherd\'s Pie Meal', url: null, idea_id: null },
+      ];
+
+      const linkedIdeas: any[] = [];
+      const visualTags: any[] = [];
+
+      rawAnnotations.forEach((a) => {
+        if (a.url || a.idea_id) {
+          linkedIdeas.push(a);
+        } else {
+          visualTags.push(a);
+        }
+      });
+
+      expect(linkedIdeas.length).toBe(9);
+      expect(visualTags.length).toBe(7);
+      expect(rawAnnotations.length).toBe(16);
+
+      const counterText = `${linkedIdeas.length} linked ideas · ${visualTags.length} visual tags`;
+      expect(counterText).toBe('9 linked ideas · 7 visual tags');
+    });
+
+    it('sets activePace to all when selecting non-delta sorts in dropdown', () => {
+      let activePace: '24h' | '3d' | '7d' | 'all' = '24h';
+      let currentSort = 'delta_saves';
+
+      const handleDropdownSortChange = (newSort: string) => {
+        currentSort = newSort;
+        if (currentSort === 'delta_saves') {
+          activePace = '24h';
+        } else if (currentSort === 'delta_3d') {
+          activePace = '3d';
+        } else if (currentSort === 'delta_7d') {
+          activePace = '7d';
+        } else {
+          activePace = 'all';
+        }
+      };
+
+      handleDropdownSortChange('saves');
+      expect(activePace).toBe('all');
+
+      handleDropdownSortChange('velocity');
+      expect(activePace).toBe('all');
+
+      handleDropdownSortChange('delta_3d');
+      expect(activePace).toBe('3d');
+
+      handleDropdownSortChange('delta_saves');
+      expect(activePace).toBe('24h');
+    });
+
+    it('deduplicates annotations case-insensitively and handles diverse URL formats safely', () => {
+      const rawAnnotations = [
+        { name: 'Potato Shepard Pie', url: '/ideas/potato/123/', idea_id: '123' },
+        { name: 'potato shepard pie', url: '/ideas/potato/123/', idea_id: '123' }, // duplicate (case variant)
+        { name: 'Full Url Idea', url: 'https://www.pinterest.com/ideas/full/456/', idea_id: null },
+        { name: 'Visual Tag One', url: null, idea_id: null },
+        { name: 'Visual Tag One', url: null, idea_id: null }, // duplicate
+      ];
+
+      const linkedIdeas: Array<{ name: string; url: string }> = [];
+      const visualTags: Array<{ name: string }> = [];
+      const seenNames = new Set<string>();
+
+      rawAnnotations.forEach((a: any) => {
+        const name = typeof a === 'string' ? a.trim() : String(a?.name || '').trim();
+        if (!name) return;
+        const lower = name.toLowerCase();
+        if (seenNames.has(lower)) return;
+        seenNames.add(lower);
+
+        const url = typeof a === 'object' && a?.url ? String(a.url).trim() : null;
+        const ideaId = typeof a === 'object' && a?.idea_id ? String(a.idea_id).trim() : null;
+
+        if (url || ideaId) {
+          let fullUrl = '';
+          if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+            fullUrl = url;
+          } else if (url && url.startsWith('/')) {
+            fullUrl = `https://www.pinterest.com${url}`;
+          } else if (url) {
+            fullUrl = `https://www.pinterest.com/${url}`;
+          } else if (ideaId) {
+            fullUrl = `https://www.pinterest.com/ideas/${encodeURIComponent(name)}/${encodeURIComponent(ideaId)}/`;
+          } else {
+            fullUrl = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(name)}`;
+          }
+          linkedIdeas.push({ name, url: fullUrl });
+        } else {
+          visualTags.push({ name });
+        }
+      });
+
+      expect(linkedIdeas.length).toBe(2);
+      expect(linkedIdeas[0].url).toBe('https://www.pinterest.com/ideas/potato/123/');
+      expect(linkedIdeas[1].url).toBe('https://www.pinterest.com/ideas/full/456/');
+      expect(visualTags.length).toBe(1);
+      expect(visualTags[0].name).toBe('Visual Tag One');
+    });
+
+    it('renderPinCardHtml generates valid URLs without duplicating pinterest.com for absolute links', () => {
+      const pin = {
+        id: 'test-pin-1',
+        pin_id: '123456789',
+        title: 'Test Pin',
+        saves: 100,
+        repins: 20,
+        annotations: [
+          { name: 'Absolute URL Tag', url: 'https://www.pinterest.com/ideas/my-idea/999/' },
+          { name: 'Relative URL Tag', url: '/ideas/other-idea/888/' },
+        ],
+      };
+
+      const htmlAccount = renderPinCardHtml(pin, { viewMode: 'account' });
+      expect(htmlAccount).toContain('href="https://www.pinterest.com/ideas/my-idea/999/"');
+      expect(htmlAccount).not.toContain('pinterest.com/https://');
+      expect(htmlAccount).toContain('href="https://www.pinterest.com/ideas/other-idea/888/"');
+
+      const htmlTopics = renderPinCardHtml(pin, { viewMode: 'topics' });
+      expect(htmlTopics).toContain('href="https://www.pinterest.com/ideas/my-idea/999/"');
+      expect(htmlTopics).not.toContain('pinterest.com/https://');
+    });
   });
 });
+
+

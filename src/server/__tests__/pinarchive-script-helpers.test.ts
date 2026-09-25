@@ -499,4 +499,43 @@ describe('PinArchive Script Library & Pagination Suite (Phase 6d)', () => {
       }
     });
   });
+
+  describe('4. formatPin Annotations Enrichment & Merging', () => {
+    it('merges idea_id and url across duplicate annotations in annotationsWithLinksArray', () => {
+      const pinObj = {
+        id: '123456',
+        pinJoin: {
+          annotationsWithLinksArray: [
+            { name: 'Dinner Ideas', idea_id: null, url: null },
+            { name: 'dinner ideas', idea_id: '999', url: 'https://pinterest.com/ideas/dinner/999/' },
+          ],
+        },
+      };
+      const formatted = formatPin(pinObj);
+      expect(formatted.annotations).toEqual([
+        {
+          name: 'Dinner Ideas',
+          idea_id: '999',
+          url: 'https://pinterest.com/ideas/dinner/999/',
+        },
+      ]);
+    });
+
+    it('falls back to pin.annotations when annotationsWithLinksArray is absent', () => {
+      const pinObj = {
+        id: '789012',
+        annotations: [
+          { name: 'Keto Diet', idea_id: '555', url: '/ideas/keto/555/' },
+        ],
+      };
+      const formatted = formatPin(pinObj);
+      expect(formatted.annotations).toEqual([
+        {
+          name: 'Keto Diet',
+          idea_id: '555',
+          url: '/ideas/keto/555/',
+        },
+      ]);
+    });
+  });
 });

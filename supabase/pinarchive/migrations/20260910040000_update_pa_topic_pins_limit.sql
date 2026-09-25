@@ -68,6 +68,16 @@ AS $$
       AND (
         p.annotations @> jsonb_build_array(jsonb_build_object('name', p_name))
         OR p.annotations @> to_jsonb(ARRAY[p_name])
+        OR EXISTS (
+          SELECT 1 FROM jsonb_array_elements(
+            CASE WHEN jsonb_typeof(p.annotations) = 'array' THEN p.annotations ELSE '[]'::jsonb END
+          ) elem
+          WHERE lower(trim(CASE
+            WHEN jsonb_typeof(elem) = 'string' THEN elem #>> '{}'
+            WHEN jsonb_typeof(elem) = 'object' THEN elem->>'name'
+            ELSE ''
+          END)) = lower(trim(p_name))
+        )
       )
       AND (p_account_id IS NULL OR p.account_id = p_account_id)
       AND (p_board IS NULL OR trim(p_board) = '' OR p.board_name = trim(p_board))

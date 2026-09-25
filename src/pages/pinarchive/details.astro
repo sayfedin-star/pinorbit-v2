@@ -127,6 +127,7 @@ import Layout from '../../layouts/Layout.astro';
               <span id="pin-stage-badge"></span>
               <span id="pin-anomaly-badge"></span>
               <span id="pin-board-badge" class="inline-flex items-center gap-1 rounded-full bg-muted/80 px-3 py-1 text-xs font-semibold text-muted-foreground border border-border/60"></span>
+              <span id="pin-color-badge" class="hidden inline-flex items-center gap-1.5 rounded-full bg-muted/80 px-2.5 py-1 text-xs font-medium text-muted-foreground border border-border/60"></span>
               <span id="pin-canonical-badge" class="hidden inline-flex items-center gap-1 rounded-full bg-purple-500/10 px-3 py-1 text-xs font-bold text-purple-500 border border-purple-500/20"></span>
               <a id="pin-account-badge" href="#" class="hidden inline-flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary border border-primary/20 hover:bg-primary/20 transition-colors"></a>
             </div>
@@ -136,6 +137,15 @@ import Layout from '../../layouts/Layout.astro';
             
             <!-- Description -->
             <p id="pin-detail-description" class="mt-2 text-xs text-muted-foreground line-clamp-3 leading-relaxed"></p>
+
+            <!-- SEO Alt Text (if present) -->
+            <div id="pin-seo-alt-box" class="hidden mt-2 p-2.5 rounded-xl bg-muted/30 border border-border/60 text-xs">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                <span>🔎</span>
+                <span>Pinterest SEO Alt Text</span>
+              </span>
+              <p id="pin-seo-alt-content" class="mt-0.5 text-xs text-foreground/90 italic font-mono"></p>
+            </div>
           </div>
 
           <!-- Quick Copy Action Toolbar -->
@@ -167,7 +177,7 @@ import Layout from '../../layouts/Layout.astro';
           </div>
 
           <!-- Structured Metadata Key-Value Grid -->
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-3 pb-1 border-t border-border/70">
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-3 pb-1 border-t border-border/70">
             <div class="bg-muted/30 rounded-xl p-2.5 border border-border/40">
               <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Pin ID</span>
               <span class="font-mono text-xs font-bold text-foreground block mt-0.5 truncate" id="pin-id-str">—</span>
@@ -183,6 +193,17 @@ import Layout from '../../layouts/Layout.astro';
             <div class="bg-muted/30 rounded-xl p-2.5 border border-border/40">
               <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Last Archived</span>
               <span class="text-xs font-bold text-foreground block mt-0.5" id="pin-archived-date-str">—</span>
+            </div>
+            <div class="bg-muted/30 rounded-xl p-2.5 border border-border/40">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Dominant Color</span>
+              <div class="flex items-center gap-1.5 mt-0.5">
+                <span id="pin-meta-color-swatch" class="h-3 w-3 rounded-full border border-border shrink-0"></span>
+                <span class="font-mono text-xs font-bold text-foreground truncate" id="pin-meta-color-str">—</span>
+              </div>
+            </div>
+            <div class="bg-muted/30 rounded-xl p-2.5 border border-border/40">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Image Signature</span>
+              <span class="font-mono text-[11px] font-bold text-foreground block mt-0.5 truncate" id="pin-signature-str" title="Perceptual / MD5 Image Signature">—</span>
             </div>
           </div>
 
@@ -813,7 +834,7 @@ import Layout from '../../layouts/Layout.astro';
     });
   }
 
-  async function loadPinDetail() {
+  async function loadPinDetail(retries = 2) {
     const urlParams = new URLSearchParams(window.location.search);
     const pinId = urlParams.get('id');
 
@@ -906,6 +927,7 @@ import Layout from '../../layouts/Layout.astro';
       if (img) {
         if (pin.image_url) {
           img.src = pin.image_url;
+          img.alt = pin.seo_alt_text || pin.title || 'Pinterest Pin';
           if (imgOverlayLink) imgOverlayLink.href = pin.image_url;
           img.onerror = () => {
             img.style.display = 'none';
@@ -943,7 +965,23 @@ import Layout from '../../layouts/Layout.astro';
 
       const boardBadge = document.getElementById('pin-board-badge');
       if (boardBadge) {
-        boardBadge.textContent = pin.board_name ? `📁 ${pin.board_name}` : '📁 General Board';
+        const boardName = pin.board_name || 'General Board';
+        const pinCountStr = pin.board_pin_count != null ? ` · ${fmtNumber(pin.board_pin_count)} pins` : '';
+        boardBadge.textContent = `📁 ${boardName}${pinCountStr}`;
+        if (pin.board_last_modified_at) {
+          boardBadge.title = `Board updated on ${fmtDateTime(pin.board_last_modified_at)}`;
+        }
+      }
+
+      const colorBadge = document.getElementById('pin-color-badge');
+      if (colorBadge) {
+        if (pin.dominant_color) {
+          colorBadge.innerHTML = `<span class="h-2.5 w-2.5 rounded-full border border-border/60 shrink-0" style="background-color: ${escapeHtml(pin.dominant_color)};"></span><span class="font-mono text-[11px] font-semibold">${escapeHtml(pin.dominant_color)}</span>`;
+          colorBadge.title = `Dominant Color: ${pin.dominant_color}`;
+          colorBadge.classList.remove('hidden');
+        } else {
+          colorBadge.classList.add('hidden');
+        }
       }
 
       const canonicalBadge = document.getElementById('pin-canonical-badge');
@@ -973,6 +1011,15 @@ import Layout from '../../layouts/Layout.astro';
       const descEl = document.getElementById('pin-detail-description');
       if (descEl) descEl.textContent = pin.description || pin.seo_alt_text || 'No description available for this pin.';
 
+      const seoAltBox = document.getElementById('pin-seo-alt-box');
+      const seoAltContent = document.getElementById('pin-seo-alt-content');
+      if (pin.seo_alt_text && seoAltBox && seoAltContent) {
+        seoAltContent.textContent = `"${pin.seo_alt_text}"`;
+        seoAltBox.classList.remove('hidden');
+      } else if (seoAltBox) {
+        seoAltBox.classList.add('hidden');
+      }
+
       const idStr = document.getElementById('pin-id-str');
       if (idStr) idStr.textContent = pin.pin_id || pin.id;
 
@@ -985,6 +1032,24 @@ import Layout from '../../layouts/Layout.astro';
 
       const firstSeenDateStr = document.getElementById('pin-first-seen-date-str');
       if (firstSeenDateStr) firstSeenDateStr.textContent = fmtDate(pin.first_seen_at);
+
+      const metaColorSwatch = document.getElementById('pin-meta-color-swatch');
+      const metaColorStr = document.getElementById('pin-meta-color-str');
+      if (metaColorSwatch && metaColorStr) {
+        if (pin.dominant_color) {
+          metaColorSwatch.style.backgroundColor = pin.dominant_color;
+          metaColorStr.textContent = pin.dominant_color;
+        } else {
+          metaColorSwatch.style.display = 'none';
+          metaColorStr.textContent = '—';
+        }
+      }
+
+      const sigStr = document.getElementById('pin-signature-str');
+      if (sigStr) {
+        sigStr.textContent = pin.image_signature || '—';
+        if (pin.image_signature) sigStr.title = pin.image_signature;
+      }
 
       const extLink = document.getElementById('pin-external-link') as HTMLAnchorElement | null;
       if (extLink) {
@@ -1009,47 +1074,91 @@ import Layout from '../../layouts/Layout.astro';
       setupCopyButton('copy-url-btn', () => `https://www.pinterest.com/pin/${pin.pin_id || pin.id}/`);
       setupCopyButton('copy-title-btn', () => pin.title || `Pin ${pin.pin_id}`);
 
-      // Annotations with linked clickable URLs
+      // Annotations: separate true Linked Ideas from visual recognition keywords
       const annContainer = document.getElementById('pin-annotations-container');
       const annCounter = document.getElementById('annotations-counter');
       if (annContainer) {
-        const annotations = Array.isArray(pin.annotations) ? pin.annotations : [];
-        let linkedCount = 0;
+        const rawAnnotations = Array.isArray(pin.annotations) ? pin.annotations : [];
+        
+        const linkedIdeas: Array<{ name: string; url: string; idea_id?: string | null }> = [];
+        const visualTags: Array<{ name: string }> = [];
+        const seenNames = new Set<string>();
 
-        if (annotations.length === 0) {
+        rawAnnotations.forEach((a: any) => {
+          const name = typeof a === 'string' ? a.trim() : String(a?.name || '').trim();
+          if (!name) return;
+          const lower = name.toLowerCase();
+          if (seenNames.has(lower)) return;
+          seenNames.add(lower);
+
+          const url = typeof a === 'object' && a?.url ? String(a.url).trim() : null;
+          const ideaId = typeof a === 'object' && a?.idea_id ? String(a.idea_id).trim() : null;
+
+          if (url || ideaId) {
+            let fullUrl = '';
+            if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+              fullUrl = url.startsWith('http://') ? 'https://' + url.slice(7) : url;
+            } else if (url && url.startsWith('/')) {
+              fullUrl = `https://www.pinterest.com${url}`;
+            } else if (url) {
+              fullUrl = `https://www.pinterest.com/${url}`;
+            } else if (ideaId) {
+              fullUrl = `https://www.pinterest.com/ideas/${encodeURIComponent(name)}/${encodeURIComponent(ideaId)}/`;
+            } else {
+              fullUrl = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(name)}`;
+            }
+            linkedIdeas.push({ name, url: fullUrl, idea_id: ideaId });
+          } else {
+            visualTags.push({ name });
+          }
+        });
+
+        const totalCount = linkedIdeas.length + visualTags.length;
+
+        if (totalCount === 0) {
           annContainer.innerHTML = '<span class="text-xs text-muted-foreground">No annotations stored</span>';
           if (annCounter) annCounter.textContent = '';
         } else {
-          annContainer.innerHTML = annotations
-            .map((a: any) => {
-              const name = typeof a === 'string' ? a : a?.name || '';
-              if (!name) return '';
-              let fullUrl = '';
-              if (typeof a === 'object' && a?.url) {
-                fullUrl = `https://www.pinterest.com${a.url.startsWith('/') ? a.url : '/' + a.url}`;
-              } else if (typeof a === 'object' && a?.idea_id) {
-                fullUrl = `https://www.pinterest.com/ideas/${encodeURIComponent(name)}/${a.idea_id}/`;
-              } else {
-                fullUrl = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(name)}`;
-              }
-              linkedCount++;
-
-              return `
-                <a
-                  href="${escapeHtml(fullUrl)}"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="inline-flex items-center gap-1.5 text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 px-3 py-1.5 rounded-xl font-medium border border-rose-500/20 transition-all group"
-                  title="${escapeHtml(name)} (Pinterest Idea)"
-                >
-                  <span>${escapeHtml(name)}</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 shrink-0 opacity-70 group-hover:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                </a>
-              `;
-            })
+          const linkedHtml = linkedIdeas
+            .map((idea) => `
+              <a
+                href="${escapeHtml(idea.url)}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center gap-1.5 text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 px-3 py-1.5 rounded-xl font-medium border border-rose-500/20 transition-all group"
+                title="${escapeHtml(idea.name)} (Pinterest Linked Idea)"
+              >
+                <span class="text-[11px]">💡</span>
+                <span>${escapeHtml(idea.name)}</span>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 shrink-0 opacity-70 group-hover:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            `)
             .join('');
 
-          if (annCounter) annCounter.textContent = `${linkedCount} linked idea${linkedCount === 1 ? '' : 's'}`;
+          const visualHtml = visualTags
+            .map((vt) => `
+              <a
+                href="/pinarchive/topics?q=${encodeURIComponent(vt.name)}"
+                class="inline-flex items-center gap-1.5 text-xs bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-xl font-medium border border-border transition-all"
+                title="${escapeHtml(vt.name)} (Visual Recognition Tag - Click to explore topics)"
+              >
+                <span class="text-[10px] opacity-70">👁️</span>
+                <span>${escapeHtml(vt.name)}</span>
+              </a>
+            `)
+            .join('');
+
+          annContainer.innerHTML = linkedHtml + visualHtml;
+
+          if (annCounter) {
+            if (linkedIdeas.length > 0 && visualTags.length > 0) {
+              annCounter.textContent = `${linkedIdeas.length} linked idea${linkedIdeas.length === 1 ? '' : 's'} · ${visualTags.length} visual tag${visualTags.length === 1 ? '' : 's'}`;
+            } else if (linkedIdeas.length > 0) {
+              annCounter.textContent = `${linkedIdeas.length} linked idea${linkedIdeas.length === 1 ? '' : 's'}`;
+            } else {
+              annCounter.textContent = `${visualTags.length} visual tag${visualTags.length === 1 ? '' : 's'}`;
+            }
+          }
         }
       }
 

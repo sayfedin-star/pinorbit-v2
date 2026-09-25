@@ -22,6 +22,7 @@ import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { aesKey, decryptCookieValue, resolveKek, getVaultCookie } from './lib/vault.mjs';
 import { writeToGas, pushToIngest as pushToIngestClient, fetchAllAccounts } from './lib/pa-client.mjs';
+import { formatPin } from './lib/pinterest.mjs';
 
 const CFG = {
   PAGE_SIZE: 50,
@@ -215,37 +216,26 @@ function buildDiscoveryUrl(username, cursor) {
 
 // ── Format Pin from UserActivityPinsResource ──
 function mapDiscoveryPin(p) {
-  const st = (p.aggregated_pin_data && p.aggregated_pin_data.aggregated_stats) || {};
-  const saves = Number(st.saves || p.saves || 0);
-  const repins = Number(p.repin_count || p.repins || 0);
-  const comments = Number(p.comment_count || p.comments || 0);
-  const created = p.created_at ? new Date(p.created_at) : new Date();
+  const formatted = formatPin(p);
+  const created = formatted.created_at_pinterest
+    ? new Date(formatted.created_at_pinterest)
+    : (p.created_at ? new Date(p.created_at) : new Date());
   const createdMs = created.getTime();
-  const ageDays = Math.max(1, (Date.now() - createdMs) / 86400000);
+  const ageDays = !Number.isFinite(createdMs) || createdMs <= 0
+    ? 1
+    : Math.max(1, (Date.now() - createdMs) / 86400000);
 
-  const tags = (p.pin_join && p.pin_join.visual_annotation) || p.visual_annotation || [];
-  const tagList = Array.isArray(tags) ? tags : [];
-  const annotations = tagList.map(t => (typeof t === 'string' ? { name: t } : t));
+  const pinId = String(p.id || p.pin_id || formatted.node_id || '').trim();
+  const tagList = Array.isArray(formatted.annotations)
+    ? formatted.annotations.map(a => a.name)
+    : [];
 
   return {
-    pin_id: String(p.id || p.pin_id || '').trim(),
-    title: p.title || p.grid_title || '',
-    description: p.description || p.grid_description || '',
-    link: p.link || '',
-    domain: p.domain || '',
-    board_name: (p.board && p.board.name) || '',
-    board_id: p.board?.entityId ?? p.board?.id ?? null,
-    created_at_pinterest: p.created_at || created.toISOString(),
-    image_url: (p.images && p.images.orig && p.images.orig.url) || p.image_large_url || '',
-    image_signature: p.image_signature || null,
-    dominant_color: p.dominant_color || null,
-    is_video: Boolean(p.is_video || p.isVideo),
-    saves,
-    repins,
-    comments,
+    ...formatted,
+    pin_id: pinId,
+    created_at_pinterest: formatted.created_at_pinterest || created.toISOString(),
     age_days: ageDays,
-    velocity: Math.round((saves / ageDays) * 100) / 100,
-    annotations,
+    velocity: Math.round((formatted.saves / ageDays) * 100) / 100,
     tags: tagList,
   };
 }

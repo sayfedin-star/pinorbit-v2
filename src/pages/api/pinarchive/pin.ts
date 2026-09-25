@@ -9,7 +9,7 @@ import { computePinStage, computePinAnomaly } from '../../../server/lib/pin-stag
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const PIN_DETAIL_PROJECTION =
-  'id, workspace_id, account_id, pin_id, title, description, link, domain, board_name, created_at_pinterest, image_url, dominant_color, is_video, saves, repins, comments, reactions, velocity, promoted, first_seen_at, archived_at, annotations, seo_category, canonical_pin_id, seo_alt_text, share_count, notes';
+  'id, workspace_id, account_id, pin_id, title, description, link, domain, board_name, created_at_pinterest, image_url, dominant_color, is_video, saves, repins, comments, reactions, velocity, promoted, first_seen_at, archived_at, annotations, seo_category, canonical_pin_id, seo_alt_text, share_count, notes, board_pin_count, board_last_modified_at, image_signature';
 
 const json = (o: any, s = 200) =>
   new Response(JSON.stringify(o), {
