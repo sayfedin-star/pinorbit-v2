@@ -156,13 +156,21 @@ describe('PinArchive Ingest Annotations Logic', () => {
       ]);
     });
 
-    it('returns empty array when incoming is explicitly empty array (all tags removed)', () => {
+    it('preserves existing annotations when incoming is empty array (Two-Writer GAS protection)', () => {
       const existing = [
         { name: 'Old Tag', idea_id: '123', url: '/ideas/old/123/' },
       ];
 
+      // GAS emits annotations: [] on every sync; it must never wipe out existing annotations
       const result = mergeAnnotationsLatest([], existing);
-      expect(result).toEqual([]);
+      expect(result).toEqual([
+        { name: 'Old Tag', idea_id: '123', url: '/ideas/old/123/' },
+      ]);
+    });
+
+    it('returns empty array when incoming is empty array and existing has no annotations', () => {
+      expect(mergeAnnotationsLatest([], [])).toEqual([]);
+      expect(mergeAnnotationsLatest([], undefined)).toEqual([]);
     });
 
     it('preserves existing annotations when incoming is undefined', () => {
@@ -178,6 +186,26 @@ describe('PinArchive Ingest Annotations Logic', () => {
     it('returns undefined when both incoming and existing are undefined', () => {
       const result = mergeAnnotationsLatest(undefined, undefined);
       expect(result).toBeUndefined();
+    });
+
+    it('in-batch: preserves earlier annotations when subsequent occurrence has empty array', () => {
+      const firstAnn = [{ name: 'Keto Breakfast', idea_id: '123', url: '/ideas/keto/123/' }];
+      // Later entry in batch has no tags (e.g. basic metrics update)
+      const result = mergeAnnotationsLatest([], firstAnn);
+      expect(result).toEqual(firstAnn);
+    });
+
+    it('sanitizes empty string idea_id and url to null', () => {
+      const normalized = normalizeAnnotation({
+        name: 'Quick Salad',
+        idea_id: '   ',
+        url: '',
+      });
+      expect(normalized).toEqual({
+        name: 'Quick Salad',
+        idea_id: null,
+        url: null,
+      });
     });
   });
 });

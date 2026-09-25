@@ -369,11 +369,33 @@ async function main() {
           const oldSaves = Number(p.saves) || 0;
           const oldRepins = Number(p.repins) || 0;
 
-          const existingAnnotationNames = new Set((Array.isArray(p.annotations) ? p.annotations : [])
-            .map(a => (typeof a === 'string' ? a.trim() : String(a?.name || '').trim()))
-            .filter(Boolean));
-          const newAnnotations = (Array.isArray(fresh.annotations) ? fresh.annotations : [])
-            .filter(a => a?.name && !existingAnnotationNames.has(a.name));
+          const existingAnnList = Array.isArray(p.annotations) ? p.annotations : [];
+          const freshAnnList = Array.isArray(fresh.annotations) ? fresh.annotations : [];
+
+          const existingAnnotationNames = new Set(
+            existingAnnList
+              .map(a => (typeof a === 'string' ? a.trim().toLowerCase() : String(a?.name || '').trim().toLowerCase()))
+              .filter(Boolean)
+          );
+          const freshAnnotationNames = new Set(
+            freshAnnList
+              .map(a => (typeof a === 'string' ? a.trim().toLowerCase() : String(a?.name || '').trim().toLowerCase()))
+              .filter(Boolean)
+          );
+
+          let annotationsChanged = false;
+          if (freshAnnList.length > 0) {
+            if (existingAnnotationNames.size !== freshAnnotationNames.size) {
+              annotationsChanged = true;
+            } else {
+              for (const name of freshAnnotationNames) {
+                if (!existingAnnotationNames.has(name)) {
+                  annotationsChanged = true;
+                  break;
+                }
+              }
+            }
+          }
 
           // X3: ageDays NaN protection
           const createdAt = p.created_at_pinterest || fresh.created_at_pinterest;
@@ -392,7 +414,7 @@ async function main() {
             (fresh.share_count !== undefined && fresh.share_count !== oldShares) ||
             (fresh.comments !== undefined && fresh.comments !== oldComments) ||
             reactionsAdvanced ||
-            newAnnotations.length > 0
+            annotationsChanged
           ) {
             const changedItem = {
               pin_id: pinId,
@@ -410,8 +432,8 @@ async function main() {
             } else if (fresh.reactions && Object.keys(fresh.reactions).length > 0) {
               changedItem.reactions = fresh.reactions;
             }
-            if (newAnnotations.length > 0) {
-              changedItem.annotations = newAnnotations;
+            if (annotationsChanged && freshAnnList.length > 0) {
+              changedItem.annotations = freshAnnList;
             }
             if (typeof fresh.share_count === 'number' && fresh.share_count > 0) {
               changedItem.share_count = fresh.share_count;

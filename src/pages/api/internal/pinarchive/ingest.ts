@@ -72,21 +72,41 @@ export function normalizeAnnotation(ann: any): PinAnnotation | null {
   if (typeof ann === 'object') {
     const rawName = typeof ann.name === 'string' ? ann.name.trim() : '';
     if (!rawName) return null;
+    const trimmedId = ann.idea_id !== undefined && ann.idea_id !== null ? String(ann.idea_id).trim() : null;
+    const trimmedUrl = ann.url !== undefined && ann.url !== null ? String(ann.url).trim() : null;
     return {
       name: rawName,
-      idea_id: ann.idea_id !== undefined && ann.idea_id !== null ? String(ann.idea_id).trim() : null,
-      url: ann.url !== undefined && ann.url !== null ? String(ann.url).trim() : null,
+      idea_id: trimmedId || null,
+      url: trimmedUrl || null,
     };
   }
   return null;
+}
+
+function dedupeAndNormalize(list: any[]): PinAnnotation[] {
+  const result: PinAnnotation[] = [];
+  const seen = new Set<string>();
+  for (const a of list) {
+    const norm = normalizeAnnotation(a);
+    if (norm) {
+      const lower = norm.name.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        result.push(norm);
+      }
+    }
+  }
+  return result;
 }
 
 /**
  * Merges incoming annotations with existing annotations:
  * 1. Adopts incoming list as the authoritative set of active tags (prunes retired tags).
  * 2. If incoming is undefined, retains existing annotations (case-insensitive deduplication).
- * 3. Inherits existing idea_id and url if incoming lacks them (enrichment preservation).
- * 4. Normalizes casing and deduplicates case-insensitively, preserving incoming display casing.
+ * 3. Two-writer contract: If incoming is empty array [] (e.g. GAS push with annotations: []),
+ *    preserves existing enriched annotations instead of wiping them out.
+ * 4. Inherits existing idea_id and url if incoming lacks them (enrichment preservation).
+ * 5. Normalizes casing and deduplicates case-insensitively, preserving incoming display casing.
  */
 export function mergeAnnotationsLatest(
   incoming: any[] | undefined | null,
@@ -95,22 +115,19 @@ export function mergeAnnotationsLatest(
   if (incoming === undefined) {
     if (existing === undefined) return undefined;
     if (!Array.isArray(existing)) return [];
-    const result: PinAnnotation[] = [];
-    const seen = new Set<string>();
-    for (const a of existing) {
-      const norm = normalizeAnnotation(a);
-      if (norm) {
-        const lower = norm.name.toLowerCase();
-        if (!seen.has(lower)) {
-          seen.add(lower);
-          result.push(norm);
-        }
-      }
-    }
-    return result;
+    return dedupeAndNormalize(existing);
   }
 
   if (incoming === null || !Array.isArray(incoming)) return [];
+
+  // Two-writer contract: If incoming is empty array [] (e.g. GAS push with annotations: []),
+  // do NOT wipe out existing workflow annotations.
+  if (incoming.length === 0) {
+    if (existing && Array.isArray(existing) && existing.length > 0) {
+      return dedupeAndNormalize(existing);
+    }
+    return [];
+  }
 
   // Index existing annotations by lowercase name
   const existingMap = new Map<string, PinAnnotation>();
