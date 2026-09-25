@@ -75,8 +75,8 @@ BEGIN
     r.image_url,
     r.image_signature,
     r.dominant_color,
-    coalesce(r.is_video, false) AS is_video,
-    coalesce(r.is_product, false) AS is_product,
+    r.is_video,
+    r.is_product,
     r.price,
     r.currency,
     r.site_name,
@@ -85,7 +85,7 @@ BEGIN
     coalesce(r.comments, 0)::int AS comments,
     r.reactions,
     coalesce(r.velocity, 0)::numeric AS velocity,
-    coalesce(r.promoted, false) AS promoted,
+    r.promoted,
     r.share_count,
     r.archived_at,
     CASE
@@ -271,10 +271,14 @@ BEGIN
       description = coalesce(excluded.description, pa_pins.description),
       link = coalesce(excluded.link, pa_pins.link),
       domain = coalesce(excluded.domain, pa_pins.domain),
+      board_id = coalesce(excluded.board_id, pa_pins.board_id),
       board_name = coalesce(excluded.board_name, pa_pins.board_name),
+      node_id = coalesce(excluded.node_id, pa_pins.node_id),
+      created_at_pinterest = coalesce(pa_pins.created_at_pinterest, excluded.created_at_pinterest),
       image_url = coalesce(excluded.image_url, pa_pins.image_url),
-      is_video = excluded.is_video,
-      is_product = excluded.is_product,
+      is_video = coalesce(excluded.is_video, pa_pins.is_video),
+      is_product = coalesce(excluded.is_product, pa_pins.is_product),
+      promoted = coalesce(excluded.promoted, pa_pins.promoted),
       price = coalesce(excluded.price, pa_pins.price),
       currency = coalesce(excluded.currency, pa_pins.currency),
       site_name = coalesce(excluded.site_name, pa_pins.site_name),
@@ -283,7 +287,19 @@ BEGIN
       reactions = CASE
         WHEN excluded.reactions IS NOT NULL
              AND excluded.reactions <> '{}'::jsonb
-             AND coalesce((excluded.reactions->>'total')::bigint, 0) >= coalesce((pa_pins.reactions->>'total')::bigint, 0)
+             AND (
+               CASE
+                 WHEN (excluded.reactions->>'total') ~ '^-?[0-9]+(\.[0-9]+)?$'
+                 THEN (excluded.reactions->>'total')::numeric::bigint
+                 ELSE 0
+               END
+             ) >= (
+               CASE
+                 WHEN (pa_pins.reactions->>'total') ~ '^-?[0-9]+(\.[0-9]+)?$'
+                 THEN (pa_pins.reactions->>'total')::numeric::bigint
+                 ELSE 0
+               END
+             )
         THEN excluded.reactions
         ELSE pa_pins.reactions
       END,
@@ -344,7 +360,11 @@ BEGIN
       u.repins,
       u.comments,
       u.share_count,
-      coalesce((u.reactions->>'total')::bigint, 0)
+      CASE
+        WHEN (u.reactions->>'total') ~ '^-?[0-9]+(\.[0-9]+)?$'
+        THEN (u.reactions->>'total')::numeric::bigint
+        ELSE 0
+      END
     FROM upserted u
     WHERE NOT EXISTS (
       SELECT 1 FROM (
@@ -358,7 +378,13 @@ BEGIN
         AND pm.repins >= u.repins
         AND pm.shares >= u.share_count
         AND pm.comments >= u.comments
-        AND pm.reactions_total >= coalesce((u.reactions->>'total')::bigint, 0)
+        AND pm.reactions_total >= (
+          CASE
+            WHEN (u.reactions->>'total') ~ '^-?[0-9]+(\.[0-9]+)?$'
+            THEN (u.reactions->>'total')::numeric::bigint
+            ELSE 0
+          END
+        )
     )
     ON CONFLICT (pin_ref, recorded_at) DO NOTHING
     RETURNING id

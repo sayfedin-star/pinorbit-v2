@@ -425,6 +425,11 @@ async function main() {
               archived_at: p.archived_at ?? null,
               refreshed_at: new Date().toISOString(),
             };
+            if (fresh.is_video !== undefined) changedItem.is_video = Boolean(fresh.is_video);
+            if (fresh.node_id) changedItem.node_id = fresh.node_id;
+            if (fresh.board_id) changedItem.board_id = fresh.board_id;
+            if (fresh.canonical_pin_id) changedItem.canonical_pin_id = fresh.canonical_pin_id;
+            if (fresh.seo_category) changedItem.seo_category = fresh.seo_category;
             if (freshReactionsTotal !== null && freshReactionsTotal >= oldReactionsTotal && freshReactionsTotal > 0) {
               changedItem.reactions = fresh.reactions;
             } else if (oldReactionsTotal > 0) {
