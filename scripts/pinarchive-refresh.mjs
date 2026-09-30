@@ -3,6 +3,7 @@
  * Env Vars: PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, PINORBIT_WORKER_URL, PINARCHIVE_INGEST_SECRET
  */
 
+import fs from 'node:fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import {
@@ -12,6 +13,11 @@ import {
   extractPinData,
 } from './lib/pinterest.mjs';
 import { pushToIngest, fetchAllAccounts, partitionAccountsLPT } from './lib/pa-client.mjs';
+import {
+  getPinFromRunnerCache,
+  savePinsToRunnerCache,
+  getRunnerCacheStats,
+} from './lib/runner-cache.mjs';
 
 const CFG = {
   SLEEP_MS_MIN: 1500,
@@ -222,7 +228,25 @@ async function main() {
     : partitionAccountsLPT(accounts, SHARD_COUNT, REFRESH_SHARD);
 
   console.log(`Found ${accounts.length} account(s) total — processing ${shardedAccounts.length} in shard ${REFRESH_SHARD + 1}/${SHARD_COUNT}\n`);
+
+  if (!shardedAccounts.length) {
+    console.log('No accounts assigned to this shard.');
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      try {
+        fs.appendFileSync(
+          process.env.GITHUB_STEP_SUMMARY,
+          `### 🔄 Refresh Shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} (⚪ Idle)\n*No accounts assigned to this shard in current scope.*\n\n`,
+          'utf-8'
+        );
+      } catch (e) {
+        console.warn('Could not write to GITHUB_STEP_SUMMARY:', e.message);
+      }
+    }
+    return;
+  }
+
   const summary = { refreshed: 0, updated: 0, pushed: 0, errors: [] };
+  const accountSummaries = [];
 
   for (const acc of shardedAccounts) {
     const wsPrefix = `[ws:${acc.workspace_id.slice(0, 8)}]`;
@@ -318,27 +342,34 @@ async function main() {
         try {
           if (circuitBroken) return;
 
-          // Rate-limit cooldown check
-          if (Date.now() < rateLimitCooldownUntil) {
-            const waitMs = Math.max(0, rateLimitCooldownUntil - Date.now());
-            console.warn(`[RATE LIMIT] Pausing for ${Math.round(waitMs / 1000)}s cooldown before pin ${p.pin_id}`);
-            await sleep(waitMs);
+          const pinId = String(p.pin_id);
+          let fresh = getPinFromRunnerCache(pinId);
+
+          if (!fresh) {
+            // Rate-limit cooldown check
+            if (Date.now() < rateLimitCooldownUntil) {
+              const waitMs = Math.max(0, rateLimitCooldownUntil - Date.now());
+              console.warn(`[RATE LIMIT] Pausing for ${Math.round(waitMs / 1000)}s cooldown before pin ${p.pin_id}`);
+              await sleep(waitMs);
+            }
+
+            if (circuitBroken) return;
+
+            // Apply jitter delay before request
+            await sleep(randomJitterMs());
+
+            fresh = await fetchPinFromPinterest(pinId);
+            if (fresh && fresh.ok) {
+              savePinsToRunnerCache({ pin_id: pinId, ...fresh });
+            }
           }
 
-          if (circuitBroken) return;
-
-          // Apply jitter delay before request
-          await sleep(randomJitterMs());
-
-          const pinId = String(p.pin_id);
-          const fresh = await fetchPinFromPinterest(pinId);
-
-          if (!fresh.ok) {
-            if (fresh.code === 429) {
+          if (!fresh || !fresh.ok) {
+            if (fresh?.code === 429) {
               consecutiveErrors++;
               rateLimitCooldownUntil = Date.now() + 60000;
               console.warn(`[429 RATE LIMIT] Pin ${pinId} received 429. Setting 60s cooldown.`);
-            } else if (fresh.code === 403) {
+            } else if (fresh?.code === 403) {
               consecutiveErrors++;
             } else {
               consecutiveErrors = 0;
@@ -351,11 +382,11 @@ async function main() {
               return;
             }
 
-            if (fresh.code === 200 && fresh.diag) {
+            if (fresh?.code === 200 && fresh?.diag) {
               console.warn(`[DIAG] ${pinId}: html=${Math.round(fresh.diag.htmlLen / 1024)}KB relay=${fresh.diag.relay} pws=${fresh.diag.pws} hasPinId=${fresh.diag.hasPinId}`);
             }
-            console.warn(`[FAIL] ${pinId}: ${fresh.error || 'http ' + fresh.code} (code=${fresh.code})`);
-            summary.errors.push(`${pinId}: ${fresh.error || 'http ' + fresh.code}`);
+            console.warn(`[FAIL] ${pinId}: ${fresh?.error || 'http ' + (fresh?.code ?? 'unknown')} (code=${fresh?.code ?? 0})`);
+            summary.errors.push(`${pinId}: ${fresh?.error || 'http ' + (fresh?.code ?? 'unknown')}`);
             return;
           }
 
@@ -514,12 +545,48 @@ async function main() {
         }
       }
     }
+
+    accountSummaries.push({
+      username: acc.username,
+      checked: pins.length,
+      changed: changedPins.length,
+      circuitBroken,
+    });
   }
 
-  console.log(`\nSummary: checked=${summary.refreshed}, changed=${summary.updated}, pushed=${summary.pushed}, errors=${summary.errors.length}`);
+  const cacheStats = getRunnerCacheStats();
+  console.log(`\nSummary: checked=${summary.refreshed}, changed=${summary.updated}, pushed=${summary.pushed}, cacheHits=${cacheStats.hits}, errors=${summary.errors.length}`);
   const isFiltered = Boolean(REFRESH_WORKSPACE_ID || REFRESH_USERNAME || REFRESH_USERNAMES.length > 0);
   const hasPushErrors = summary.errors.some(e => e.startsWith('push:'));
   const allFailed = summary.errors.length > 0 && summary.refreshed === 0;
+
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try {
+      const statusIcon = (hasPushErrors || allFailed)
+        ? '❌ Failed'
+        : (summary.errors.length > 0 ? '⚠️ Has Errors' : '✅ Completed');
+      let md = `### 🔄 Refresh Shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} (${statusIcon})\n\n`;
+      if (accountSummaries.length > 0) {
+        md += `| Account | Pins Scanned | Pins Updated | Status |\n`;
+        md += `| :--- | :---: | :---: | :---: |\n`;
+        for (const row of accountSummaries) {
+          const rowStatus = row.circuitBroken ? '❌ Circuit-broken' : '✅ OK';
+          md += `| \`@${row.username}\` | ${row.checked} | **${row.changed}** | ${rowStatus} |\n`;
+        }
+        md += `\n`;
+      }
+      md += `**Total:** ${summary.refreshed} pin(s) checked, **${summary.updated}** changed, **${summary.pushed}** pushed to Ingest.\n\n`;
+      if (cacheStats.hits > 0) {
+        md += `⚡ **Runner Cache Acceleration:** ${cacheStats.hits} pin(s) served instantly from local runner cache (saved ${cacheStats.hits} network requests).\n\n`;
+      }
+      if (summary.errors.length > 0) {
+        md += `<details><summary>⚠️ View Errors (${summary.errors.length})</summary>\n\n- ${summary.errors.join('\n- ')}\n\n</details>\n\n`;
+      }
+      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md, 'utf-8');
+    } catch (e) {
+      console.warn('Could not write to GITHUB_STEP_SUMMARY:', e.message);
+    }
+  }
 
   if (hasPushErrors || allFailed) {
     process.exit(1);

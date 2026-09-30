@@ -51,6 +51,11 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -67,10 +72,31 @@ jobs:
       RUN_TRIGGER: ${{ github.event.inputs.trigger || github.event.inputs.run_trigger || '' }}
       EVENT_NAME: ${{ github.event_name }}
       GITHUB_EVENT_NAME: ${{ github.event_name }}
+      COMPETITOR_SHARD: ${{ matrix.shard }}
+      SHARD_COUNT: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install @supabase/supabase-js --no-save
-      - run: node scripts/update-competitors.mjs
+          cache: 'npm'
+
+      - name: Log Egress IP
+        run: |
+          echo "Checking runner egress IP..."
+          curl -s --max-time 10 https://api.ipify.org?format=json || true
+
+      - name: Stagger Job Start (IP & DB distribution)
+        run: |
+          DELAY=$(( ${{ matrix.shard }} * 3 ))
+          echo "Stagger delay for shard ${{ matrix.shard }}: ${DELAY}s"
+          sleep $DELAY
+
+      - name: Install dependencies
+        run: npm install @supabase/supabase-js --no-save
+
+      - name: Run Pinterest Competitors Sync (Shard ${{ matrix.shard }}/5)
+        run: node scripts/update-competitors.mjs

@@ -1,10 +1,15 @@
-// Node 22. Proven Pinterest scraping headers + DB vault + job tracking + self-heal.
+// Node 22. Proven Pinterest scraping headers + DB vault + job tracking + self-heal + matrix sharding.
 // Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (existing).
 // Vault: encrypted cookies in pinterest_cookies (KEK from competitor_kek table).
 // Jobs: per-workspace tracking in competitor_ingestion_jobs.
+import fs from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
 import { aesKey, decryptCookieValue, resolveKek, getVaultCookie } from './lib/vault.mjs';
+
+// ── Sharding Configuration ──
+const SHARD_COUNT = Math.max(1, parseInt(process.env.SHARD_COUNT || '1', 10) || 1);
+const COMPETITOR_SHARD = Math.max(0, parseInt(process.env.COMPETITOR_SHARD || process.env.SHARD_INDEX || '0', 10) || 0);
 
 // ── PROVEN headers (verbatim from working old script — Chrome 151) ──
 function getHeaders(username, activeCookie) {
@@ -52,8 +57,8 @@ async function pinterestFetch(url, username, cookiePlain, maxRetries = 3) {
 const resourceUrl = (username, resource, options) =>
   `https://www.pinterest.com/resource/${resource}/get/?source_url=%2F${username}%2F&data=${encodeURIComponent(JSON.stringify({ options, context: {} }))}&_=${Date.now()}`;
 
-// ── Main: per-workspace processing ──
-async function processWorkspace(db, wsId, kek, options = {}) {
+// ── Per-workspace processing for assigned shard competitors ──
+async function processWorkspace(db, wsId, kek, comps, options = {}) {
   const now = new Date().toISOString();
   const parseIsoSafe = (val, fallback = null) => {
     if (val === null || val === undefined) return fallback;
@@ -70,41 +75,25 @@ async function processWorkspace(db, wsId, kek, options = {}) {
       return fallback;
     }
   };
+
+  if (!comps || comps.length === 0) {
+    return { ok: true, processed: 0, items: [], errors: [] };
+  }
+
   const cookie = await getVaultCookie(db, wsId, kek);
   if (!cookie) {
-    return { ok: false, error: 'No Pinterest cookie available in vault for this workspace' };
+    return { ok: false, error: 'No Pinterest cookie available in vault for this workspace', processed: 0, items: [], errors: ['No cookie available'] };
   }
   console.log(`🍪 [${wsId.slice(0, 8)}] using vault cookie ${cookie.id.slice(0, 8)}`);
 
-  let query = db.from('competitors').select('id, username').eq('workspace_id', wsId);
-  
-  if (!options.forceRun) {
-    query = query.eq('is_active', true);
-  }
-
-  const { data: allComps, error } = await query;
-  if (error || !allComps) return { ok: false, error: error?.message || 'fetch failed' };
-
-  let comps = allComps;
-
-  // Filter by competitor_ids if provided (scope = 'selected')
-  if (options.competitorIds && options.competitorIds.length > 0) {
-    const idSet = new Set(options.competitorIds);
-    comps = comps.filter(c => idSet.has(c.id));
-  } else if (options.targetUsername && options.targetUsername.trim()) {
-    const targetU = options.targetUsername.trim().toLowerCase();
-    comps = comps.filter(c => c.username.toLowerCase() === targetU);
-  }
-
-  if (comps.length === 0) return { ok: true, processed: 0, errors: [] };
-
   const errors = [];
+  const processedItems = [];
   let processed = 0;
 
   for (const comp of comps) {
     const username = comp.username.trim();
     console.log(`\n--------------------------------------------------`);
-    console.log(`🔍 Processing Competitor (${processed + 1}/${comps.length}): @${username}`);
+    console.log(`🔍 [Shard ${COMPETITOR_SHARD + 1}/${SHARD_COUNT}] Processing Competitor (${processed + 1}/${comps.length}): @${username}`);
 
     try {
       // ── STEP 1: Profile (with self-heal on 401/403) ──
@@ -118,16 +107,22 @@ async function processWorkspace(db, wsId, kek, options = {}) {
         activeCookie = '';
         userRes = await pinterestFetch(userUrl, username, activeCookie);
       }
+
+      let profileReach = 0;
+      let profileViews = 0;
+      let followers = 0;
+      let pins = 0;
+
       if (!userRes.ok) {
         console.warn(`⚠️ UserResource HTTP ${userRes.status} for @${username}. Skipping profile update.`);
       } else {
         const userPayload = await userRes.json();
         const userData = userPayload?.resource_response?.data;
         if (userData) {
-          const profileViews = Number(userData.profile_views ?? userData.monthly_views ?? userData.profile_reach ?? 0) || 0;
-          const profileReach = Number(userData.profile_reach ?? userData.profile_views ?? userData.monthly_views ?? 0) || 0;
-          const followers = Number(userData.follower_count || 0) || 0;
-          const pins = Number(userData.pin_count || 0) || 0;
+          profileViews = Number(userData.profile_views ?? userData.monthly_views ?? userData.profile_reach ?? 0) || 0;
+          profileReach = Number(userData.profile_reach ?? userData.profile_views ?? userData.monthly_views ?? 0) || 0;
+          followers = Number(userData.follower_count || 0) || 0;
+          pins = Number(userData.pin_count || 0) || 0;
           const fullName = userData.full_name || username;
           const websiteUrl = userData.website_url || (userData.domain_url ? `https://${userData.domain_url}` : null);
           const domainVerified = !!userData.domain_verified;
@@ -200,6 +195,8 @@ async function processWorkspace(db, wsId, kek, options = {}) {
           break;
         }
       }
+
+      let boardsCount = 0;
       if (allBoards.length > 0 && !options.dryRun) {
         // Deduplicate boards by board_id to prevent Postgres "ON CONFLICT DO UPDATE command cannot affect row a second time"
         const seenBoardIds = new Set();
@@ -212,6 +209,7 @@ async function processWorkspace(db, wsId, kek, options = {}) {
           }
         }
 
+        boardsCount = uniqueBoards.length;
         const boardsToUpsert = uniqueBoards.map(b => {
           const boardUrl = b.url ? (b.url.startsWith('http') ? b.url : `https://www.pinterest.com${b.url}`) : `https://www.pinterest.com/${username}/`;
           const realCreatedAt = parseIsoSafe(b.created_at, null);
@@ -238,21 +236,70 @@ async function processWorkspace(db, wsId, kek, options = {}) {
       }
 
       processed++;
+      processedItems.push({
+        username,
+        reach: profileReach,
+        followers,
+        pins,
+        boards: boardsCount,
+        status: 'ok',
+      });
 
-      // Real-time telemetry update to competitor_ingestion_jobs table for live UI polling
+      // Real-time atomic telemetry update to competitor_ingestion_jobs table for live UI polling
       if (options.jobId) {
-        await db.from('competitor_ingestion_jobs').update({
-          items_processed: processed,
-          error_message: errors.length ? errors.join(' | ').slice(0, 2000) : null,
-        }).eq('id', options.jobId);
+        try {
+          const { data: currentCount } = await db.rpc('increment_competitor_job_processed', {
+            p_job_id: options.jobId,
+            p_inc: 1,
+          });
+          if (options.totalInScope && currentCount != null && currentCount >= options.totalInScope) {
+            await db.from('competitor_ingestion_jobs').update({
+              status: errors.length >= options.totalInScope ? 'failed' : 'completed',
+              completed_at: new Date().toISOString(),
+            }).eq('id', options.jobId);
+          }
+        } catch {
+          await db.from('competitor_ingestion_jobs').update({
+            items_processed: processed,
+            error_message: errors.length ? errors.join(' | ').slice(0, 2000) : null,
+          }).eq('id', options.jobId);
+        }
       }
+
+      // Gentle inter-competitor pacing delay
+      await new Promise(r => setTimeout(r, 400 + Math.random() * 200));
     } catch (err) {
       console.error(`❌ Error processing @${username}:`, err.message);
       errors.push(`@${username}: ${err.message}`);
+      processedItems.push({
+        username,
+        reach: 0,
+        followers: 0,
+        pins: 0,
+        boards: 0,
+        status: 'error',
+        error: err.message,
+      });
+
+      // Still increment atomic counter on error so job progress does not stall
+      if (options.jobId) {
+        try {
+          const { data: currentCount } = await db.rpc('increment_competitor_job_processed', {
+            p_job_id: options.jobId,
+            p_inc: 1,
+          });
+          if (options.totalInScope && currentCount != null && currentCount >= options.totalInScope) {
+            await db.from('competitor_ingestion_jobs').update({
+              status: errors.length >= options.totalInScope ? 'failed' : 'completed',
+              completed_at: new Date().toISOString(),
+            }).eq('id', options.jobId);
+          }
+        } catch (_) {}
+      }
     }
   }
 
-  return { ok: true, processed, errors };
+  return { ok: true, processed, items: processedItems, errors };
 }
 
 async function main() {
@@ -267,24 +314,30 @@ async function main() {
   const DRY_RUN = process.env.DRY_RUN === 'true';
   if (DRY_RUN) console.log('⚠️ DRY_RUN mode — no writes will be performed.');
 
-  // Auto-recover stale jobs stuck in 'running' status for > 30 minutes
-  try {
-    const { data: cleaned } = await db.rpc('cleanup_stale_competitor_jobs', { p_interval_minutes: 30 });
-    if (cleaned && cleaned > 0) {
-      console.log(`🧹 Auto-healed ${cleaned} stale competitor ingestion job(s) older than 30 minutes.`);
-    }
-  } catch {
+  console.log(`\n==================================================`);
+  console.log(`⚡ PinOrbit Competitors Sync | Shard ${COMPETITOR_SHARD + 1}/${SHARD_COUNT}`);
+  console.log(`==================================================`);
+
+  // Auto-recover stale jobs stuck in 'running' status for > 30 minutes (only shard 0 handles recovery)
+  if (COMPETITOR_SHARD === 0) {
     try {
-      const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-      await db.from('competitor_ingestion_jobs')
-        .update({
-          status: 'failed',
-          error_message: 'Job timed out after 30 minutes in running status (auto-healed)',
-          completed_at: new Date().toISOString(),
-        })
-        .eq('status', 'running')
-        .lt('started_at', thirtyMinAgo);
-    } catch {}
+      const { data: cleaned } = await db.rpc('cleanup_stale_competitor_jobs', { p_interval_minutes: 30 });
+      if (cleaned && cleaned > 0) {
+        console.log(`🧹 Auto-healed ${cleaned} stale competitor ingestion job(s) older than 30 minutes.`);
+      }
+    } catch {
+      try {
+        const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        await db.from('competitor_ingestion_jobs')
+          .update({
+            status: 'failed',
+            error_message: 'Job timed out after 30 minutes in running status (auto-healed)',
+            completed_at: new Date().toISOString(),
+          })
+          .eq('status', 'running')
+          .lt('started_at', thirtyMinAgo);
+      } catch {}
+    }
   }
 
   // Parse Scope & Inputs
@@ -310,7 +363,7 @@ async function main() {
 
   if (workspaces.length === 0) {
     console.log('ℹ️ No active workspaces found to process.');
-    if (inputJobId) {
+    if (inputJobId && COMPETITOR_SHARD === 0) {
       await db.from('competitor_ingestion_jobs').update({
         status: 'completed',
         items_processed: 0,
@@ -318,10 +371,17 @@ async function main() {
         completed_at: new Date().toISOString(),
       }).eq('id', inputJobId);
     }
+    const stepSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+    if (stepSummaryPath) {
+      try {
+        const md = `### ℹ️ PinOrbit Competitors Sync (Shard ${COMPETITOR_SHARD + 1}/${SHARD_COUNT})\n\nNo active workspaces or competitors found to process.\n`;
+        fs.appendFileSync(stepSummaryPath, md, 'utf-8');
+      } catch (_) {}
+    }
     process.exit(0);
   }
 
-  console.log(`🚀 Execution Scope: ${targetScope} | Workspaces: ${workspaces.length} | Competitors Filter: ${competitorIds.length ? competitorIds.length : 'All'} | DRY_RUN=${DRY_RUN} | FORCE=${forceRun}`);
+  console.log(`🚀 Execution Scope: ${targetScope} | Workspaces: ${workspaces.length} | Competitors Filter: ${competitorIds.length ? competitorIds.length : (targetUsername || 'All')} | DRY_RUN=${DRY_RUN} | FORCE=${forceRun}`);
 
   // Check Master Workspace Global Kill-Switch for scheduled pipeline runs
   const isGhScheduled = (process.env.EVENT_NAME || process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'schedule';
@@ -341,6 +401,13 @@ async function main() {
             const { data: masterPipe } = await db.from('competitor_pipeline_settings').select('github_schedule_enabled').eq('workspace_id', masterId).maybeSingle();
             if (masterPipe && masterPipe.github_schedule_enabled === false) {
               console.log(`[GLOBAL SKIP] GitHub Actions 02:00 UTC schedule is globally disabled by Master Workspace (${masterId.slice(0, 8)}). Exiting immediately.`);
+              const stepSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+              if (stepSummaryPath) {
+                try {
+                  const md = `### ⏹️ PinOrbit Competitors Sync (Shard ${COMPETITOR_SHARD + 1}/${SHARD_COUNT})\n\nGitHub Actions 02:00 UTC schedule is globally disabled by Master Workspace (${masterId.slice(0, 8)}).\n`;
+                  fs.appendFileSync(stepSummaryPath, md, 'utf-8');
+                } catch (_) {}
+              }
               return;
             }
           }
@@ -355,10 +422,12 @@ async function main() {
 
   let anyFatal = false;
   let grandProcessed = 0;
+  let grandBoards = 0;
+  let processedWorkspaces = 0;
+  const grandItems = [];
+  const allErrors = [];
 
   for (const wsId of workspaces) {
-    let wsJobId = (inputJobId && (targetWsId === wsId || workspaces.length === 1)) ? inputJobId : null;
-
     try {
       // Check per-workspace pipeline settings
       const { data: wsPipe } = await db.from('competitor_pipeline_settings').select('is_enabled, github_schedule_enabled, dry_run').eq('workspace_id', wsId).maybeSingle();
@@ -373,7 +442,57 @@ async function main() {
         continue;
       }
 
-      if (!wsJobId) {
+      // Fetch competitors for this workspace
+      let query = db.from('competitors').select('id, username').eq('workspace_id', wsId);
+      if (!forceRun) {
+        query = query.eq('is_active', true);
+      }
+      const { data: allComps, error: compErr } = await query;
+      if (compErr || !allComps) {
+        console.error(`❌ Failed to fetch competitors for ws ${wsId}:`, compErr?.message);
+        continue;
+      }
+
+      let comps = allComps;
+      if (competitorIds && competitorIds.length > 0) {
+        const idSet = new Set(competitorIds);
+        comps = comps.filter(c => idSet.has(c.id));
+      } else if (targetUsername && targetUsername.trim()) {
+        const targetU = targetUsername.trim().toLowerCase();
+        comps = comps.filter(c => c.username.toLowerCase() === targetU);
+      }
+
+      // Deterministic sort by UUID
+      comps.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+      const totalInScope = comps.length;
+
+      if (totalInScope === 0) {
+        console.log(`ℹ️ [${wsId.slice(0, 8)}] 0 competitors in scope.`);
+        continue;
+      }
+
+      // Partition deterministically across shards
+      const myComps = comps.filter((_, idx) => idx % SHARD_COUNT === COMPETITOR_SHARD);
+      console.log(`[SHARD ${COMPETITOR_SHARD + 1}/${SHARD_COUNT}] Workspace ${wsId.slice(0, 8)}: ${myComps.length}/${totalInScope} competitor(s) assigned.`);
+
+      if (myComps.length === 0) {
+        continue;
+      }
+
+      processedWorkspaces++;
+      const effectiveDryRun = DRY_RUN || Boolean(wsPipe?.dry_run);
+
+      // Handle job tracking record
+      let wsJobId = null;
+      if (inputJobId && (targetWsId === wsId || workspaces.length === 1)) {
+        wsJobId = inputJobId;
+        if (COMPETITOR_SHARD === 0) {
+          await db.from('competitor_ingestion_jobs').update({
+            status: 'running',
+            started_at: new Date().toISOString(),
+          }).eq('id', wsJobId);
+        }
+      } else {
         const rawTrigger = (process.env.RUN_TRIGGER || '').trim().toLowerCase();
         const validTriggers = ['cron', 'manual', 'run_now', 'full'];
         const runTrigger = validTriggers.includes(rawTrigger)
@@ -382,66 +501,110 @@ async function main() {
 
         const { data: job } = await db.from('competitor_ingestion_jobs').insert({
           workspace_id: wsId,
-          competitor_id: competitorIds.length === 1 ? competitorIds[0] : null,
+          competitor_id: totalInScope === 1 && myComps.length === 1 ? myComps[0].id : null,
           status: 'running',
           trigger: runTrigger,
           items_processed: 0,
+          error_message: SHARD_COUNT > 1 ? `Shard ${COMPETITOR_SHARD + 1}/${SHARD_COUNT}` : null,
           started_at: new Date().toISOString(),
         }).select('id').single();
         if (job) wsJobId = job.id;
-      } else {
-        await db.from('competitor_ingestion_jobs').update({
-          status: 'running',
-          started_at: new Date().toISOString(),
-        }).eq('id', wsJobId);
       }
 
-      const effectiveDryRun = DRY_RUN || Boolean(wsPipe?.dry_run);
-
-      const r = await processWorkspace(db, wsId, kek, {
-        targetUsername,
-        competitorIds,
+      const r = await processWorkspace(db, wsId, kek, myComps, {
         jobId: wsJobId,
         forceRun,
         dryRun: effectiveDryRun,
+        totalInScope,
       });
 
       if (wsJobId) {
-        const isJobFailed = !r.ok || (r.processed === 0 && !effectiveDryRun && (competitorIds.length > 0 || r.errors.length > 0));
-        await db.from('competitor_ingestion_jobs').update({
-          status: isJobFailed ? 'failed' : 'completed',
-          items_processed: effectiveDryRun ? 0 : r.processed,
-          error_message: r.ok ? (r.errors.length ? r.errors.join(' | ').slice(0, 2000) : null) : r.error,
-          completed_at: new Date().toISOString(),
-        }).eq('id', wsJobId);
+        if (inputJobId && wsJobId === inputJobId) {
+          // If UI dispatched with specific job_id:
+          if (totalInScope === 1) {
+            const isJobFailed = !r.ok || (r.processed === 0 && !effectiveDryRun && r.errors.length > 0);
+            await db.from('competitor_ingestion_jobs').update({
+              status: isJobFailed ? 'failed' : 'completed',
+              items_processed: effectiveDryRun ? 0 : r.processed,
+              error_message: r.ok ? (r.errors.length ? r.errors.join(' | ').slice(0, 2000) : null) : r.error,
+              completed_at: new Date().toISOString(),
+            }).eq('id', wsJobId);
+          } else {
+            // In multi-competitor sharded runs, items_processed is maintained atomically via RPC.
+            // Check if all items across all shards have finished.
+            const { data: jobState } = await db.from('competitor_ingestion_jobs').select('items_processed, status').eq('id', wsJobId).maybeSingle();
+            if (jobState && jobState.status === 'running' && jobState.items_processed >= totalInScope) {
+              await db.from('competitor_ingestion_jobs').update({
+                status: 'completed',
+                completed_at: new Date().toISOString(),
+              }).eq('id', wsJobId);
+            }
+          }
+        } else {
+          // Auto-created job for this specific shard (e.g. daily cron)
+          const isJobFailed = !r.ok || (r.processed === 0 && !effectiveDryRun && r.errors.length > 0);
+          await db.from('competitor_ingestion_jobs').update({
+            status: isJobFailed ? 'failed' : 'completed',
+            items_processed: effectiveDryRun ? 0 : r.processed,
+            error_message: r.ok
+              ? (r.errors.length ? r.errors.join(' | ').slice(0, 2000) : (SHARD_COUNT > 1 ? `Shard ${COMPETITOR_SHARD + 1}/${SHARD_COUNT} completed (${r.processed} items)` : null))
+              : r.error,
+            completed_at: new Date().toISOString(),
+          }).eq('id', wsJobId);
+        }
       }
 
-      if (!r.ok) {
+      if (!r.ok || (r.processed === 0 && !effectiveDryRun && r.errors?.length > 0)) {
         anyFatal = true;
-        console.error(`❌ ws ${wsId}: ${r.error}`);
+        console.error(`❌ ws ${wsId}: ${r.error || r.errors.join(' | ')}`);
       }
+
       grandProcessed += r.processed || 0;
+      grandItems.push(...(r.items || []));
+      grandBoards += (r.items || []).reduce((acc, it) => acc + (it.boards || 0), 0);
+      if (r.errors?.length) allErrors.push(...r.errors);
+
     } catch (wsErr) {
-      console.error(`❌ Workspace ${wsId} crashed:`, wsErr);
-      if (wsJobId) {
-        await db.from('competitor_ingestion_jobs').update({
-          status: 'failed',
-          error_message: `Workspace crash: ${wsErr?.message || String(wsErr)}`,
-          completed_at: new Date().toISOString(),
-        }).eq('id', wsJobId);
-      }
+      console.error(`❌ Workspace ${wsId} crashed on shard ${COMPETITOR_SHARD + 1}:`, wsErr);
       anyFatal = true;
+      allErrors.push(`Workspace ${wsId}: ${wsErr?.message || String(wsErr)}`);
     }
   }
 
-  console.log(`\n🎉 Competitor sync complete! (${grandProcessed} profile(s) across ${workspaces.length} workspace(s))`);
-  process.exit(anyFatal && grandProcessed === 0 ? 1 : 0);
+  // ── Unified Observability Dashboard ($GITHUB_STEP_SUMMARY) ──
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try {
+      const statusIcon = allErrors.length > 0 ? '⚠️ Has Errors' : (grandProcessed > 0 ? '✅ Completed' : 'ℹ️ Idle');
+      let md = `### 🎯 Competitors Sync - Shard ${COMPETITOR_SHARD + 1}/${SHARD_COUNT} (${statusIcon})\n\n`;
+      if (grandItems.length > 0) {
+        md += `| Competitor | Reach | Followers | Pins | Boards | Status |\n`;
+        md += `| :--- | :---: | :---: | :---: | :---: | :---: |\n`;
+        for (const item of grandItems) {
+          const statusBadge = item.status === 'ok' ? '✅ OK' : '❌ Failed';
+          md += `| \`@${item.username}\` | ${Number(item.reach || 0).toLocaleString()} | ${Number(item.followers || 0).toLocaleString()} | ${Number(item.pins || 0).toLocaleString()} | **${item.boards}** | ${statusBadge} |\n`;
+        }
+        md += `\n`;
+        md += `**Total for this Shard:** ${grandItems.length} competitor(s) processed, ${grandBoards} boards ingested across ${processedWorkspaces} workspace(s).\n\n`;
+      } else {
+        md += `ℹ️ *No competitors were assigned to this shard for the requested scope.*\n\n`;
+      }
+      if (allErrors.length > 0) {
+        md += `<details><summary>⚠️ View Errors (${allErrors.length})</summary>\n\n- ${allErrors.join('\n- ')}\n\n</details>\n\n`;
+      }
+      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md, 'utf-8');
+    } catch (e) {
+      console.warn('Could not write to GITHUB_STEP_SUMMARY:', e.message);
+    }
+  }
+
+  console.log(`\n🎉 Competitor sync shard [${COMPETITOR_SHARD + 1}/${SHARD_COUNT}] complete! (${grandProcessed} profile(s) across ${processedWorkspaces} active workspace(s))`);
+  process.exit(anyFatal && grandProcessed === 0 && grandItems.length > 0 ? 1 : 0);
 }
 
 main().catch(async (e) => {
   console.error('💥 Fatal:', e);
   const inputJobId = process.env.JOB_ID || null;
-  if (inputJobId) {
+  if (inputJobId && COMPETITOR_SHARD === 0) {
     try {
       const SUPABASE_URL = process.env.SUPABASE_URL;
       const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
