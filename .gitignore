@@ -27,6 +27,7 @@ build/
 *.tmp
 .DS_Store
 Thumbs.db
+.cache/
 
 # Coverage
 coverage/

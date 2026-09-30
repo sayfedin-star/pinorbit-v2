@@ -16,6 +16,7 @@
  * - SHARD_COUNT, DISCOVERY_SHARD (for parallel matrix execution)
  */
 
+import fs from 'node:fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import crypto from 'node:crypto';
@@ -23,6 +24,7 @@ import { createClient } from '@supabase/supabase-js';
 import { aesKey, decryptCookieValue, resolveKek, getVaultCookie } from './lib/vault.mjs';
 import { writeToGas, pushToIngest as pushToIngestClient, fetchAllAccounts } from './lib/pa-client.mjs';
 import { formatPin } from './lib/pinterest.mjs';
+import { savePinsToRunnerCache } from './lib/runner-cache.mjs';
 
 const CFG = {
   PAGE_SIZE: 50,
@@ -468,10 +470,22 @@ async function main() {
 
   if (!shardedAccounts.length) {
     console.log('No accounts assigned to this shard.');
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      try {
+        fs.appendFileSync(
+          process.env.GITHUB_STEP_SUMMARY,
+          `### 🔍 Discovery Shard ${DISCOVERY_SHARD + 1}/${SHARD_COUNT} (⚪ Idle)\n*No accounts assigned to this shard in current scope.*\n\n`,
+          'utf-8'
+        );
+      } catch (e) {
+        console.warn('Could not write to GITHUB_STEP_SUMMARY:', e.message);
+      }
+    }
     return;
   }
 
   const grandSummary = { accounts: 0, pages: 0, newPins: 0, qualifyingPins: 0, sheetPushed: 0, errors: [] };
+  const accountSummaries = [];
 
   for (const acc of shardedAccounts) {
     const wsPrefix = `[ws:${acc.workspace_id.slice(0, 8)}]`;
@@ -654,6 +668,7 @@ async function main() {
       // Check how many pins on this page are already known / after watermark
       let pageNewPinsCount = 0;
       const formattedPagePins = pagePins.map(mapDiscoveryPin);
+      savePinsToRunnerCache(formattedPagePins);
 
       for (const p of formattedPagePins) {
         if (!p.pin_id) continue;
@@ -802,11 +817,43 @@ async function main() {
       status: circuitBroken ? 'failed' : 'completed',
       message: lastResult,
     });
+
+    accountSummaries.push({
+      username: acc.username,
+      pages: pageCount,
+      newPins: newPinsCount,
+      qualifyingPins: qualifyingForDb.length,
+      sheetPushed,
+      circuitBroken,
+    });
   }
 
   console.log(`\n==================================================`);
   console.log(`🎉 Discovery Complete!`);
   console.log(`Accounts: ${grandSummary.accounts} | Pages: ${grandSummary.pages} | New Qualifying Pins: ${grandSummary.qualifyingPins} | Sheet Pushed: ${grandSummary.sheetPushed} | Errors: ${grandSummary.errors.length}`);
+
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try {
+      const statusIcon = grandSummary.errors.length > 0 ? '⚠️ Has Errors' : '✅ Completed';
+      let md = `### 🔍 Discovery Shard ${DISCOVERY_SHARD + 1}/${SHARD_COUNT} (${statusIcon})\n\n`;
+      if (accountSummaries.length > 0) {
+        md += `| Account | Pages | New Pins | Qualifying | Sheet Pushed | Status |\n`;
+        md += `| :--- | :---: | :---: | :---: | :---: | :---: |\n`;
+        for (const row of accountSummaries) {
+          const rowStatus = row.circuitBroken ? '❌ Circuit-broken' : '✅ OK';
+          md += `| \`@${row.username}\` | ${row.pages} | **+${row.newPins}** | ${row.qualifyingPins} | ${row.sheetPushed} | ${rowStatus} |\n`;
+        }
+        md += `\n`;
+      }
+      md += `**Total:** ${grandSummary.accounts} account(s), ${grandSummary.pages} page(s), **+${grandSummary.qualifyingPins}** qualifying pin(s), ${grandSummary.sheetPushed} pushed to Sheet.\n\n`;
+      if (grandSummary.errors.length > 0) {
+        md += `<details><summary>⚠️ View Errors (${grandSummary.errors.length})</summary>\n\n- ${grandSummary.errors.join('\n- ')}\n\n</details>\n\n`;
+      }
+      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md, 'utf-8');
+    } catch (e) {
+      console.warn('Could not write to GITHUB_STEP_SUMMARY:', e.message);
+    }
+  }
 
   if (grandSummary.errors.length > 0) {
     console.error(`\n❌ Discovery pipeline completed with ${grandSummary.errors.length} error(s):\n - ${grandSummary.errors.join('\n - ')}`);

@@ -28,26 +28,33 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+          cache: 'npm'
+
+      - name: Stagger Job Start (DB load distribution)
+        run: |
+          DELAY=$(( ${{ matrix.shard }} * 3 ))
+          echo "Stagger delay for shard ${{ matrix.shard }}: ${DELAY}s"
+          sleep $DELAY
 
       - name: Probe single pin fetch
         continue-on-error: true
         run: node scripts/test-pin-fetch.mjs 1079245498222414527
 
-      - name: Run PinArchive Refresh (Shard ${{ matrix.shard }}/4)
+      - name: Run PinArchive Refresh (Shard ${{ matrix.shard }}/20)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -60,6 +67,6 @@ jobs:
           REFRESH_USERNAMES: ${{ github.event.inputs.usernames || '' }}
           REFRESH_FORCE: ${{ github.event.inputs.force || '' }}
           REFRESH_SHARD: ${{ matrix.shard }}
-          SHARD_COUNT: 4
+          SHARD_COUNT: 20
           REFRESH_MAX_PINS: '0'
         run: node scripts/pinarchive-refresh.mjs

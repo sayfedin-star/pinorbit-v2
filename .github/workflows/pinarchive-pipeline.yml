@@ -7,7 +7,7 @@
 #    - Sheet spot-check: 0 duplicate pin_ids, correct data integrity.
 #    - Sane candidate promotion counts in DB.
 # 3. Full Matrix Run: Once gates pass, run without `usernames` filter for full
-#    workspace coverage across all 4 matrix runner shards.
+#    workspace coverage across all 20 matrix runner shards.
 # ==============================================================================
 
 name: PinArchive Pipeline (GH Brain)
@@ -54,15 +54,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ── STAGE 1: Discovery (Vault Cookies + IP Rotation + GAS Thin Writer) ──
-  discovery:
-    if: github.event.inputs.mode == 'all' || github.event.inputs.mode == 'discovery' || github.event_name == 'schedule' || github.event.inputs.mode == ''
+  # ── FUSED INTRA-SHARD PIPELINE: Stage 1 (Discovery) + Stage 2 (Rotation) ──
+  pipeline:
+    name: Pipeline Shard ${{ matrix.shard }}/20
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 
     steps:
       - name: Checkout
@@ -72,6 +72,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm install @supabase/supabase-js --no-save
@@ -81,13 +82,14 @@ jobs:
           echo "Checking runner egress IP..."
           curl -s --max-time 10 https://api.ipify.org?format=json || true
 
-      - name: Stagger Job Start (IP distribution)
+      - name: Stagger Job Start (IP & DB distribution)
         run: |
-          DELAY=$(( ${{ matrix.shard }} * 45 ))
+          DELAY=$(( ${{ matrix.shard }} * 3 ))
           echo "Stagger delay for shard ${{ matrix.shard }}: ${DELAY}s"
           sleep $DELAY
 
-      - name: Run PinArchive Discovery (Shard ${{ matrix.shard }}/4)
+      - name: Run PinArchive Discovery (Stage 1)
+        if: github.event.inputs.mode == 'all' || github.event.inputs.mode == 'discovery' || github.event_name == 'schedule' || github.event.inputs.mode == ''
         env:
           PINARCHIVE_SUPABASE_URL: ${{ secrets.PINARCHIVE_SUPABASE_URL }}
           PINARCHIVE_SUPABASE_KEY: ${{ secrets.PINARCHIVE_SUPABASE_KEY }}
@@ -102,42 +104,25 @@ jobs:
           FORCE_RUN: ${{ github.event.inputs.force || '' }}
           DISCOVERY_MAX_PAGES: ${{ github.event.inputs.max_pages || '' }}
           DISCOVERY_SHARD: ${{ matrix.shard }}
-          SHARD_COUNT: 4
+          SHARD_COUNT: 20
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: node scripts/pinarchive-discovery.mjs
 
-  # ── STAGE 2: Rotation (Metrics & Enrichment Refresh) ──
-  rotation:
-    needs: [discovery]
-    if: always() && (github.event.inputs.mode == 'all' || github.event.inputs.mode == 'rotation' || github.event_name == 'schedule' || github.event.inputs.mode == '')
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Run PinArchive Refresh (Shard ${{ matrix.shard }}/4)
+      - name: Run PinArchive Rotation (Stage 2)
+        if: always() && !cancelled() && (github.event.inputs.mode == 'all' || github.event.inputs.mode == 'rotation' || github.event_name == 'schedule' || github.event.inputs.mode == '')
         env:
           PINARCHIVE_SUPABASE_URL: ${{ secrets.PINARCHIVE_SUPABASE_URL }}
           PINARCHIVE_SUPABASE_KEY: ${{ secrets.PINARCHIVE_SUPABASE_KEY }}
           PINORBIT_WORKER_URL: ${{ secrets.PINORBIT_WORKER_URL }}
           PINARCHIVE_INGEST_SECRET: ${{ secrets.PINARCHIVE_INGEST_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           REFRESH_WORKSPACE_ID: ${{ github.event.inputs.workspace_filter || github.event.inputs.workspace_id || '' }}
           REFRESH_USERNAMES: ${{ github.event.inputs.usernames || '' }}
           REFRESH_FORCE: ${{ github.event.inputs.force || '' }}
           FORCE_RUN: ${{ github.event.inputs.force || '' }}
           REFRESH_SHARD: ${{ matrix.shard }}
-          SHARD_COUNT: 4
+          SHARD_COUNT: 20
           REFRESH_MAX_PINS: '0'
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: node scripts/pinarchive-refresh.mjs
@@ -146,8 +131,8 @@ jobs:
   staleness_check:
     name: Check for stale workspaces
     runs-on: ubuntu-latest
-    if: always()
-    needs: [rotation]
+    if: always() && !cancelled()
+    needs: [pipeline]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -156,6 +141,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm install @supabase/supabase-js --no-save
