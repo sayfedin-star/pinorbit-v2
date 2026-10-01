@@ -375,7 +375,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     } else {
       const { data: dbAccount } = await pinArchive
         .from('pa_accounts')
-        .select('id, status, ingest_enabled')
+        .select('id, status, ingest_enabled, last_run_at')
         .eq('workspace_id', workspaceId)
         .eq('username', username)
         .maybeSingle();
@@ -412,8 +412,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const promotedCount = pins.filter((p: any) => Boolean(p.promoted)).length;
 
-    // A) Upsert pa_accounts (Throttled: skip if already upserted recently in same session)
+    // A) Upsert pa_accounts (Throttled: skip if already upserted recently in same session or intermediate batch)
     let accountId: string;
+    const isIntermediateBatch = payload.skip_run_log === true;
+    const payloadAccountId = typeof payload.account_id === 'string' && UUID_REGEX.test(payload.account_id) ? payload.account_id : null;
+    const resolvedExistingId = cachedAccount?.id || existingAccount?.id || payloadAccountId;
+
     const hasExplicitCursor = account_meta.backfill_cursor !== undefined;
     const isStatusChanged = Boolean(
       account_meta.status &&
@@ -423,16 +427,53 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const shouldSkipUpsert = Boolean(
       !hasExplicitCursor &&
       !isStatusChanged &&
-      useCache &&
+      ((isIntermediateBatch && resolvedExistingId) ||
+      (useCache &&
       cachedAccount &&
       cachedAccount.id &&
       UUID_REGEX.test(cachedAccount.id) &&
-      (now - cachedAccount.lastUpsertedAt < ACCOUNT_UPSERT_THROTTLE_MS)
+      (now - cachedAccount.lastUpsertedAt < ACCOUNT_UPSERT_THROTTLE_MS)))
     );
 
-    if (shouldSkipUpsert && cachedAccount) {
-      accountId = cachedAccount.id;
+    if (shouldSkipUpsert && resolvedExistingId) {
+      accountId = resolvedExistingId;
       resolvedAccountId = accountId;
+    } else if (existingAccount && payload.trigger === 'refresh' && !hasExplicitCursor && !isStatusChanged) {
+      // Refresh fast-path: account exists; do NOT perform full UPSERT which causes index lock contention
+      accountId = existingAccount.id;
+      resolvedAccountId = accountId;
+
+      const lastRunMs = (existingAccount as any).last_run_at ? new Date((existingAccount as any).last_run_at).getTime() : 0;
+      const isRecentlyRefreshed = lastRunMs > 0 && (now - lastRunMs < 5 * 60 * 1000);
+      const hasFollowerUpdate = typeof payload.follower_count === 'number' && Number.isFinite(payload.follower_count);
+
+      if (!isRecentlyRefreshed || hasFollowerUpdate) {
+        const updateData: Record<string, any> = { last_run_at: fetchedAt };
+        if (hasFollowerUpdate) {
+          updateData.follower_count = Math.max(0, Math.round(payload.follower_count));
+        }
+        try {
+          const accTable = pinArchive.from('pa_accounts');
+          if (typeof accTable.update === 'function') {
+            await accTable.update(updateData).eq('id', accountId);
+          } else if (typeof accTable.upsert === 'function') {
+            await accTable.upsert({ workspace_id: workspaceId, username, ...updateData }, { onConflict: 'workspace_id,username' });
+          }
+        } catch (e: any) {
+          console.warn('[PinArchive Ingest] pa_accounts update warning:', e?.message || e);
+        }
+      }
+
+      if (useCache) {
+        accountCache.set(accountKey, {
+          id: accountId,
+          status: existingAccount?.status || 'active',
+          ingest_enabled: existingAccount?.ingest_enabled ?? true,
+          lastUpsertedAt: now,
+          expiresAt: now + ACCOUNT_CACHE_TTL_MS,
+        });
+        pruneCache(accountCache);
+      }
     } else {
       const accountData: Record<string, any> = {
         workspace_id: workspaceId,

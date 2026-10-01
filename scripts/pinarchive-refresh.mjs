@@ -12,10 +12,11 @@ import {
   formatPin,
   extractPinData,
 } from './lib/pinterest.mjs';
-import { pushToIngest, fetchAllAccounts } from './lib/pa-client.mjs';
+import { pushToIngest, fetchAllAccounts, supaPatch, supaInsert } from './lib/pa-client.mjs';
 import {
   getPinFromRunnerCache,
   savePinsToRunnerCache,
+  flushRunnerCacheToDisk,
   getRunnerCacheStats,
 } from './lib/runner-cache.mjs';
 
@@ -90,32 +91,56 @@ class Semaphore {
 
 
 
-async function fetchPinFromPinterest(pinId) {
-  try {
-    const res = await fetch(`https://www.pinterest.com/pin/${pinId}/`, { headers: HEADERS, redirect: 'follow', signal: AbortSignal.timeout(15000) });
-    if (res.status !== 200) return { ok: false, code: res.status };
-    const html = await res.text();
-    const data = extractPinData(html, pinId);
-    if (!data) {
+async function fetchPinFromPinterest(pinId, maxRetries = 2) {
+  let attempt = 0;
+  while (attempt <= maxRetries) {
+    try {
+      const res = await fetch(`https://www.pinterest.com/pin/${pinId}/`, {
+        headers: HEADERS,
+        redirect: 'follow',
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (res.status === 429) {
+        if (attempt < maxRetries) {
+          const backoff = (attempt + 1) * 3000 + Math.floor(Math.random() * 2000);
+          await sleep(backoff);
+          attempt++;
+          continue;
+        }
+        return { ok: false, code: 429, error: 'rate-limited-429' };
+      }
+
+      if (res.status !== 200) return { ok: false, code: res.status };
+      const html = await res.text();
+      const data = extractPinData(html, pinId);
+      if (!data) {
+        return {
+          ok: false,
+          code: 200,
+          error: 'extraction-failed',
+          diag: {
+            htmlLen: html.length,
+            relay: html.includes('__PWS_RELAY_REGISTER_COMPLETED_REQUEST__'),
+            pws: html.includes('__PWS_DATA__'),
+            hasPinId: html.includes(pinId),
+          },
+        };
+      }
+      return { ok: true, ...data };
+    } catch (err) {
+      if (attempt < maxRetries) {
+        const backoff = (attempt + 1) * 2000 + Math.floor(Math.random() * 1000);
+        await sleep(backoff);
+        attempt++;
+        continue;
+      }
       return {
         ok: false,
-        code: 200,
-        error: 'extraction-failed',
-        diag: {
-          htmlLen: html.length,
-          relay: html.includes('__PWS_RELAY_REGISTER_COMPLETED_REQUEST__'),
-          pws: html.includes('__PWS_DATA__'),
-          hasPinId: html.includes(pinId),
-        },
+        code: 0,
+        error: err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'fetch-timeout-15s' : (err?.message || 'fetch-failed'),
       };
     }
-    return { ok: true, ...data };
-  } catch (err) {
-    return {
-      ok: false,
-      code: 0,
-      error: err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'fetch-timeout-15s' : (err?.message || 'fetch-failed'),
-    };
   }
 }
 
@@ -301,7 +326,7 @@ async function main() {
       : (settingsRefreshMaxPins !== null && !isNaN(settingsRefreshMaxPins) ? settingsRefreshMaxPins : 0);
 
     const cap = configuredCap > 0 ? configuredCap : Number.MAX_SAFE_INTEGER;
-    const effectiveCap = Math.min(cap, 10000);
+    const effectiveCap = cap;
 
     // Refresh Min Saves Gate: env REFRESH_MIN_SAVES -> else DB setting -> else 0 (all)
     const envMinSavesRaw = process.env.REFRESH_MIN_SAVES !== undefined && process.env.REFRESH_MIN_SAVES.trim() !== ''
@@ -371,15 +396,18 @@ async function main() {
 
             fresh = await fetchPinFromPinterest(pinId);
             if (fresh && fresh.ok) {
-              savePinsToRunnerCache({ pin_id: pinId, ...fresh });
+              savePinsToRunnerCache({ pin_id: pinId, ...fresh }, undefined, false);
             }
           }
 
           if (!fresh || !fresh.ok) {
             if (fresh?.code === 429) {
-              consecutiveErrors++;
-              rateLimitCooldownUntil = Date.now() + 60000;
+              const wasAlreadyInCooldown = Date.now() < rateLimitCooldownUntil;
+              rateLimitCooldownUntil = Math.max(rateLimitCooldownUntil, Date.now() + 60000);
               console.warn(`[429 RATE LIMIT] Pin ${pinId} received 429. Setting 60s cooldown.`);
+              if (!wasAlreadyInCooldown) {
+                consecutiveErrors++;
+              }
             } else if (fresh?.code === 403) {
               consecutiveErrors++;
             } else {
@@ -529,6 +557,9 @@ async function main() {
       })
     );
 
+    // Flush runner cache to disk once per account (eliminating 383+ synchronous disk writes per runner)
+    flushRunnerCacheToDisk();
+
     // Two-Phase: Phase 2 (Sequential Batch Push)
     if (changedPins.length > 0) {
       console.log(`[PUSH] Pushing ${changedPins.length} changed pins for @${acc.username} in batches of ${CFG.BATCH_SIZE}...`);
@@ -553,6 +584,33 @@ async function main() {
         }
         if (!isLastBatch) {
           await sleep(CFG.PUSH_SLEEP_MS);
+        }
+      }
+    } else {
+      // Freshness Guarantee: If leader shard found 0 changed pins, update pa_accounts and record pa_runs
+      const isLeader = REFRESH_SHARD === 0 || SHARD_COUNT === 1;
+      if (isLeader) {
+        const nowIso = new Date().toISOString();
+        try {
+          const patchData = { last_run_at: nowIso };
+          if (accountFollowerCount) patchData.follower_count = accountFollowerCount;
+          await supaPatch(PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, 'pa_accounts', `workspace_id=eq.${acc.workspace_id}&id=eq.${acc.id}`, patchData);
+          await supaInsert(PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, 'pa_runs', {
+            workspace_id: acc.workspace_id,
+            account_id: acc.id,
+            trigger: 'refresh',
+            started_at: nowIso,
+            finished_at: nowIso,
+            pages_fetched: 1,
+            pins_added: 0,
+            pins_updated: 0,
+            pins_promoted: 0,
+            status: 'completed',
+            message: `refresh shard 1/${SHARD_COUNT} (0 changed)`
+          });
+          console.log(`[REFRESH] @${acc.username}: 0 changed pins, recorded freshness & run log as leader shard.`);
+        } catch (err) {
+          console.warn(`[REFRESH] Could not record zero-delta freshness for @${acc.username}: ${err.message}`);
         }
       }
     }

@@ -42,9 +42,41 @@ function initCache() {
 }
 
 /**
+ * Flush the in-memory runner cache to disk atomically with guaranteed temp file cleanup.
+ */
+export function flushRunnerCacheToDisk() {
+  initCache();
+  if (!inMemoryMap || inMemoryMap.size === 0) return false;
+
+  let tempFile = null;
+  try {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    const serialized = Object.fromEntries(inMemoryMap.entries());
+    tempFile = path.join(CACHE_DIR, `runner-pins.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
+    fs.writeFileSync(tempFile, JSON.stringify(serialized), 'utf-8');
+    try {
+      fs.renameSync(tempFile, CACHE_FILE);
+      tempFile = null; // Successfully renamed, no unlink needed
+    } catch (renameErr) {
+      fs.copyFileSync(tempFile, CACHE_FILE);
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[RunnerCache] Could not persist cache to disk: ${err.message}`);
+    return false;
+  } finally {
+    if (tempFile) {
+      try {
+        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+      } catch (_) {}
+    }
+  }
+}
+
+/**
  * Save an array of pins (or a single pin object) into the local runner cache.
  */
-export function savePinsToRunnerCache(pins, ttlMs = DEFAULT_TTL_MS) {
+export function savePinsToRunnerCache(pins, ttlMs = DEFAULT_TTL_MS, persistDisk = true) {
   if (!pins) return 0;
   initCache();
 
@@ -76,23 +108,11 @@ export function savePinsToRunnerCache(pins, ttlMs = DEFAULT_TTL_MS) {
     count++;
   }
 
-  // Persist to disk atomically with unique collision-free temp filename
-  try {
-    fs.mkdirSync(CACHE_DIR, { recursive: true });
-    const serialized = Object.fromEntries(inMemoryMap.entries());
-    const tempFile = path.join(CACHE_DIR, `runner-pins.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
-    fs.writeFileSync(tempFile, JSON.stringify(serialized), 'utf-8');
-    try {
-      fs.renameSync(tempFile, CACHE_FILE);
-    } catch (renameErr) {
-      fs.copyFileSync(tempFile, CACHE_FILE);
-      try { fs.unlinkSync(tempFile); } catch (_) {}
-    }
-    stats.saved += count;
-  } catch (err) {
-    console.warn(`[RunnerCache] Could not persist cache to disk: ${err.message}`);
+  if (persistDisk) {
+    flushRunnerCacheToDisk();
   }
 
+  stats.saved += count;
   return count;
 }
 
