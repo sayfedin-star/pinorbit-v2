@@ -51,6 +51,8 @@ export class OverviewController {
     const kpiArchived = document.getElementById('kpi-archived-pins');
     const kpiSaves = document.getElementById('kpi-total-saves');
     const kpiShares = document.getElementById('kpi-total-shares');
+    const kpi24hSaves = document.getElementById('kpi-24h-saves');
+    const kpi24hRepins = document.getElementById('kpi-24h-repins');
     const metaText = document.getElementById('refresh-meta-text');
     const tbody = document.getElementById('accounts-table-body');
 
@@ -70,6 +72,8 @@ export class OverviewController {
       if (kpiArchived) kpiArchived.textContent = fmtNumberFull(totals.archived_pins ?? 0);
       if (kpiSaves) kpiSaves.textContent = fmtNumberFull(totals.sum_saves ?? 0);
       if (kpiShares) kpiShares.textContent = fmtNumberFull(totals.sum_shares ?? 0);
+      if (kpi24hSaves) kpi24hSaves.textContent = `+${fmtNumberFull(totals.sum_delta_saves_24h ?? 0)}`;
+      if (kpi24hRepins) kpi24hRepins.textContent = `+${fmtNumberFull(totals.sum_delta_repins_24h ?? 0)}`;
 
       // Meta refresh line
       if (metaText) {
@@ -85,7 +89,7 @@ export class OverviewController {
     } catch (e: any) {
       if (retries > 0) {
         if (tbody) {
-          tbody.innerHTML = `<tr><td colspan="11" class="p-8 text-center text-xs text-muted-foreground animate-pulse">Retrying… (attempt ${3 - retries}/2)</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="13" class="p-8 text-center text-xs text-muted-foreground animate-pulse">Retrying… (attempt ${3 - retries}/2)</td></tr>`;
         }
         setTimeout(() => this.loadOverview(retries - 1), 1500);
         return;
@@ -96,19 +100,23 @@ export class OverviewController {
       if (kpiArchived) kpiArchived.textContent = '—';
       if (kpiSaves) kpiSaves.textContent = '—';
       if (kpiShares) kpiShares.textContent = '—';
+      if (kpi24hSaves) kpi24hSaves.textContent = '—';
+      if (kpi24hRepins) kpi24hRepins.textContent = '—';
       if (metaText) metaText.textContent = 'Sync schedule unavailable';
 
       if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="11" class="p-8 text-center text-xs text-rose-500">
+        tbody.innerHTML = `<tr><td colspan="13" class="p-8 text-center text-xs text-rose-500">
            Failed to load accounts. <button id="retry-load-btn" class="underline font-bold cursor-pointer ml-1">Retry</button>
          </td></tr>`;
       }
       document.getElementById('retry-load-btn')?.addEventListener('click', () => {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="11" class="p-8 text-center text-xs text-muted-foreground animate-pulse">Loading tracked accounts…</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="13" class="p-8 text-center text-xs text-muted-foreground animate-pulse">Loading tracked accounts…</td></tr>`;
         if (kpiAccounts) kpiAccounts.innerHTML = '<div class="h-8 w-12 bg-muted/60 rounded animate-pulse"></div>';
         if (kpiArchived) kpiArchived.innerHTML = '<div class="h-8 w-12 bg-muted/60 rounded animate-pulse"></div>';
-        if (kpiSaves) kpiSaves.innerHTML = '<div class="h-8 w-12 bg-muted/60 rounded animate-pulse"></div>';
-        if (kpiShares) kpiShares.innerHTML = '<div class="h-8 w-12 bg-muted/60 rounded animate-pulse"></div>';
+        if (kpiSaves) kpiSaves.innerHTML = '<div class="h-8 w-20 bg-muted/60 rounded animate-pulse"></div>';
+        if (kpiShares) kpiShares.innerHTML = '<div class="h-8 w-16 bg-muted/60 rounded animate-pulse"></div>';
+        if (kpi24hSaves) kpi24hSaves.innerHTML = '<div class="h-8 w-16 bg-muted/60 rounded animate-pulse"></div>';
+        if (kpi24hRepins) kpi24hRepins.innerHTML = '<div class="h-8 w-16 bg-muted/60 rounded animate-pulse"></div>';
         if (metaText) metaText.textContent = 'Loading sync schedule...';
         this.loadOverview(2);
       });

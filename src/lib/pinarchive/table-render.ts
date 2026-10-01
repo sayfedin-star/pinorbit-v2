@@ -31,6 +31,8 @@ export function renderTableHeaderHtml(colVisible: Record<string, boolean>): stri
 
   if (colVisible.followers) headersHtml += `<th class="py-3 px-4 font-semibold text-right">Followers</th>`;
   if (colVisible.archived_pins) headersHtml += `<th class="py-3 px-4 font-semibold text-right">Archived Pins</th>`;
+  if (colVisible.delta_saves_24h) headersHtml += `<th class="py-3 px-4 font-semibold text-right text-rose-600 dark:text-rose-400">24h Saves Δ</th>`;
+  if (colVisible.delta_repins_24h) headersHtml += `<th class="py-3 px-4 font-semibold text-right text-emerald-600 dark:text-emerald-400">24h Repins Δ</th>`;
   if (colVisible.account_age) headersHtml += `<th class="py-3 px-4 font-semibold">Account Age</th>`;
   if (colVisible.interval_days) headersHtml += `<th class="py-3 px-4 font-semibold">Interval</th>`;
   if (colVisible.delta_changed) headersHtml += `<th class="py-3 px-4 font-semibold text-right">Recent Δ</th>`;
@@ -49,7 +51,7 @@ export function renderTableHeaderHtml(colVisible: Record<string, boolean>): stri
 export function renderEmptyAccountsRowHtml(hasRawAccounts: boolean): string {
   return `
     <tr>
-      <td colspan="11" class="p-12 text-center text-xs text-muted-foreground bg-muted/10">
+      <td colspan="13" class="p-12 text-center text-xs text-muted-foreground bg-muted/10">
         <div class="flex flex-col items-center gap-2 max-w-sm mx-auto">
           <span class="text-2xl">🔍</span>
           <span class="font-bold text-foreground">${hasRawAccounts ? 'No accounts match active filters' : 'No accounts tracked in archive yet'}</span>
@@ -105,6 +107,22 @@ export function renderAccountsStripHtml(
           <td class="${padClass} text-right font-semibold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
             <span title="Total archived pins with verified metrics">${fmtMetric(archCount, isCompactNumbers)}</span>
           </td>`;
+      }
+
+      if (colVisible.delta_saves_24h) {
+        const dSaves = Number(acc.delta_saves_24h ?? 0);
+        const badge = dSaves > 0
+          ? `<span class="inline-flex items-center gap-1 font-bold text-[11px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20" title="${dSaves.toLocaleString('en-US')} saves gained in last 24h">+${fmtMetric(dSaves, isCompactNumbers)}</span>`
+          : `<span class="text-[11px] text-muted-foreground font-mono" title="No saves gained in last 24h">0</span>`;
+        dynamicCells += `<td class="${padClass} text-right font-mono tabular-nums">${badge}</td>`;
+      }
+
+      if (colVisible.delta_repins_24h) {
+        const dRepins = Number(acc.delta_repins_24h ?? 0);
+        const badge = dRepins > 0
+          ? `<span class="inline-flex items-center gap-1 font-bold text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" title="${dRepins.toLocaleString('en-US')} repins gained in last 24h">+${fmtMetric(dRepins, isCompactNumbers)}</span>`
+          : `<span class="text-[11px] text-muted-foreground font-mono" title="No repins gained in last 24h">0</span>`;
+        dynamicCells += `<td class="${padClass} text-right font-mono tabular-nums">${badge}</td>`;
       }
 
       if (colVisible.account_age) {

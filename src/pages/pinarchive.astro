@@ -137,8 +137,8 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
   <!-- ═══ Tab 1 View: Accounts, KPIs & Ingest Rules ═══ -->
   <div id="pa-tab-view-accounts" class="space-y-6">
   
-    <!-- ═══ KPI Dashboard (4 cards with clean micro-borders) ═══ -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+    <!-- ═══ KPI Dashboard (6 cards with clean micro-borders) ═══ -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
       <!-- Card 1: Accounts -->
       <div class="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-xs hover:border-primary/30 transition-all flex flex-col justify-between group">
         <div class="flex items-center justify-between">
@@ -211,6 +211,44 @@ const isMasterWorkspace = Boolean(currentWorkspace?.is_master);
           <div class="mt-2 text-[11px] text-muted-foreground flex items-center gap-1.5" id="kpi-shares-sub">
             <span class="h-1.5 w-1.5 rounded-full bg-blue-500"></span>
             <span>Engagement signals</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 5: 24h Saves Δ -->
+      <div class="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-xs hover:border-rose-500/40 transition-all flex flex-col justify-between group">
+        <div class="flex items-center justify-between">
+          <span class="text-[10.5px] font-semibold text-rose-500 uppercase tracking-wider">24h Saves Δ</span>
+          <span class="flex h-7 w-7 items-center justify-center rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 group-hover:scale-105 transition-transform">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </span>
+        </div>
+        <div>
+          <div class="text-2xl sm:text-3xl font-bold tracking-tight text-rose-600 dark:text-rose-400 mt-2 font-mono tabular-nums" id="kpi-24h-saves">
+            <div class="h-7 w-16 bg-muted/60 rounded animate-pulse"></div>
+          </div>
+          <div class="mt-2 text-[11px] text-muted-foreground flex items-center gap-1.5" id="kpi-24h-saves-sub">
+            <span class="h-1.5 w-1.5 rounded-full bg-rose-500"></span>
+            <span>Past 24h saves gained</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 6: 24h Repins Δ -->
+      <div class="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-xs hover:border-emerald-500/40 transition-all flex flex-col justify-between group">
+        <div class="flex items-center justify-between">
+          <span class="text-[10.5px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">24h Repins Δ</span>
+          <span class="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 group-hover:scale-105 transition-transform">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          </span>
+        </div>
+        <div>
+          <div class="text-2xl sm:text-3xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 mt-2 font-mono tabular-nums" id="kpi-24h-repins">
+            <div class="h-7 w-16 bg-muted/60 rounded animate-pulse"></div>
+          </div>
+          <div class="mt-2 text-[11px] text-muted-foreground flex items-center gap-1.5" id="kpi-24h-repins-sub">
+            <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+            <span>Past 24h viral repins</span>
           </div>
         </div>
       </div>

@@ -10,6 +10,8 @@ export interface PinArchiveAccountSummary {
   pins_count: number;
   last_run_at: string | null;
   next_run_at: string | null;
+  delta_saves_24h?: number;
+  delta_repins_24h?: number;
 }
 
 export const PINARCHIVE_ACCOUNT_FIELDS =
@@ -37,5 +39,26 @@ export async function getAccountByUsername(
     return null;
   }
 
-  return data as PinArchiveAccountSummary;
+  const accountSummary: PinArchiveAccountSummary = {
+    ...(data as PinArchiveAccountSummary),
+    delta_saves_24h: 0,
+    delta_repins_24h: 0,
+  };
+
+  try {
+    if (typeof db.rpc === 'function') {
+      const { data: deltaRows } = await db.rpc('pa_account_deltas_24h', {
+        p_workspace_id: workspaceId,
+        p_account_id: accountSummary.id,
+      });
+      if (Array.isArray(deltaRows) && deltaRows.length > 0) {
+        accountSummary.delta_saves_24h = Number(deltaRows[0].delta_saves_24h || 0);
+        accountSummary.delta_repins_24h = Number(deltaRows[0].delta_repins_24h || 0);
+      }
+    }
+  } catch (deltaErr) {
+    console.warn('[PinArchiveAccountService] Failed to load 24h deltas for account:', deltaErr);
+  }
+
+  return accountSummary;
 }

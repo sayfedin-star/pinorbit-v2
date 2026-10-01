@@ -12,6 +12,8 @@ export interface ColDef {
 export const COLUMN_DEFS: ColDef[] = [
   { key: 'followers',       label: 'Followers',       defaultVisible: true,  align: 'right' },
   { key: 'archived_pins',   label: 'Archived Pins',   defaultVisible: true,  align: 'right' },
+  { key: 'delta_saves_24h',  label: '24h Saves Δ',     defaultVisible: true,  align: 'right' },
+  { key: 'delta_repins_24h', label: '24h Repins Δ',    defaultVisible: true,  align: 'right' },
   { key: 'account_age',     label: 'Account Age',     defaultVisible: true,  align: 'left' },
   { key: 'interval_days',   label: 'Sync Interval',   defaultVisible: true,  align: 'left' },
   { key: 'delta_changed',   label: 'Recent Δ',        defaultVisible: true,  align: 'right' },
@@ -35,6 +37,7 @@ export function loadColVisibility(): Record<string, boolean> {
 
   try {
     const saved =
+      localStorage.getItem('po_pa_cols_v6') ||
       localStorage.getItem('po_pa_cols_v5') ||
       localStorage.getItem('po_pa_cols_v4');
     if (saved) {
@@ -51,12 +54,13 @@ export function loadColVisibility(): Record<string, boolean> {
 export function saveColVisibility(cols: Record<string, boolean>): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem('po_pa_cols_v5', JSON.stringify(cols));
+    localStorage.setItem('po_pa_cols_v6', JSON.stringify(cols));
   } catch {}
 }
 
 export function resetColVisibility(): Record<string, boolean> {
   if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('po_pa_cols_v6');
     localStorage.removeItem('po_pa_cols_v5');
     localStorage.removeItem('po_pa_cols_v4');
   }
