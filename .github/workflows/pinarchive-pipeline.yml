@@ -50,7 +50,7 @@ on:
         default: ''
 
 concurrency:
-  group: pinarchive-pipeline
+  group: pinarchive-execution-gate
   cancel-in-progress: false
 
 jobs:
@@ -85,7 +85,7 @@ jobs:
 
       - name: Stagger Job Start (IP & DB distribution)
         run: |
-          DELAY=$(( ${{ matrix.shard }} * 3 ))
+          DELAY=$(( ${{ matrix.shard }} * 2 ))
           echo "Stagger delay for shard ${{ matrix.shard }}: ${DELAY}s"
           sleep $DELAY
 

@@ -2,7 +2,7 @@ name: PinArchive Monthly Audit Sweep
 
 on:
   schedule:
-    - cron: '0 2 1 * *'
+    - cron: '23 1 1 * *' # Off-peak (01:23 UTC on the 1st of every month to avoid top-of-hour cron queue delay)
   workflow_dispatch:
     inputs:
       workspace_id:
@@ -20,13 +20,18 @@ on:
         default: '500'
 
 concurrency:
-  group: pinarchive-audit-sweep
+  group: pinarchive-execution-gate
   cancel-in-progress: false
 
 jobs:
   sweep:
+    name: Audit Sweep Shard ${{ matrix.shard }}/8
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
 
     steps:
       - name: Checkout
@@ -46,6 +51,12 @@ jobs:
           echo "Checking runner egress IP..."
           curl -s --max-time 10 https://api.ipify.org?format=json || true
 
+      - name: Stagger Job Start (IP & DB distribution)
+        run: |
+          DELAY=$(( ${{ matrix.shard }} * 2 ))
+          echo "Stagger delay for shard ${{ matrix.shard }}: ${DELAY}s"
+          sleep $DELAY
+
       - name: Run PinArchive Monthly Audit Sweep
         env:
           PINARCHIVE_SUPABASE_URL: ${{ secrets.PINARCHIVE_SUPABASE_URL }}
@@ -60,6 +71,6 @@ jobs:
           DISCOVERY_MAX_PAGES: ${{ github.event.inputs.max_pages || '' }}
           AUDIT_SWEEP: 'true'
           FORCE_RUN: 'true'
-          SHARD_COUNT: 1
-          DISCOVERY_SHARD: 0
+          SHARD_COUNT: 8
+          DISCOVERY_SHARD: ${{ matrix.shard }}
         run: node scripts/pinarchive-discovery.mjs

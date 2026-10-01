@@ -469,6 +469,11 @@ async function main() {
   }
   console.log('');
 
+  // Sort accounts by pins_count descending (LPT: Longest Processing Time heuristic)
+  // Ensures heavy historical accounts (@recipestower, @whispe_sad, @zollinsadru) are distributed
+  // evenly across different runner shards rather than clustering on the same runner.
+  accounts.sort((a, b) => (Number(b.pins_count) || 0) - (Number(a.pins_count) || 0));
+
   // Sharding across runner matrix
   const shardedAccounts = accounts.filter((_, idx) => idx % SHARD_COUNT === DISCOVERY_SHARD);
   console.log(`Shard ${DISCOVERY_SHARD + 1}/${SHARD_COUNT}: Processing ${shardedAccounts.length} of ${accounts.length} total accounts.\n`);
@@ -501,7 +506,10 @@ async function main() {
     const isGhScheduledEvent = (process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'schedule';
     const pausedPolicy = wsSetting.paused_account_policy ?? 'reject';
     const discoveryStopPages = Number(wsSetting.discovery_stop_pages ?? 3);
-    const maxBatchPins = Math.min(Number(wsSetting.max_batch_pins || CFG.MAX_BATCH_PINS), 500);
+    const maxBatchPins = Math.min(
+      Number(wsSetting.max_batch_pins || (IS_AUDIT_SWEEP ? 500 : CFG.MAX_BATCH_PINS)),
+      500
+    );
     const discoveryMaxPages = Math.min(
       Math.max(1, Number(process.env.DISCOVERY_MAX_PAGES || wsSetting.discovery_max_pages || CFG.MAX_PAGES_DEFAULT)),
       500
