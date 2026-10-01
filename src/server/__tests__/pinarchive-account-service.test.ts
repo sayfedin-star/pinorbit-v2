@@ -3,7 +3,6 @@ import {
   getAccountByUsername,
   PINARCHIVE_ACCOUNT_FIELDS,
 } from '../services/pinarchive-account-service';
-import { dbClients } from '../db/clients';
 
 const { mockPinArchiveClient } = vi.hoisted(() => ({
   mockPinArchiveClient: {
@@ -54,8 +53,11 @@ describe('pinarchive-account-service', () => {
     expect(mockPinArchiveClient.from).toHaveBeenCalledWith('pa_accounts');
     expect(selectMock).toHaveBeenCalledWith(PINARCHIVE_ACCOUNT_FIELDS);
     expect(eqWsMock).toHaveBeenCalledWith('workspace_id', workspaceId);
-    expect(eqUserMock).toHaveBeenCalledWith('username', username);
-    expect(result).toEqual(mockAccountData);
+    expect(result).toEqual({
+      ...mockAccountData,
+      delta_saves_24h: 0,
+      delta_repins_24h: 0,
+    });
   });
 
   it('returns null if account is not found', async () => {
@@ -110,6 +112,44 @@ describe('pinarchive-account-service', () => {
     const result = await getAccountByUsername(workspaceId, username, undefined, customClient);
     expect(customClient.from).toHaveBeenCalledWith('pa_accounts');
     expect(mockPinArchiveClient.from).not.toHaveBeenCalled();
-    expect(result).toEqual({ id: 'acc-custom', username });
+    expect(result).toEqual({
+      id: 'acc-custom',
+      username,
+      delta_saves_24h: 0,
+      delta_repins_24h: 0,
+    });
+  });
+
+  it('queries pa_account_deltas_24h via RPC and attaches deltas to result', async () => {
+    const customClientWithRpc: any = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({
+                data: { id: 'acc-rpc', username },
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      }),
+      rpc: vi.fn().mockResolvedValue({
+        data: [{ account_id: 'acc-rpc', delta_saves_24h: 42, delta_repins_24h: 18 }],
+        error: null,
+      }),
+    };
+
+    const result = await getAccountByUsername(workspaceId, username, undefined, customClientWithRpc);
+    expect(customClientWithRpc.rpc).toHaveBeenCalledWith('pa_account_deltas_24h', {
+      p_workspace_id: workspaceId,
+      p_account_id: 'acc-rpc',
+    });
+    expect(result).toEqual({
+      id: 'acc-rpc',
+      username,
+      delta_saves_24h: 42,
+      delta_repins_24h: 18,
+    });
   });
 });

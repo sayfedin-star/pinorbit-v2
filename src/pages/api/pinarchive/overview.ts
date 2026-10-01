@@ -68,13 +68,18 @@ export const GET: APIRoute = async ({ request, locals }) => {
       ? db.rpc('pa_workspace_sums_fast', { p_workspace_id: ws })
       : Promise.resolve({ data: null, error: { message: 'fast sums rpc unavailable' } });
 
+    const deltas24hPromise = typeof db.rpc === 'function'
+      ? db.rpc('pa_account_deltas_24h', { p_workspace_id: ws })
+      : Promise.resolve({ data: [], error: { message: 'deltas rpc unavailable' } });
+
     // Tier 2: Execute all independent queries concurrently via Promise.allSettled
     const [
       accResSettled,
       recentRunsSettled,
       wsSettingsSettled,
       statsResSettled,
-      fastSumsSettled
+      fastSumsSettled,
+      deltas24hSettled
     ] = await Promise.allSettled([
       db.from('pa_accounts')
         .select('id, username, status, pins_count, follower_count, last_run_at, sheet_id, next_run_at, ingest_enabled, interval_days, backfill_status, backfill_cursor, last_result, oldest_pin_at')
@@ -83,7 +88,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
       runsPromise,
       settingsPromise,
       statsPromise,
-      fastSumsPromise
+      fastSumsPromise,
+      deltas24hPromise
     ]);
 
     // 1. Process Accounts
@@ -297,9 +303,28 @@ export const GET: APIRoute = async ({ request, locals }) => {
       }
     }
 
+    // Process 24h deltas per account and compute workspace total
+    const deltaMap = new Map<string, { delta_saves_24h: number; delta_repins_24h: number }>();
+    let sumDeltaSaves24h = 0;
+    let sumDeltaRepins24h = 0;
+
+    const deltasRes = deltas24hSettled.status === 'fulfilled' ? deltas24hSettled.value : null;
+    if (deltasRes && !deltasRes.error && Array.isArray(deltasRes.data)) {
+      for (const row of deltasRes.data) {
+        if (row.account_id) {
+          const ds = Number(row.delta_saves_24h || 0);
+          const dr = Number(row.delta_repins_24h || 0);
+          deltaMap.set(row.account_id, { delta_saves_24h: ds, delta_repins_24h: dr });
+          sumDeltaSaves24h += ds;
+          sumDeltaRepins24h += dr;
+        }
+      }
+    }
+
     // Attach computed metrics to each account:
     accounts = accounts.map((a: any) => {
       const dbPins = countMap.has(a.id) ? countMap.get(a.id) : a.pins_count;
+      const accDeltas = deltaMap.get(a.id) || { delta_saves_24h: 0, delta_repins_24h: 0 };
       return {
         ...a,
         db_pins_count: dbPins,
@@ -308,6 +333,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
         changed_last_refresh: changedMap.get(a.id) ?? 0,
         checked_last_refresh: Number(dbPins ?? 0),
         oldest_pin_at: combinedAges[a.username] ?? null,
+        delta_saves_24h: accDeltas.delta_saves_24h,
+        delta_repins_24h: accDeltas.delta_repins_24h,
       };
     });
 
@@ -320,6 +347,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
         sum_saves: sumSaves,
         sum_shares: sumShares,
         total_pins: totalPins,
+        sum_delta_saves_24h: sumDeltaSaves24h,
+        sum_delta_repins_24h: sumDeltaRepins24h,
       },
     });
   } catch (e: any) {

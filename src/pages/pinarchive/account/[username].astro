@@ -153,10 +153,30 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
     </div>
 
     <!-- Metrics Grid -->
-    <div class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
       <div class="bg-background rounded-xl border border-border p-3.5">
         <span class="text-[11px] font-medium text-muted-foreground uppercase block">Followers</span>
         <span class="text-lg font-bold text-foreground mt-1 block">{(account.follower_count || 0).toLocaleString('en-US')}</span>
+      </div>
+
+      <div class="bg-background rounded-xl border border-rose-500/20 bg-rose-500/[0.02] p-3.5 transition-all">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-medium text-rose-500 uppercase tracking-wider block">24h Saves</span>
+          <span class="text-[10px] font-semibold text-rose-500/80 bg-rose-500/10 px-1.5 py-0.5 rounded-md">Growth</span>
+        </div>
+        <span class="text-lg font-black text-rose-600 dark:text-rose-400 mt-1 block tracking-tight" id="account-24h-saves-metric">
+          {(account.delta_saves_24h !== undefined && account.delta_saves_24h > 0) ? `+${account.delta_saves_24h.toLocaleString('en-US')}` : (account.delta_saves_24h || 0).toLocaleString('en-US')}
+        </span>
+      </div>
+
+      <div class="bg-background rounded-xl border border-emerald-500/20 bg-emerald-500/[0.02] p-3.5 transition-all">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-medium text-emerald-500 uppercase tracking-wider block">24h Repins</span>
+          <span class="text-[10px] font-semibold text-emerald-500/80 bg-emerald-500/10 px-1.5 py-0.5 rounded-md">Growth</span>
+        </div>
+        <span class="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1 block tracking-tight" id="account-24h-repins-metric">
+          {(account.delta_repins_24h !== undefined && account.delta_repins_24h > 0) ? `+${account.delta_repins_24h.toLocaleString('en-US')}` : (account.delta_repins_24h || 0).toLocaleString('en-US')}
+        </span>
       </div>
 
       <div class="bg-background rounded-xl border border-border p-3.5">
@@ -954,6 +974,21 @@ const dotClass = isActive ? 'bg-emerald-500' : account.status === 'paused' ? 'bg
       const metricPins = document.getElementById('account-pins-total-metric');
       if (metricPins && !currentSearch && !currentBoard && !currentStage && currentMaxSaves === null && currentMinSaves === null && !changedOnly) {
         metricPins.textContent = fmtNumber(total);
+      }
+
+      if (json.account_delta_saves_24h !== undefined) {
+        const saves24hEl = document.getElementById('account-24h-saves-metric');
+        if (saves24hEl) {
+          const sVal = Number(json.account_delta_saves_24h || 0);
+          saves24hEl.textContent = sVal > 0 ? `+${fmtNumber(sVal)}` : fmtNumber(sVal);
+        }
+      }
+      if (json.account_delta_repins_24h !== undefined) {
+        const repins24hEl = document.getElementById('account-24h-repins-metric');
+        if (repins24hEl) {
+          const rVal = Number(json.account_delta_repins_24h || 0);
+          repins24hEl.textContent = rVal > 0 ? `+${fmtNumber(rVal)}` : fmtNumber(rVal);
+        }
       }
 
       // Render Cards

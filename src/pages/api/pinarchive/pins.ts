@@ -192,7 +192,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         return {
           id: p.id,
           pin_id: p.pin_id,
-          account_id: p.account_id,
+          account_id: p.account_id || accountId,
           title: p.title,
           image_url: p.image_url,
           link: p.link,
@@ -223,6 +223,23 @@ export const GET: APIRoute = async ({ request, locals }) => {
         };
       });
 
+      let accountDeltaSaves24h = 0;
+      let accountDeltaRepins24h = 0;
+      try {
+        if (typeof db.rpc === 'function') {
+          const { data: accDeltaData } = await db.rpc('pa_account_deltas_24h', {
+            p_workspace_id: ws,
+            p_account_id: accountId,
+          });
+          if (Array.isArray(accDeltaData) && accDeltaData.length > 0) {
+            accountDeltaSaves24h = Number(accDeltaData[0].delta_saves_24h || 0);
+            accountDeltaRepins24h = Number(accDeltaData[0].delta_repins_24h || 0);
+          }
+        }
+      } catch (deltaErr) {
+        console.warn('[pins:mode=page] Failed to query account deltas RPC:', deltaErr);
+      }
+
       return json({
         success: true,
         pins,
@@ -231,6 +248,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
         page,
         page_size: pageSize,
         total_pages: Math.max(1, Math.ceil(total / pageSize)),
+        account_delta_saves_24h: accountDeltaSaves24h,
+        account_delta_repins_24h: accountDeltaRepins24h,
       });
     } catch (e: any) {
       return json({ success: false, error: e.message || 'Internal Server Error' }, 500);
