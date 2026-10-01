@@ -12,7 +12,7 @@ import {
   formatPin,
   extractPinData,
 } from './lib/pinterest.mjs';
-import { pushToIngest, fetchAllAccounts, partitionAccountsLPT } from './lib/pa-client.mjs';
+import { pushToIngest, fetchAllAccounts } from './lib/pa-client.mjs';
 import {
   getPinFromRunnerCache,
   savePinsToRunnerCache,
@@ -221,13 +221,11 @@ async function main() {
   }
   console.log('');
 
-  // Distribute accounts across shard matrix using Greedy Bin-Packing (LPT) based on pins_count
-  const isTargetedRun = Boolean(REFRESH_USERNAME || REFRESH_USERNAMES.length > 0);
-  const shardedAccounts = isTargetedRun
-    ? accounts
-    : partitionAccountsLPT(accounts, SHARD_COUNT, REFRESH_SHARD);
+  // Intra-Account Pin-Level Modulo Sharding across all runners
+  // All matrix runners iterate through eligible accounts, processing their deterministic slice of pins (idx % SHARD_COUNT === REFRESH_SHARD)
+  const shardedAccounts = accounts;
 
-  console.log(`Found ${accounts.length} account(s) total — processing ${shardedAccounts.length} in shard ${REFRESH_SHARD + 1}/${SHARD_COUNT}\n`);
+  console.log(`Found ${accounts.length} account(s) total — processing pin slice (shard ${REFRESH_SHARD + 1}/${SHARD_COUNT}) across eligible accounts\n`);
 
   if (!shardedAccounts.length) {
     console.log('No accounts assigned to this shard.');
@@ -284,6 +282,11 @@ async function main() {
       console.log(`[SKIP]${wsPrefix} ${acc.username}: outside requested account.`); continue;
     }
 
+    // Fast-skip accounts with 0 known pins in DB to eliminate redundant database queries
+    if (typeof acc.pins_count === 'number' && acc.pins_count === 0) {
+      continue;
+    }
+
     // X2: Precedence: env REFRESH_MAX_PINS if set -> else DB setting -> else 0 (unlimited with pagination)
     const envMaxPinsRaw = process.env.REFRESH_MAX_PINS !== undefined && process.env.REFRESH_MAX_PINS.trim() !== ''
       ? parseInt(process.env.REFRESH_MAX_PINS, 10)
@@ -306,7 +309,7 @@ async function main() {
       : (settingsRefreshMinSaves !== null && !isNaN(settingsRefreshMinSaves) ? Math.max(0, settingsRefreshMinSaves) : 0);
     const savesFilterQuery = effectiveMinSaves > 0 ? `&saves=gte.${effectiveMinSaves}` : '';
 
-    // True pagination loop (1000 per page)
+    // True pagination loop (1000 per page) with deterministic order=pin_id.asc
     const allPins = [];
     let offset = 0;
     const PAGE = 1000;
@@ -314,7 +317,7 @@ async function main() {
       const fetchLimit = Math.min(PAGE, effectiveCap - allPins.length);
       const chunk = await supaQuery(
         'pa_pins',
-        `select=pin_id,saves,repins,comments,share_count,reactions,annotations,seo_category,canonical_pin_id,seo_alt_text,board_pin_count,board_last_modified_at,archived_at,title,description,link,utm_link,domain,board_name,board_id,created_at_pinterest,image_url,dominant_color,image_signature,node_id,is_video,velocity&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}${savesFilterQuery}&order=last_updated_at.asc&limit=${fetchLimit}&offset=${offset}`
+        `select=pin_id,saves,repins,comments,share_count,reactions,annotations,seo_category,canonical_pin_id,seo_alt_text,board_pin_count,board_last_modified_at,archived_at,title,description,link,utm_link,domain,board_name,board_id,created_at_pinterest,image_url,dominant_color,image_signature,node_id,is_video,velocity&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}${savesFilterQuery}&order=pin_id.asc&limit=${fetchLimit}&offset=${offset}`
       );
       if (!Array.isArray(chunk) || chunk.length === 0) break;
       allPins.push(...chunk);
@@ -322,7 +325,11 @@ async function main() {
       offset += chunk.length;
     }
 
-    const pins = isTargetedRun ? allPins.filter((_, idx) => idx % SHARD_COUNT === REFRESH_SHARD) : allPins;
+    // Strictly deterministic in-memory sort by immutable pin_id before modulo partitioning
+    allPins.sort((a, b) => String(a.pin_id).localeCompare(String(b.pin_id)));
+
+    // Intra-account pin-level modulo sharding across all runners
+    const pins = allPins.filter((_, idx) => idx % SHARD_COUNT === REFRESH_SHARD);
 
     if (!pins.length) continue;
     console.log(`${acc.username}: ${pins.length} pins to refresh (min saves: ${effectiveMinSaves > 0 ? effectiveMinSaves : 'all'}, shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} of ${allPins.length} total)`);

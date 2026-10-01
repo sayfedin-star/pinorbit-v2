@@ -50,7 +50,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     // Safely prepare table queries with method checks
     const runsTable = typeof db.from === 'function' ? db.from('pa_runs') : null;
     const runsPromise = runsTable && typeof runsTable.select === 'function'
-      ? runsTable.select('account_id, pins_updated, started_at').eq('workspace_id', ws).eq('trigger', 'refresh').order('started_at', { ascending: false }).limit(300)
+      ? runsTable.select('account_id, pins_updated, started_at').eq('workspace_id', ws).eq('trigger', 'refresh').order('started_at', { ascending: false }).limit(2000)
       : Promise.resolve({ data: [], error: null });
 
     const settingsTable = typeof db.from === 'function' ? db.from('pa_workspace_settings') : null;

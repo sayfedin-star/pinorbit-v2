@@ -206,6 +206,11 @@ export async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
   const username = String(payload?.username || '');
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt === 0) {
+      // Add pre-flight jitter to prevent multiple matrix runners from hitting Google Apps Script lock simultaneously
+      const preFlightJitterMs = Math.floor(Math.random() * 2000) + 500;
+      await sleep(preFlightJitterMs);
+    }
     const startedAt = Date.now();
     try {
       const res = await fetch(gasUrl, {
