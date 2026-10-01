@@ -12,10 +12,11 @@ import {
   formatPin,
   extractPinData,
 } from './lib/pinterest.mjs';
-import { pushToIngest, fetchAllAccounts, partitionAccountsLPT } from './lib/pa-client.mjs';
+import { pushToIngest, fetchAllAccounts, supaPatch, supaInsert } from './lib/pa-client.mjs';
 import {
   getPinFromRunnerCache,
   savePinsToRunnerCache,
+  flushRunnerCacheToDisk,
   getRunnerCacheStats,
 } from './lib/runner-cache.mjs';
 
@@ -54,6 +55,7 @@ async function supaQuery(table, params = '') {
   const url = `${PINARCHIVE_SUPABASE_URL}/rest/v1/${table}${params ? '?' + params : ''}`;
   const res = await fetch(url, {
     headers: { 'apikey': PINARCHIVE_SUPABASE_KEY, 'Authorization': `Bearer ${PINARCHIVE_SUPABASE_KEY}`, 'Accept': 'application/json' },
+    signal: AbortSignal.timeout(30000),
   });
   if (!res.ok) throw new Error(`Supabase ${table}: HTTP ${res.status}`);
   return res.json();
@@ -90,32 +92,60 @@ class Semaphore {
 
 
 
-async function fetchPinFromPinterest(pinId) {
-  try {
-    const res = await fetch(`https://www.pinterest.com/pin/${pinId}/`, { headers: HEADERS, redirect: 'follow', signal: AbortSignal.timeout(15000) });
-    if (res.status !== 200) return { ok: false, code: res.status };
-    const html = await res.text();
-    const data = extractPinData(html, pinId);
-    if (!data) {
+async function fetchPinFromPinterest(pinId, maxRetries = 2) {
+  let attempt = 0;
+  while (attempt <= maxRetries) {
+    try {
+      const res = await fetch(`https://www.pinterest.com/pin/${pinId}/`, {
+        headers: HEADERS,
+        redirect: 'follow',
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (res.status === 429) {
+        await res.text().catch(() => '');
+        if (attempt < maxRetries) {
+          const backoff = (attempt + 1) * 3000 + Math.floor(Math.random() * 2000);
+          await sleep(backoff);
+          attempt++;
+          continue;
+        }
+        return { ok: false, code: 429, error: 'rate-limited-429' };
+      }
+
+      if (res.status !== 200) {
+        await res.text().catch(() => '');
+        return { ok: false, code: res.status };
+      }
+      const html = await res.text();
+      const data = extractPinData(html, pinId);
+      if (!data) {
+        return {
+          ok: false,
+          code: 200,
+          error: 'extraction-failed',
+          diag: {
+            htmlLen: html.length,
+            relay: html.includes('__PWS_RELAY_REGISTER_COMPLETED_REQUEST__'),
+            pws: html.includes('__PWS_DATA__'),
+            hasPinId: html.includes(pinId),
+          },
+        };
+      }
+      return { ok: true, ...data };
+    } catch (err) {
+      if (attempt < maxRetries) {
+        const backoff = (attempt + 1) * 2000 + Math.floor(Math.random() * 1000);
+        await sleep(backoff);
+        attempt++;
+        continue;
+      }
       return {
         ok: false,
-        code: 200,
-        error: 'extraction-failed',
-        diag: {
-          htmlLen: html.length,
-          relay: html.includes('__PWS_RELAY_REGISTER_COMPLETED_REQUEST__'),
-          pws: html.includes('__PWS_DATA__'),
-          hasPinId: html.includes(pinId),
-        },
+        code: 0,
+        error: err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'fetch-timeout-15s' : (err?.message || 'fetch-failed'),
       };
     }
-    return { ok: true, ...data };
-  } catch (err) {
-    return {
-      ok: false,
-      code: 0,
-      error: err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'fetch-timeout-15s' : (err?.message || 'fetch-failed'),
-    };
   }
 }
 
@@ -162,6 +192,7 @@ async function main() {
       if (p1Url && p1Key) {
         const p1Res = await fetch(`${p1Url}/rest/v1/workspaces?select=id,is_master&is_master=eq.true&limit=1`, {
           headers: { apikey: p1Key, Authorization: `Bearer ${p1Key}`, Accept: 'application/json' },
+          signal: AbortSignal.timeout(15000),
         });
         if (p1Res.ok) {
           const masterWorkspaces = await p1Res.json();
@@ -221,13 +252,15 @@ async function main() {
   }
   console.log('');
 
-  // Distribute accounts across shard matrix using Greedy Bin-Packing (LPT) based on pins_count
-  const isTargetedRun = Boolean(REFRESH_USERNAME || REFRESH_USERNAMES.length > 0);
-  const shardedAccounts = isTargetedRun
-    ? accounts
-    : partitionAccountsLPT(accounts, SHARD_COUNT, REFRESH_SHARD);
+  // Intra-Account Pin-Level Modulo Sharding across all runners
+  // All matrix runners iterate through eligible accounts, processing their deterministic slice of pins (idx % SHARD_COUNT === REFRESH_SHARD)
+  // Stagger/rotate account order by shard index to eliminate thundering herd and distribute load
+  const offset = REFRESH_SHARD % (accounts.length || 1);
+  const shardedAccounts = accounts.length > 1
+    ? [...accounts.slice(offset), ...accounts.slice(0, offset)]
+    : accounts;
 
-  console.log(`Found ${accounts.length} account(s) total — processing ${shardedAccounts.length} in shard ${REFRESH_SHARD + 1}/${SHARD_COUNT}\n`);
+  console.log(`Found ${accounts.length} account(s) total — processing pin slice (shard ${REFRESH_SHARD + 1}/${SHARD_COUNT}, account start offset=${offset}) across eligible accounts\n`);
 
   if (!shardedAccounts.length) {
     console.log('No accounts assigned to this shard.');
@@ -284,6 +317,11 @@ async function main() {
       console.log(`[SKIP]${wsPrefix} ${acc.username}: outside requested account.`); continue;
     }
 
+    // Fast-skip accounts with 0 known pins in DB to eliminate redundant database queries
+    if (typeof acc.pins_count === 'number' && acc.pins_count === 0) {
+      continue;
+    }
+
     // X2: Precedence: env REFRESH_MAX_PINS if set -> else DB setting -> else 0 (unlimited with pagination)
     const envMaxPinsRaw = process.env.REFRESH_MAX_PINS !== undefined && process.env.REFRESH_MAX_PINS.trim() !== ''
       ? parseInt(process.env.REFRESH_MAX_PINS, 10)
@@ -294,7 +332,7 @@ async function main() {
       : (settingsRefreshMaxPins !== null && !isNaN(settingsRefreshMaxPins) ? settingsRefreshMaxPins : 0);
 
     const cap = configuredCap > 0 ? configuredCap : Number.MAX_SAFE_INTEGER;
-    const effectiveCap = Math.min(cap, 10000);
+    const effectiveCap = cap;
 
     // Refresh Min Saves Gate: env REFRESH_MIN_SAVES -> else DB setting -> else 0 (all)
     const envMinSavesRaw = process.env.REFRESH_MIN_SAVES !== undefined && process.env.REFRESH_MIN_SAVES.trim() !== ''
@@ -306,23 +344,27 @@ async function main() {
       : (settingsRefreshMinSaves !== null && !isNaN(settingsRefreshMinSaves) ? Math.max(0, settingsRefreshMinSaves) : 0);
     const savesFilterQuery = effectiveMinSaves > 0 ? `&saves=gte.${effectiveMinSaves}` : '';
 
-    // True pagination loop (1000 per page)
+    // True pagination loop (1000 per page) with deterministic order=pin_id.asc
     const allPins = [];
-    let offset = 0;
+    let pinOffset = 0;
     const PAGE = 1000;
     while (allPins.length < effectiveCap) {
       const fetchLimit = Math.min(PAGE, effectiveCap - allPins.length);
       const chunk = await supaQuery(
         'pa_pins',
-        `select=pin_id,saves,repins,comments,share_count,reactions,annotations,seo_category,canonical_pin_id,seo_alt_text,board_pin_count,board_last_modified_at,archived_at,title,description,link,utm_link,domain,board_name,board_id,created_at_pinterest,image_url,dominant_color,image_signature,node_id,is_video,velocity&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}${savesFilterQuery}&order=last_updated_at.asc&limit=${fetchLimit}&offset=${offset}`
+        `select=pin_id,saves,repins,comments,share_count,reactions,annotations,seo_category,canonical_pin_id,seo_alt_text,board_pin_count,board_last_modified_at,archived_at,title,description,link,utm_link,domain,board_name,board_id,created_at_pinterest,image_url,dominant_color,image_signature,node_id,is_video,velocity&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}${savesFilterQuery}&order=pin_id.asc&limit=${fetchLimit}&offset=${pinOffset}`
       );
       if (!Array.isArray(chunk) || chunk.length === 0) break;
       allPins.push(...chunk);
       if (chunk.length < fetchLimit) break;
-      offset += chunk.length;
+      pinOffset += chunk.length;
     }
 
-    const pins = isTargetedRun ? allPins.filter((_, idx) => idx % SHARD_COUNT === REFRESH_SHARD) : allPins;
+    // Strictly deterministic in-memory sort by immutable pin_id before modulo partitioning
+    allPins.sort((a, b) => String(a.pin_id).localeCompare(String(b.pin_id)));
+
+    // Intra-account pin-level modulo sharding across all runners
+    const pins = allPins.filter((_, idx) => idx % SHARD_COUNT === REFRESH_SHARD);
 
     if (!pins.length) continue;
     console.log(`${acc.username}: ${pins.length} pins to refresh (min saves: ${effectiveMinSaves > 0 ? effectiveMinSaves : 'all'}, shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} of ${allPins.length} total)`);
@@ -331,7 +373,7 @@ async function main() {
     let rateLimitCooldownUntil = 0;
     let circuitBroken = false;
     const changedPins = [];
-    let accountFollowerCount = typeof acc.follower_count === 'number' && acc.follower_count > 0 ? acc.follower_count : null;
+    let accountFollowerCount = null;
 
     const sem = new Semaphore(CFG.CONCURRENCY);
 
@@ -349,8 +391,9 @@ async function main() {
             // Rate-limit cooldown check
             if (Date.now() < rateLimitCooldownUntil) {
               const waitMs = Math.max(0, rateLimitCooldownUntil - Date.now());
-              console.warn(`[RATE LIMIT] Pausing for ${Math.round(waitMs / 1000)}s cooldown before pin ${p.pin_id}`);
-              await sleep(waitMs);
+              const jitterMs = Math.floor(Math.random() * 2000);
+              console.warn(`[RATE LIMIT] Pausing for ${Math.round(waitMs / 1000)}s cooldown (+${jitterMs}ms jitter) before pin ${p.pin_id}`);
+              await sleep(waitMs + jitterMs);
             }
 
             if (circuitBroken) return;
@@ -360,19 +403,20 @@ async function main() {
 
             fresh = await fetchPinFromPinterest(pinId);
             if (fresh && fresh.ok) {
-              savePinsToRunnerCache({ pin_id: pinId, ...fresh });
+              savePinsToRunnerCache({ pin_id: pinId, ...fresh }, undefined, false);
             }
           }
 
           if (!fresh || !fresh.ok) {
             if (fresh?.code === 429) {
-              consecutiveErrors++;
-              rateLimitCooldownUntil = Date.now() + 60000;
+              const wasAlreadyInCooldown = Date.now() < rateLimitCooldownUntil;
+              rateLimitCooldownUntil = Math.max(rateLimitCooldownUntil, Date.now() + 60000);
               console.warn(`[429 RATE LIMIT] Pin ${pinId} received 429. Setting 60s cooldown.`);
-            } else if (fresh?.code === 403) {
+              if (!wasAlreadyInCooldown) {
+                consecutiveErrors++;
+              }
+            } else if (fresh?.code === 403 || fresh?.code === 503 || fresh?.code === 500 || fresh?.error?.includes('timeout')) {
               consecutiveErrors++;
-            } else {
-              consecutiveErrors = 0;
             }
 
             if (consecutiveErrors >= CFG.CIRCUIT_BREAKER) {
@@ -393,7 +437,7 @@ async function main() {
           consecutiveErrors = 0;
           summary.refreshed++;
 
-          if (typeof fresh.follower_count === 'number' && fresh.follower_count > 0 && accountFollowerCount === null) {
+          if (typeof fresh.follower_count === 'number' && fresh.follower_count > 0 && fresh.follower_count !== acc.follower_count && accountFollowerCount === null) {
             accountFollowerCount = fresh.follower_count;
           }
 
@@ -479,6 +523,13 @@ async function main() {
           ) {
             const changedItem = {
               pin_id: pinId,
+              title: fresh.title || p.title || null,
+              description: fresh.description || p.description || null,
+              link: fresh.link || p.link || null,
+              domain: fresh.domain || p.domain || null,
+              board_name: fresh.board_name || p.board_name || null,
+              created_at_pinterest: p.created_at_pinterest || fresh.created_at_pinterest || null,
+              image_url: fresh.image_url || p.image_url || null,
               saves: fresh.saves,
               repins: fresh.repins,
               comments: fresh.comments,
@@ -518,7 +569,11 @@ async function main() {
       })
     );
 
+    // Flush runner cache to disk once per account (eliminating 383+ synchronous disk writes per runner)
+    flushRunnerCacheToDisk();
+
     // Two-Phase: Phase 2 (Sequential Batch Push)
+    // All batch pushes pass skipRunLog: true so Ingest API NEVER locks or updates pa_accounts
     if (changedPins.length > 0) {
       console.log(`[PUSH] Pushing ${changedPins.length} changed pins for @${acc.username} in batches of ${CFG.BATCH_SIZE}...`);
       for (let i = 0; i < changedPins.length; i += CFG.BATCH_SIZE) {
@@ -531,7 +586,7 @@ async function main() {
           accountFollowerCount,
           allPins.length,
           acc.id,
-          !isLastBatch,
+          true,
           changedPins.length
         );
         if (result.ok) {
@@ -543,6 +598,55 @@ async function main() {
         if (!isLastBatch) {
           await sleep(CFG.PUSH_SLEEP_MS);
         }
+      }
+
+      // Record this shard's completed telemetry directly in pa_runs
+      const nowIso = new Date().toISOString();
+      try {
+        await supaInsert(PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, 'pa_runs', {
+          workspace_id: acc.workspace_id,
+          account_id: acc.id,
+          trigger: 'refresh',
+          started_at: nowIso,
+          finished_at: nowIso,
+          pages_fetched: 1,
+          pins_added: 0,
+          pins_updated: changedPins.length,
+          pins_promoted: 0,
+          status: 'completed',
+          message: `refresh shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} (${changedPins.length} updated)`
+        });
+      } catch (err) {
+        console.warn(`[REFRESH] Could not record pa_runs for shard ${REFRESH_SHARD + 1}: ${err.message}`);
+      }
+    }
+
+    // Leader Shard Authority: ONLY the leader shard updates pa_accounts (zero lock contention)
+    const isLeader = (REFRESH_SHARD === 0 || SHARD_COUNT === 1) && !circuitBroken;
+    if (isLeader) {
+      const nowIso = new Date().toISOString();
+      try {
+        const patchData = { last_run_at: nowIso };
+        if (accountFollowerCount) patchData.follower_count = accountFollowerCount;
+        await supaPatch(PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, 'pa_accounts', `workspace_id=eq.${acc.workspace_id}&id=eq.${acc.id}`, patchData);
+        if (changedPins.length === 0) {
+          await supaInsert(PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, 'pa_runs', {
+            workspace_id: acc.workspace_id,
+            account_id: acc.id,
+            trigger: 'refresh',
+            started_at: nowIso,
+            finished_at: nowIso,
+            pages_fetched: 1,
+            pins_added: 0,
+            pins_updated: 0,
+            pins_promoted: 0,
+            status: 'completed',
+            message: `refresh shard 1/${SHARD_COUNT} (0 changed)`
+          });
+          console.log(`[REFRESH] @${acc.username}: 0 changed pins, recorded freshness & run log as leader shard.`);
+        }
+      } catch (err) {
+        console.warn(`[REFRESH] Could not record leader freshness for @${acc.username}: ${err.message}`);
       }
     }
 
@@ -558,11 +662,19 @@ async function main() {
   console.log(`\nSummary: checked=${summary.refreshed}, changed=${summary.updated}, pushed=${summary.pushed}, cacheHits=${cacheStats.hits}, errors=${summary.errors.length}`);
   const isFiltered = Boolean(REFRESH_WORKSPACE_ID || REFRESH_USERNAME || REFRESH_USERNAMES.length > 0);
   const hasPushErrors = summary.errors.some(e => e.startsWith('push:'));
-  const allFailed = summary.errors.length > 0 && summary.refreshed === 0;
+  const hasCircuitBreaker = summary.errors.some(e => e.startsWith('circuit-breaker'));
+  const systemicErrors = summary.errors.filter(e =>
+    e.startsWith('push:') ||
+    e.startsWith('circuit-breaker') ||
+    e.includes('429') ||
+    e.includes('403') ||
+    e.includes('timeout')
+  );
+  const allSystemicFailed = systemicErrors.length > 0 && summary.refreshed === 0;
 
   if (process.env.GITHUB_STEP_SUMMARY) {
     try {
-      const statusIcon = (hasPushErrors || allFailed)
+      const statusIcon = (hasPushErrors || hasCircuitBreaker || allSystemicFailed)
         ? '❌ Failed'
         : (summary.errors.length > 0 ? '⚠️ Has Errors' : '✅ Completed');
       let md = `### 🔄 Refresh Shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} (${statusIcon})\n\n`;
@@ -588,7 +700,7 @@ async function main() {
     }
   }
 
-  if (hasPushErrors || allFailed) {
+  if (hasPushErrors || hasCircuitBreaker || allSystemicFailed) {
     process.exit(1);
   }
 
@@ -596,12 +708,13 @@ async function main() {
     // Filtered run: success if anything was pushed/updated, regardless of per-pin extraction misses
     if (summary.pushed > 0 || summary.updated > 0) process.exit(0);
     // No change but also no systemic failure (e.g. capped rotation) → still 0
-    if (summary.errors.length === 0) process.exit(0);
-    // All pins in the filtered scope failed → keep red signal
+    if (systemicErrors.length === 0) process.exit(0);
+    // All pins in the filtered scope failed systemically → keep red signal
     process.exit(1);
   }
 
-  if (summary.errors.length > summary.refreshed) {
+  // Systemic threshold: fail only if systemic errors exceed successfully refreshed pins and nothing was refreshed
+  if (systemicErrors.length > summary.refreshed && summary.refreshed === 0) {
     process.exit(1);
   }
 

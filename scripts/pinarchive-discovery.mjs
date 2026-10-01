@@ -105,6 +105,7 @@ async function supaQuery(table, params = '') {
       'Authorization': `Bearer ${PINARCHIVE_SUPABASE_KEY}`,
       'Accept': 'application/json',
     },
+    signal: AbortSignal.timeout(30000),
   });
   if (!res.ok) throw new Error(`Supabase ${table}: HTTP ${res.status}`);
   return res.json();
@@ -121,6 +122,7 @@ async function supaPatch(table, matchParams, body) {
       'Prefer': 'return=minimal',
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
@@ -139,6 +141,7 @@ async function supaInsert(table, body) {
       'Prefer': 'return=minimal',
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
@@ -179,6 +182,7 @@ async function pinterestFetch(url, username, cookiePlain, vaultDb, cookieId, max
       });
 
       if ((res.status === 401 || res.status === 403) && cookieId && cookieId !== 'legacy') {
+        await res.text().catch(() => '');
         console.warn(`🚫 Cookie ${cookieId.slice(0, 8)} disabled for @${username} (HTTP ${res.status}) — retrying anonymously.`);
         await vaultDb.from('pinterest_cookies').update({ is_active: false }).eq('id', cookieId);
         activeCookie = '';
@@ -387,6 +391,7 @@ async function main() {
       if (p1Url && p1Key) {
         const p1Res = await fetch(`${p1Url}/rest/v1/workspaces?select=id,is_master&is_master=eq.true&limit=1`, {
           headers: { apikey: p1Key, Authorization: `Bearer ${p1Key}`, Accept: 'application/json' },
+          signal: AbortSignal.timeout(15000),
         });
         if (p1Res.ok) {
           const masterWorkspaces = await p1Res.json();
@@ -621,6 +626,7 @@ async function main() {
         );
 
         if (!res.ok) {
+          await res.text().catch(() => '');
           const status = res.status;
           if (status === 429) {
             consecutiveErrors++;

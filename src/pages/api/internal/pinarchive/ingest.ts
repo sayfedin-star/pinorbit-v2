@@ -24,11 +24,14 @@ interface CachedAccount {
   status: string;
   ingest_enabled: boolean;
   lastUpsertedAt: number;
+  lastRunAtMs: number;
+  followerCount: number | null;
   expiresAt: number;
 }
 
 const wsSettingsCache = new Map<string, CachedWsSettings>();
 const accountCache = new Map<string, CachedAccount>();
+const workspaceCache = new Map<string, { valid: boolean; expiresAt: number }>();
 
 function pruneCache<T extends { expiresAt: number }>(cache: Map<string, T>) {
   const now = Date.now();
@@ -51,6 +54,7 @@ function pruneCache<T extends { expiresAt: number }>(cache: Map<string, T>) {
 export function _clearIngestCachesForTesting() {
   wsSettingsCache.clear();
   accountCache.clear();
+  workspaceCache.clear();
 }
 
 export interface PinAnnotation {
@@ -244,25 +248,35 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   // 4. Verify workspace existence in Project 1 (Scheduling / Auth Authority)
-  try {
-    const admin = dbClients.getSchedulingAdmin(runtimeEnv);
-    const { data: ws, error: wsErr } = await admin
-      .from('workspaces')
-      .select('id')
-      .eq('id', workspaceId)
-      .maybeSingle();
+  const isTestEnv = typeof process !== 'undefined' && Boolean(process.env.VITEST);
+  const useCache = !isTestEnv || runtimeEnv?.ENABLE_INGEST_CACHE === 'true';
+  const now = Date.now();
+  let cachedWs = useCache ? workspaceCache.get(workspaceId) : undefined;
+  if (!cachedWs || now >= cachedWs.expiresAt) {
+    try {
+      const admin = dbClients.getSchedulingAdmin(runtimeEnv);
+      const { data: ws, error: wsErr } = await admin
+        .from('workspaces')
+        .select('id')
+        .eq('id', workspaceId)
+        .maybeSingle();
 
-    if (wsErr || !ws) {
+      if (wsErr || !ws) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Workspace not found or unauthorized.' }),
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (useCache) {
+        workspaceCache.set(workspaceId, { valid: true, expiresAt: now + WS_SETTINGS_TTL_MS });
+        pruneCache(workspaceCache);
+      }
+    } catch (err: any) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Workspace not found or unauthorized.' }),
-        { status: 403, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: 'Workspace verification failed.' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
-  } catch (err: any) {
-    return new Response(
-      JSON.stringify({ success: false, error: 'Workspace verification failed.' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
   }
 
   // 5. Ingest into Project 4 (PinArchive)
@@ -363,19 +377,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
       cachedAccount = undefined;
     }
 
-    let existingAccount: { id: string; status: string; ingest_enabled: boolean } | null = null;
+    let existingAccount: { id: string; status: string; ingest_enabled: boolean; last_run_at?: string | null; follower_count?: number | null } | null = null;
 
     if (cachedAccount) {
       existingAccount = {
         id: cachedAccount.id,
         status: cachedAccount.status,
         ingest_enabled: cachedAccount.ingest_enabled,
+        last_run_at: cachedAccount.lastRunAtMs > 0 ? new Date(cachedAccount.lastRunAtMs).toISOString() : null,
+        follower_count: cachedAccount.followerCount,
       };
       resolvedAccountId = cachedAccount.id;
     } else {
       const { data: dbAccount } = await pinArchive
         .from('pa_accounts')
-        .select('id, status, ingest_enabled')
+        .select('id, status, ingest_enabled, last_run_at, follower_count')
         .eq('workspace_id', workspaceId)
         .eq('username', username)
         .maybeSingle();
@@ -383,6 +399,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
       if (dbAccount) {
         existingAccount = dbAccount;
         resolvedAccountId = dbAccount.id;
+        if (useCache) {
+          accountCache.set(accountKey, {
+            id: dbAccount.id,
+            status: dbAccount.status,
+            ingest_enabled: dbAccount.ingest_enabled,
+            lastUpsertedAt: now,
+            lastRunAtMs: dbAccount.last_run_at ? new Date(dbAccount.last_run_at).getTime() : 0,
+            followerCount: typeof dbAccount.follower_count === 'number' ? dbAccount.follower_count : null,
+            expiresAt: now + ACCOUNT_CACHE_TTL_MS,
+          });
+          pruneCache(accountCache);
+        }
       }
     }
 
@@ -412,8 +440,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const promotedCount = pins.filter((p: any) => Boolean(p.promoted)).length;
 
-    // A) Upsert pa_accounts (Throttled: skip if already upserted recently in same session)
+    // A) Upsert pa_accounts (Throttled: skip if already upserted recently in same session or intermediate batch)
     let accountId: string;
+    const isIntermediateBatch = payload.skip_run_log === true;
+    const payloadAccountId = typeof payload.account_id === 'string' && UUID_REGEX.test(payload.account_id) ? payload.account_id : null;
+    const resolvedExistingId = cachedAccount?.id || existingAccount?.id || payloadAccountId;
+
     const hasExplicitCursor = account_meta.backfill_cursor !== undefined;
     const isStatusChanged = Boolean(
       account_meta.status &&
@@ -423,16 +455,62 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const shouldSkipUpsert = Boolean(
       !hasExplicitCursor &&
       !isStatusChanged &&
-      useCache &&
+      ((isIntermediateBatch && resolvedExistingId) ||
+      (useCache &&
       cachedAccount &&
       cachedAccount.id &&
       UUID_REGEX.test(cachedAccount.id) &&
-      (now - cachedAccount.lastUpsertedAt < ACCOUNT_UPSERT_THROTTLE_MS)
+      (now - cachedAccount.lastUpsertedAt < ACCOUNT_UPSERT_THROTTLE_MS)))
     );
 
-    if (shouldSkipUpsert && cachedAccount) {
-      accountId = cachedAccount.id;
+    if (shouldSkipUpsert && resolvedExistingId) {
+      accountId = resolvedExistingId;
       resolvedAccountId = accountId;
+    } else if (existingAccount && payload.trigger === 'refresh' && !hasExplicitCursor && !isStatusChanged) {
+      // Refresh fast-path: account exists; do NOT perform full UPSERT which causes index lock contention
+      accountId = existingAccount.id;
+      resolvedAccountId = accountId;
+
+      const lastRunMs = cachedAccount?.lastRunAtMs ||
+        ((existingAccount as any)?.last_run_at ? new Date((existingAccount as any).last_run_at).getTime() : 0);
+      const isRecentlyRefreshed = lastRunMs > 0 && (now - lastRunMs < 5 * 60 * 1000);
+      const incomingFollower = (typeof payload.follower_count === 'number' && Number.isFinite(payload.follower_count))
+        ? Math.max(0, Math.round(payload.follower_count))
+        : null;
+      const existingFollower = (typeof (existingAccount as any)?.follower_count === 'number')
+        ? (existingAccount as any).follower_count
+        : (cachedAccount?.followerCount ?? null);
+      const hasFollowerUpdate = incomingFollower !== null && incomingFollower !== existingFollower;
+
+      if (!isRecentlyRefreshed || hasFollowerUpdate) {
+        const updateData: Record<string, any> = { last_run_at: fetchedAt };
+        if (hasFollowerUpdate && incomingFollower !== null) {
+          updateData.follower_count = incomingFollower;
+        }
+        try {
+          const accTable = pinArchive.from('pa_accounts');
+          if (typeof accTable.update === 'function') {
+            await accTable.update(updateData).eq('id', accountId);
+          } else if (typeof accTable.upsert === 'function') {
+            await accTable.upsert({ workspace_id: workspaceId, username, ...updateData }, { onConflict: 'workspace_id,username' });
+          }
+        } catch (e: any) {
+          console.warn('[PinArchive Ingest] pa_accounts update warning:', e?.message || e);
+        }
+      }
+
+      if (useCache) {
+        accountCache.set(accountKey, {
+          id: accountId,
+          status: existingAccount?.status || 'active',
+          ingest_enabled: existingAccount?.ingest_enabled ?? true,
+          lastUpsertedAt: now,
+          lastRunAtMs: now,
+          followerCount: incomingFollower ?? existingFollower,
+          expiresAt: now + ACCOUNT_CACHE_TTL_MS,
+        });
+        pruneCache(accountCache);
+      }
     } else {
       const accountData: Record<string, any> = {
         workspace_id: workspaceId,
@@ -486,6 +564,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
           status: accountData.status || existingAccount?.status || 'active',
           ingest_enabled: existingAccount?.ingest_enabled ?? true,
           lastUpsertedAt: now,
+          lastRunAtMs: now,
+          followerCount: accountData.follower_count ?? null,
           expiresAt: now + ACCOUNT_CACHE_TTL_MS,
         });
         pruneCache(accountCache);
