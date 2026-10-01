@@ -100,7 +100,7 @@ export class StoreController {
 
     densityToggleBtn?.addEventListener('click', () => {
       this.state.isCompactDensity = !this.state.isCompactDensity;
-      saveDensityPreference(this.state.isCompactDensity ? 'compact' : 'comfortable');
+      saveDensityPreference(this.state.isCompactDensity);
       updateDensityUI();
       this.callbacks.onPreferencesChanged();
     });
@@ -120,7 +120,7 @@ export class StoreController {
 
     numFormatToggleBtn?.addEventListener('click', () => {
       this.state.isCompactNumbers = !this.state.isCompactNumbers;
-      saveNumFormatPreference(this.state.isCompactNumbers ? 'compact' : 'full');
+      saveNumFormatPreference(this.state.isCompactNumbers);
       updateNumFormatUI();
       this.callbacks.onPreferencesChanged();
     });

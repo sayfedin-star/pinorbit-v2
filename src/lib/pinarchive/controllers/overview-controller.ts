@@ -72,8 +72,10 @@ export class OverviewController {
       if (kpiArchived) kpiArchived.textContent = fmtNumberFull(totals.archived_pins ?? 0);
       if (kpiSaves) kpiSaves.textContent = fmtNumberFull(totals.sum_saves ?? 0);
       if (kpiShares) kpiShares.textContent = fmtNumberFull(totals.sum_shares ?? 0);
-      if (kpi24hSaves) kpi24hSaves.textContent = `+${fmtNumberFull(totals.sum_delta_saves_24h ?? 0)}`;
-      if (kpi24hRepins) kpi24hRepins.textContent = `+${fmtNumberFull(totals.sum_delta_repins_24h ?? 0)}`;
+      const ds24 = Number(totals.sum_delta_saves_24h ?? 0);
+      const dr24 = Number(totals.sum_delta_repins_24h ?? 0);
+      if (kpi24hSaves) kpi24hSaves.textContent = ds24 > 0 ? `+${fmtNumberFull(ds24)}` : fmtNumberFull(ds24);
+      if (kpi24hRepins) kpi24hRepins.textContent = dr24 > 0 ? `+${fmtNumberFull(dr24)}` : fmtNumberFull(dr24);
 
       // Meta refresh line
       if (metaText) {

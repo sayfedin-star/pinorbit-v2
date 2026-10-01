@@ -192,7 +192,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         return {
           id: p.id,
           pin_id: p.pin_id,
-          account_id: p.account_id,
+          account_id: p.account_id || accountId,
           title: p.title,
           image_url: p.image_url,
           link: p.link,

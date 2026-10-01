@@ -49,7 +49,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const db = dbClients.getPinArchive(locals.runtime?.env);
 
     // a) Fetch primary pin record
-    const { data: pin, error: pinErr } = await db
+    const { data: pinData, error: pinErr } = await db
       .from('pa_pins')
       .select(PIN_DETAIL_PROJECTION)
       .eq('id', id)
@@ -59,9 +59,10 @@ export const GET: APIRoute = async ({ request, locals }) => {
     if (pinErr) {
       return json({ success: false, error: pinErr.message }, 500);
     }
-    if (!pin) {
+    if (!pinData) {
       return json({ success: false, error: 'Pin not found.' }, 404);
     }
+    const pin: any = pinData;
 
     // Fetch creator account username if available
     if (pin.account_id) {

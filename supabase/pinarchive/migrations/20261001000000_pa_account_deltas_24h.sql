@@ -44,36 +44,49 @@ BEGIN
       pm.pin_ref,
       pm.saves,
       pm.repins,
-      row_number() OVER (PARTITION BY pm.pin_ref ORDER BY pm.recorded_at DESC) AS rnum
+      pm.recorded_at,
+      row_number() OVER (PARTITION BY pm.pin_ref ORDER BY pm.recorded_at DESC) AS rnum,
+      first_value(pm.recorded_at) OVER (PARTITION BY pm.pin_ref ORDER BY pm.recorded_at DESC) AS t0
     FROM public.pa_pin_metrics pm
     JOIN pins_with_24h pw ON pw.pin_ref = pm.pin_ref
     WHERE pm.workspace_id = p_workspace_id
   ),
+  ranked_with_baseline AS (
+    SELECT
+      rm.*,
+      CASE WHEN rm.rnum > 1 THEN
+        row_number() OVER (
+          PARTITION BY rm.pin_ref, (rm.rnum > 1)
+          ORDER BY abs(extract(epoch from (rm.t0 - rm.recorded_at)) - 86400)
+        )
+      END AS rank_24h
+    FROM ranked_metrics rm
+    WHERE rm.rnum <= 10
+  ),
   pin_deltas AS (
     SELECT
       pin_ref,
-      GREATEST(0, (max(CASE WHEN rnum = 1 THEN saves END) - max(CASE WHEN rnum = 2 THEN saves END))) AS delta_saves,
-      GREATEST(0, (max(CASE WHEN rnum = 1 THEN repins END) - max(CASE WHEN rnum = 2 THEN repins END))) AS delta_repins
-    FROM ranked_metrics
-    WHERE rnum <= 2
+      GREATEST(0, (max(CASE WHEN rnum = 1 THEN saves END) - max(CASE WHEN rank_24h = 1 THEN saves END))) AS delta_saves,
+      GREATEST(0, (max(CASE WHEN rnum = 1 THEN repins END) - max(CASE WHEN rank_24h = 1 THEN repins END))) AS delta_repins
+    FROM ranked_with_baseline
     GROUP BY pin_ref
     HAVING count(*) >= 2
   ),
-  account_pin_sums AS (
+  account_deltas AS (
     SELECT
       rp.account_id,
-      coalesce(sum(pd.delta_saves), 0)::bigint AS delta_saves_24h,
-      coalesce(sum(pd.delta_repins), 0)::bigint AS delta_repins_24h
-    FROM recent_pins rp
-    LEFT JOIN pin_deltas pd ON pd.pin_ref = rp.pin_ref
+      sum(pd.delta_saves)::bigint AS delta_saves_24h,
+      sum(pd.delta_repins)::bigint AS delta_repins_24h
+    FROM pin_deltas pd
+    JOIN recent_pins rp ON rp.pin_ref = pd.pin_ref
     GROUP BY rp.account_id
   )
   SELECT
     ta.acc_id AS account_id,
-    coalesce(aps.delta_saves_24h, 0)::bigint AS delta_saves_24h,
-    coalesce(aps.delta_repins_24h, 0)::bigint AS delta_repins_24h
+    coalesce(ad.delta_saves_24h, 0)::bigint AS delta_saves_24h,
+    coalesce(ad.delta_repins_24h, 0)::bigint AS delta_repins_24h
   FROM target_accounts ta
-  LEFT JOIN account_pin_sums aps ON aps.account_id = ta.acc_id;
+  LEFT JOIN account_deltas ad ON ad.account_id = ta.acc_id;
 END;
 $$;
 

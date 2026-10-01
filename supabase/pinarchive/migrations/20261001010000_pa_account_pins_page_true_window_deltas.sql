@@ -179,6 +179,12 @@ BEGIN
                CASE WHEN n.rnum > 1 THEN
                  row_number() OVER (
                    PARTITION BY (n.rnum > 1)
+                   ORDER BY abs(extract(epoch from (n.t0 - n.recorded_at)) - 86400)
+                 )
+               END as rank_24h,
+               CASE WHEN n.rnum > 1 THEN
+                 row_number() OVER (
+                   PARTITION BY (n.rnum > 1)
                    ORDER BY abs(extract(epoch from (n.t0 - n.recorded_at)) - 259200)
                  )
                END as rank_3d,
@@ -194,12 +200,12 @@ BEGIN
         max(CASE WHEN rnum = 1 THEN recorded_at END) AS last_snapshot_at,
         CASE
           WHEN count(*) >= 2 AND max(CASE WHEN rnum = 1 THEN recorded_at END) >= now() - interval '24 hours' THEN
-            GREATEST(0, (max(CASE WHEN rnum = 1 THEN saves END) - max(CASE WHEN rnum = 2 THEN saves END)))
+            GREATEST(0, (max(CASE WHEN rnum = 1 THEN saves END) - max(CASE WHEN rank_24h = 1 THEN saves END)))
           ELSE 0
         END::bigint AS delta_saves,
         CASE
           WHEN count(*) >= 2 AND max(CASE WHEN rnum = 1 THEN recorded_at END) >= now() - interval '24 hours' THEN
-            GREATEST(0, max(CASE WHEN rnum = 1 THEN repins END) - max(CASE WHEN rnum = 2 THEN repins END))
+            GREATEST(0, max(CASE WHEN rnum = 1 THEN repins END) - max(CASE WHEN rank_24h = 1 THEN repins END))
           ELSE 0
         END::bigint AS delta_repins,
         CASE
@@ -224,12 +230,12 @@ BEGIN
         END::bigint AS delta_repins_7d,
         CASE
           WHEN count(*) >= 2 AND max(CASE WHEN rnum = 1 THEN recorded_at END) >= now() - interval '24 hours' THEN
-            GREATEST(0, max(CASE WHEN rnum = 1 THEN shares END) - max(CASE WHEN rnum = 2 THEN shares END))
+            GREATEST(0, max(CASE WHEN rnum = 1 THEN shares END) - max(CASE WHEN rank_24h = 1 THEN shares END))
           ELSE 0
         END::bigint AS delta_shares,
         CASE
           WHEN count(*) >= 2 AND max(CASE WHEN rnum = 1 THEN recorded_at END) >= now() - interval '24 hours' THEN
-            GREATEST(0, max(CASE WHEN rnum = 1 THEN reactions_total END) - max(CASE WHEN rnum = 2 THEN reactions_total END))
+            GREATEST(0, max(CASE WHEN rnum = 1 THEN reactions_total END) - max(CASE WHEN rank_24h = 1 THEN reactions_total END))
           ELSE 0
         END::bigint AS delta_reactions
       FROM ranked
@@ -309,6 +315,12 @@ BEGIN
                  CASE WHEN n.rnum > 1 THEN
                    row_number() OVER (
                      PARTITION BY (n.rnum > 1)
+                     ORDER BY abs(extract(epoch from (n.t0 - n.recorded_at)) - 86400)
+                   )
+                 END as rank_24h,
+                 CASE WHEN n.rnum > 1 THEN
+                   row_number() OVER (
+                     PARTITION BY (n.rnum > 1)
                      ORDER BY abs(extract(epoch from (n.t0 - n.recorded_at)) - 259200)
                    )
                  END as rank_3d,
@@ -324,12 +336,12 @@ BEGIN
           max(CASE WHEN rnum = 1 THEN recorded_at END) AS last_snapshot_at,
           CASE
             WHEN count(*) >= 2 AND max(CASE WHEN rnum = 1 THEN recorded_at END) >= now() - interval '24 hours' THEN
-              GREATEST(0, (max(CASE WHEN rnum = 1 THEN saves END) - max(CASE WHEN rnum = 2 THEN saves END)))
+              GREATEST(0, (max(CASE WHEN rnum = 1 THEN saves END) - max(CASE WHEN rank_24h = 1 THEN saves END)))
             ELSE 0
           END::bigint AS delta_saves,
           CASE
             WHEN count(*) >= 2 AND max(CASE WHEN rnum = 1 THEN recorded_at END) >= now() - interval '24 hours' THEN
-              GREATEST(0, max(CASE WHEN rnum = 1 THEN repins END) - max(CASE WHEN rnum = 2 THEN repins END))
+              GREATEST(0, max(CASE WHEN rnum = 1 THEN repins END) - max(CASE WHEN rank_24h = 1 THEN repins END))
             ELSE 0
           END::bigint AS delta_repins,
           CASE
@@ -354,12 +366,12 @@ BEGIN
           END::bigint AS delta_repins_7d,
           CASE
             WHEN count(*) >= 2 AND max(CASE WHEN rnum = 1 THEN recorded_at END) >= now() - interval '24 hours' THEN
-              GREATEST(0, max(CASE WHEN rnum = 1 THEN shares END) - max(CASE WHEN rnum = 2 THEN shares END))
+              GREATEST(0, max(CASE WHEN rnum = 1 THEN shares END) - max(CASE WHEN rank_24h = 1 THEN shares END))
             ELSE 0
           END::bigint AS delta_shares,
           CASE
             WHEN count(*) >= 2 AND max(CASE WHEN rnum = 1 THEN recorded_at END) >= now() - interval '24 hours' THEN
-              GREATEST(0, max(CASE WHEN rnum = 1 THEN reactions_total END) - max(CASE WHEN rnum = 2 THEN reactions_total END))
+              GREATEST(0, max(CASE WHEN rnum = 1 THEN reactions_total END) - max(CASE WHEN rank_24h = 1 THEN reactions_total END))
             ELSE 0
           END::bigint AS delta_reactions
         FROM ranked
