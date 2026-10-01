@@ -61,7 +61,11 @@ export async function supaPatch(baseUrl, apiKey, table, matchParams, body, optio
     throw new Error(`Supabase PATCH ${table} failed (HTTP ${res.status}): ${txt}`);
   }
 
-  return options.prefer?.includes('return=representation') ? res.json() : true;
+  if (options.prefer?.includes('return=representation')) {
+    return res.json();
+  }
+  await res.text().catch(() => '');
+  return true;
 }
 
 /**
@@ -89,7 +93,11 @@ export async function supaInsert(baseUrl, apiKey, table, body, options = {}) {
     throw new Error(`Supabase POST ${table} failed (HTTP ${res.status}): ${txt}`);
   }
 
-  return options.prefer?.includes('return=representation') ? res.json() : true;
+  if (options.prefer?.includes('return=representation')) {
+    return res.json();
+  }
+  await res.text().catch(() => '');
+  return true;
 }
 
 /**

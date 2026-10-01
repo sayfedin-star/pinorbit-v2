@@ -22,9 +22,9 @@ import path from 'path';
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { aesKey, decryptCookieValue, resolveKek, getVaultCookie } from './lib/vault.mjs';
-import { writeToGas, pushToIngest as pushToIngestClient, fetchAllAccounts } from './lib/pa-client.mjs';
+import { writeToGas, pushToIngest as pushToIngestClient, fetchAllAccounts, partitionAccountsLPT } from './lib/pa-client.mjs';
 import { formatPin } from './lib/pinterest.mjs';
-import { savePinsToRunnerCache } from './lib/runner-cache.mjs';
+import { savePinsToRunnerCache, flushRunnerCacheToDisk } from './lib/runner-cache.mjs';
 
 const CFG = {
   PAGE_SIZE: 50,
@@ -75,6 +75,8 @@ async function logEgressIp() {
     if (res.ok) {
       const data = await res.json();
       console.log(`🌐 Runner Egress IP: ${data.ip}`);
+    } else {
+      await res.text().catch(() => '');
     }
   } catch (e) {
     console.warn(`⚠️ Could not determine egress IP: ${e.message}`);
@@ -107,7 +109,10 @@ async function supaQuery(table, params = '') {
     },
     signal: AbortSignal.timeout(30000),
   });
-  if (!res.ok) throw new Error(`Supabase ${table}: HTTP ${res.status}`);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`Supabase ${table}: HTTP ${res.status}: ${txt}`);
+  }
   return res.json();
 }
 
@@ -127,6 +132,8 @@ async function supaPatch(table, matchParams, body) {
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
     console.warn(`⚠️ Supabase PATCH ${table} failed (${res.status}): ${txt}`);
+  } else {
+    await res.text().catch(() => '');
   }
 }
 
@@ -146,6 +153,8 @@ async function supaInsert(table, body) {
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
     console.warn(`⚠️ Supabase POST ${table} failed (${res.status}): ${txt}`);
+  } else {
+    await res.text().catch(() => '');
   }
 }
 
@@ -403,6 +412,8 @@ async function main() {
               return;
             }
           }
+        } else {
+          await p1Res.text().catch(() => '');
         }
       }
     } catch (err) {
@@ -469,13 +480,10 @@ async function main() {
   }
   console.log('');
 
-  // Sort accounts by pins_count descending (LPT: Longest Processing Time heuristic)
-  // Ensures heavy historical accounts (@recipestower, @whispe_sad, @zollinsadru) are distributed
-  // evenly across different runner shards rather than clustering on the same runner.
-  accounts.sort((a, b) => (Number(b.pins_count) || 0) - (Number(a.pins_count) || 0));
-
-  // Sharding across runner matrix
-  const shardedAccounts = accounts.filter((_, idx) => idx % SHARD_COUNT === DISCOVERY_SHARD);
+  // Deterministic Greedy Bin-Packing (LPT) across runner matrix:
+  // Balances pin workload so heavy accounts (@recipestower, @whispe_sad, @zollinsadru)
+  // are isolated and smaller accounts are packed into shards with lowest accumulated weight.
+  const shardedAccounts = partitionAccountsLPT(accounts, SHARD_COUNT, DISCOVERY_SHARD);
   console.log(`Shard ${DISCOVERY_SHARD + 1}/${SHARD_COUNT}: Processing ${shardedAccounts.length} of ${accounts.length} total accounts.\n`);
 
   if (!shardedAccounts.length) {
@@ -682,7 +690,7 @@ async function main() {
       // Check how many pins on this page are already known / after watermark
       let pageNewPinsCount = 0;
       const formattedPagePins = pagePins.map(mapDiscoveryPin);
-      savePinsToRunnerCache(formattedPagePins);
+      savePinsToRunnerCache(formattedPagePins, undefined, false);
 
       for (const p of formattedPagePins) {
         if (!p.pin_id) continue;
@@ -840,6 +848,9 @@ async function main() {
       sheetPushed,
       circuitBroken,
     });
+
+    // Flush runner cache to disk once per account (eliminating redundant disk writes per page)
+    flushRunnerCacheToDisk();
   }
 
   console.log(`\n==================================================`);

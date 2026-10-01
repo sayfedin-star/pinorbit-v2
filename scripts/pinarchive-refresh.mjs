@@ -57,7 +57,10 @@ async function supaQuery(table, params = '') {
     headers: { 'apikey': PINARCHIVE_SUPABASE_KEY, 'Authorization': `Bearer ${PINARCHIVE_SUPABASE_KEY}`, 'Accept': 'application/json' },
     signal: AbortSignal.timeout(30000),
   });
-  if (!res.ok) throw new Error(`Supabase ${table}: HTTP ${res.status}`);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`Supabase ${table}: HTTP ${res.status}: ${txt}`);
+  }
   return res.json();
 }
 
