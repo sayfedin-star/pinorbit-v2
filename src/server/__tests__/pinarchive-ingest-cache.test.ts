@@ -636,5 +636,104 @@ describe('PinArchive Ingest Memoization & Batch Optimization Suite', () => {
     // Upsert must NOT be called on intermediate batches!
     expect(upsertCalled).toBe(false);
   });
+
+  it('11. Skips pa_accounts update on refresh when account was recently refreshed and follower_count has not changed', async () => {
+    let updateCalled = false;
+    let upsertCalled = false;
+    const recentLastRun = new Date(Date.now() - 60 * 1000).toISOString(); // 1 minute ago
+
+    mockPinArchiveClient.from.mockImplementation((table: string) => {
+      if (table === 'pa_workspace_settings') {
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({
+                data: { ingest_enabled: true, paused_account_policy: 'reject', max_batch_pins: 500 },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'pa_accounts') {
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: {
+                    id: '11111111-1111-1111-1111-111111111111',
+                    status: 'active',
+                    ingest_enabled: true,
+                    last_run_at: recentLastRun,
+                    follower_count: 5000,
+                  },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+          update: vi.fn().mockImplementation(() => {
+            updateCalled = true;
+            return { eq: vi.fn().mockResolvedValue({ data: {}, error: null }) };
+          }),
+          upsert: vi.fn().mockImplementation(() => {
+            upsertCalled = true;
+            return {
+              select: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { id: '11111111-1111-1111-1111-111111111111', workspace_id: mockWsId1, username: 'test_creator' },
+                  error: null,
+                }),
+              }),
+            };
+          }),
+        };
+      }
+      if (table === 'pa_pins') {
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              in: vi.fn().mockResolvedValue({ data: [], error: null }),
+            }),
+          }),
+          upsert: vi.fn().mockReturnValue({
+            select: vi.fn().mockResolvedValue({ data: [{ id: 'pin-row-1', pin_id: 'pin_1' }], error: null }),
+          }),
+        };
+      }
+      if (table === 'pa_runs') {
+        return {
+          insert: vi.fn().mockResolvedValue({ data: {}, error: null }),
+        };
+      }
+      return {};
+    });
+
+    const req = new Request('http://localhost:4321/api/internal/pinarchive/ingest', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-ingest-secret': mockSecret,
+      },
+      body: JSON.stringify({
+        workspace_id: mockWsId1,
+        username: 'test_creator',
+        trigger: 'refresh',
+        follower_count: 5000,
+        pins: [{ pin_id: 'pin_1', title: 'P1', saves: 10 }],
+      }),
+    });
+
+    const res = await ingestHandler({
+      request: req,
+      locals: { runtime: { env: mockRuntimeEnv } },
+    } as any);
+
+    expect(res.status).toBe(200);
+    // Update and upsert should be completely skipped to eliminate lock contention
+    expect(updateCalled).toBe(false);
+    expect(upsertCalled).toBe(false);
+  });
 });
 

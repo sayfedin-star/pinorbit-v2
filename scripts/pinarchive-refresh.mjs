@@ -367,7 +367,7 @@ async function main() {
     let rateLimitCooldownUntil = 0;
     let circuitBroken = false;
     const changedPins = [];
-    let accountFollowerCount = typeof acc.follower_count === 'number' && acc.follower_count > 0 ? acc.follower_count : null;
+    let accountFollowerCount = null;
 
     const sem = new Semaphore(CFG.CONCURRENCY);
 
@@ -385,8 +385,9 @@ async function main() {
             // Rate-limit cooldown check
             if (Date.now() < rateLimitCooldownUntil) {
               const waitMs = Math.max(0, rateLimitCooldownUntil - Date.now());
-              console.warn(`[RATE LIMIT] Pausing for ${Math.round(waitMs / 1000)}s cooldown before pin ${p.pin_id}`);
-              await sleep(waitMs);
+              const jitterMs = Math.floor(Math.random() * 2000);
+              console.warn(`[RATE LIMIT] Pausing for ${Math.round(waitMs / 1000)}s cooldown (+${jitterMs}ms jitter) before pin ${p.pin_id}`);
+              await sleep(waitMs + jitterMs);
             }
 
             if (circuitBroken) return;
@@ -408,10 +409,8 @@ async function main() {
               if (!wasAlreadyInCooldown) {
                 consecutiveErrors++;
               }
-            } else if (fresh?.code === 403) {
+            } else if (fresh?.code === 403 || fresh?.code === 503 || fresh?.code === 500 || fresh?.error?.includes('timeout')) {
               consecutiveErrors++;
-            } else {
-              consecutiveErrors = 0;
             }
 
             if (consecutiveErrors >= CFG.CIRCUIT_BREAKER) {
@@ -432,7 +431,7 @@ async function main() {
           consecutiveErrors = 0;
           summary.refreshed++;
 
-          if (typeof fresh.follower_count === 'number' && fresh.follower_count > 0 && accountFollowerCount === null) {
+          if (typeof fresh.follower_count === 'number' && fresh.follower_count > 0 && fresh.follower_count !== acc.follower_count && accountFollowerCount === null) {
             accountFollowerCount = fresh.follower_count;
           }
 
@@ -587,8 +586,8 @@ async function main() {
         }
       }
     } else {
-      // Freshness Guarantee: If leader shard found 0 changed pins, update pa_accounts and record pa_runs
-      const isLeader = REFRESH_SHARD === 0 || SHARD_COUNT === 1;
+      // Freshness Guarantee: If leader shard found 0 changed pins and was not circuit-broken, update pa_accounts and record pa_runs
+      const isLeader = (REFRESH_SHARD === 0 || SHARD_COUNT === 1) && !circuitBroken;
       if (isLeader) {
         const nowIso = new Date().toISOString();
         try {
@@ -627,11 +626,19 @@ async function main() {
   console.log(`\nSummary: checked=${summary.refreshed}, changed=${summary.updated}, pushed=${summary.pushed}, cacheHits=${cacheStats.hits}, errors=${summary.errors.length}`);
   const isFiltered = Boolean(REFRESH_WORKSPACE_ID || REFRESH_USERNAME || REFRESH_USERNAMES.length > 0);
   const hasPushErrors = summary.errors.some(e => e.startsWith('push:'));
-  const allFailed = summary.errors.length > 0 && summary.refreshed === 0;
+  const hasCircuitBreaker = summary.errors.some(e => e.startsWith('circuit-breaker'));
+  const systemicErrors = summary.errors.filter(e =>
+    e.startsWith('push:') ||
+    e.startsWith('circuit-breaker') ||
+    e.includes('429') ||
+    e.includes('403') ||
+    e.includes('timeout')
+  );
+  const allSystemicFailed = systemicErrors.length > 0 && summary.refreshed === 0;
 
   if (process.env.GITHUB_STEP_SUMMARY) {
     try {
-      const statusIcon = (hasPushErrors || allFailed)
+      const statusIcon = (hasPushErrors || hasCircuitBreaker || allSystemicFailed)
         ? '❌ Failed'
         : (summary.errors.length > 0 ? '⚠️ Has Errors' : '✅ Completed');
       let md = `### 🔄 Refresh Shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} (${statusIcon})\n\n`;
@@ -657,7 +664,7 @@ async function main() {
     }
   }
 
-  if (hasPushErrors || allFailed) {
+  if (hasPushErrors || hasCircuitBreaker || allSystemicFailed) {
     process.exit(1);
   }
 
@@ -665,12 +672,13 @@ async function main() {
     // Filtered run: success if anything was pushed/updated, regardless of per-pin extraction misses
     if (summary.pushed > 0 || summary.updated > 0) process.exit(0);
     // No change but also no systemic failure (e.g. capped rotation) → still 0
-    if (summary.errors.length === 0) process.exit(0);
-    // All pins in the filtered scope failed → keep red signal
+    if (systemicErrors.length === 0) process.exit(0);
+    // All pins in the filtered scope failed systemically → keep red signal
     process.exit(1);
   }
 
-  if (summary.errors.length > summary.refreshed) {
+  // Systemic threshold: fail only if systemic errors exceed successfully refreshed pins and nothing was refreshed
+  if (systemicErrors.length > summary.refreshed && summary.refreshed === 0) {
     process.exit(1);
   }
 

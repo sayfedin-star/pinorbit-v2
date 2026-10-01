@@ -24,6 +24,8 @@ interface CachedAccount {
   status: string;
   ingest_enabled: boolean;
   lastUpsertedAt: number;
+  lastRunAtMs: number;
+  followerCount: number | null;
   expiresAt: number;
 }
 
@@ -363,19 +365,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
       cachedAccount = undefined;
     }
 
-    let existingAccount: { id: string; status: string; ingest_enabled: boolean } | null = null;
+    let existingAccount: { id: string; status: string; ingest_enabled: boolean; last_run_at?: string | null; follower_count?: number | null } | null = null;
 
     if (cachedAccount) {
       existingAccount = {
         id: cachedAccount.id,
         status: cachedAccount.status,
         ingest_enabled: cachedAccount.ingest_enabled,
+        last_run_at: cachedAccount.lastRunAtMs > 0 ? new Date(cachedAccount.lastRunAtMs).toISOString() : null,
+        follower_count: cachedAccount.followerCount,
       };
       resolvedAccountId = cachedAccount.id;
     } else {
       const { data: dbAccount } = await pinArchive
         .from('pa_accounts')
-        .select('id, status, ingest_enabled, last_run_at')
+        .select('id, status, ingest_enabled, last_run_at, follower_count')
         .eq('workspace_id', workspaceId)
         .eq('username', username)
         .maybeSingle();
@@ -383,6 +387,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
       if (dbAccount) {
         existingAccount = dbAccount;
         resolvedAccountId = dbAccount.id;
+        if (useCache) {
+          accountCache.set(accountKey, {
+            id: dbAccount.id,
+            status: dbAccount.status,
+            ingest_enabled: dbAccount.ingest_enabled,
+            lastUpsertedAt: now,
+            lastRunAtMs: dbAccount.last_run_at ? new Date(dbAccount.last_run_at).getTime() : 0,
+            followerCount: typeof dbAccount.follower_count === 'number' ? dbAccount.follower_count : null,
+            expiresAt: now + ACCOUNT_CACHE_TTL_MS,
+          });
+          pruneCache(accountCache);
+        }
       }
     }
 
@@ -443,14 +459,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
       accountId = existingAccount.id;
       resolvedAccountId = accountId;
 
-      const lastRunMs = (existingAccount as any).last_run_at ? new Date((existingAccount as any).last_run_at).getTime() : 0;
+      const lastRunMs = cachedAccount?.lastRunAtMs ||
+        ((existingAccount as any)?.last_run_at ? new Date((existingAccount as any).last_run_at).getTime() : 0);
       const isRecentlyRefreshed = lastRunMs > 0 && (now - lastRunMs < 5 * 60 * 1000);
-      const hasFollowerUpdate = typeof payload.follower_count === 'number' && Number.isFinite(payload.follower_count);
+      const incomingFollower = (typeof payload.follower_count === 'number' && Number.isFinite(payload.follower_count))
+        ? Math.max(0, Math.round(payload.follower_count))
+        : null;
+      const existingFollower = (typeof (existingAccount as any)?.follower_count === 'number')
+        ? (existingAccount as any).follower_count
+        : (cachedAccount?.followerCount ?? null);
+      const hasFollowerUpdate = incomingFollower !== null && incomingFollower !== existingFollower;
 
       if (!isRecentlyRefreshed || hasFollowerUpdate) {
         const updateData: Record<string, any> = { last_run_at: fetchedAt };
-        if (hasFollowerUpdate) {
-          updateData.follower_count = Math.max(0, Math.round(payload.follower_count));
+        if (hasFollowerUpdate && incomingFollower !== null) {
+          updateData.follower_count = incomingFollower;
         }
         try {
           const accTable = pinArchive.from('pa_accounts');
@@ -470,6 +493,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
           status: existingAccount?.status || 'active',
           ingest_enabled: existingAccount?.ingest_enabled ?? true,
           lastUpsertedAt: now,
+          lastRunAtMs: now,
+          followerCount: incomingFollower ?? existingFollower,
           expiresAt: now + ACCOUNT_CACHE_TTL_MS,
         });
         pruneCache(accountCache);
@@ -527,6 +552,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
           status: accountData.status || existingAccount?.status || 'active',
           ingest_enabled: existingAccount?.ingest_enabled ?? true,
           lastUpsertedAt: now,
+          lastRunAtMs: now,
+          followerCount: accountData.follower_count ?? null,
           expiresAt: now + ACCOUNT_CACHE_TTL_MS,
         });
         pruneCache(accountCache);
