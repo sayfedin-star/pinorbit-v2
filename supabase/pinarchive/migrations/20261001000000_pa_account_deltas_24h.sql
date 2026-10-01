@@ -31,6 +31,14 @@ BEGIN
     WHERE p.workspace_id = p_workspace_id
       AND (p_account_id IS NULL OR p.account_id = p_account_id)
   ),
+  -- True 24-hour window filter: only consider pins with a snapshot recorded in the last 24 hours
+  pins_with_24h AS (
+    SELECT DISTINCT pm.pin_ref
+    FROM public.pa_pin_metrics pm
+    JOIN recent_pins rp ON rp.pin_ref = pm.pin_ref
+    WHERE pm.workspace_id = p_workspace_id
+      AND pm.recorded_at >= now() - interval '24 hours'
+  ),
   ranked_metrics AS (
     SELECT
       pm.pin_ref,
@@ -38,7 +46,7 @@ BEGIN
       pm.repins,
       row_number() OVER (PARTITION BY pm.pin_ref ORDER BY pm.recorded_at DESC) AS rnum
     FROM public.pa_pin_metrics pm
-    JOIN recent_pins rp ON rp.pin_ref = pm.pin_ref
+    JOIN pins_with_24h pw ON pw.pin_ref = pm.pin_ref
     WHERE pm.workspace_id = p_workspace_id
   ),
   pin_deltas AS (
