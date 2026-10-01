@@ -33,7 +33,12 @@ export async function supaQuery(baseUrl, apiKey, table, params = '', options = {
     throw new Error(`Supabase ${table} failed (HTTP ${res.status}): ${txt}`);
   }
 
-  return res.json();
+  try {
+    return await res.json();
+  } catch (err) {
+    await res.body?.cancel().catch(() => {});
+    throw err;
+  }
 }
 
 /**
@@ -62,7 +67,12 @@ export async function supaPatch(baseUrl, apiKey, table, matchParams, body, optio
   }
 
   if (options.prefer?.includes('return=representation')) {
-    return res.json();
+    try {
+      return await res.json();
+    } catch (err) {
+      await res.body?.cancel().catch(() => {});
+      throw err;
+    }
   }
   await res.text().catch(() => '');
   return true;
@@ -94,7 +104,12 @@ export async function supaInsert(baseUrl, apiKey, table, body, options = {}) {
   }
 
   if (options.prefer?.includes('return=representation')) {
-    return res.json();
+    try {
+      return await res.json();
+    } catch (err) {
+      await res.body?.cancel().catch(() => {});
+      throw err;
+    }
   }
   await res.text().catch(() => '');
   return true;
@@ -287,16 +302,20 @@ export async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
         return { ok: false, error: typed };
       }
 
-      // (3) Lock conflict check
-      const isLockConflict = data.ok === false && (data.error === 'locked' || (typeof data.error === 'string' && /lock/i.test(data.error)));
+      // (3) Lock & transient concurrency conflict check
+      const errStr = String(data.error || data.message || '');
+      const isLockConflict = data.ok === false && (
+        data.error === 'locked' ||
+        /lock|busy|timeout|service invoked too many times|try again|server error|exceeded maximum execution time/i.test(errStr)
+      );
       if (isLockConflict) {
         if (attempt < maxRetries) {
           const backoffMs = Math.floor(3000 * Math.pow(2, attempt) + Math.random() * 2000);
-          console.warn(`⚠️ [GAS Write] Lock conflict detected on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${backoffMs}ms...`);
+          console.warn(`⚠️ [GAS Write] Transient conflict detected (${errStr.slice(0, 80)}) on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${backoffMs}ms...`);
           await sleep(backoffMs);
           continue;
         }
-        return { ok: false, error: data.error || 'locked' };
+        return { ok: false, error: data.error || data.message || 'locked' };
       }
 
       // (4) Success telemetry
@@ -350,7 +369,14 @@ export async function callGasAccountAges(gasUrl, secret, workspaceId, usernames)
     throw new Error(`GAS HTTP ${res.status}: ${txt}`);
   }
 
-  const data = await res.json();
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (err) {
+    await res.body?.cancel().catch(() => {});
+    throw new Error(`GAS JSON parse error: ${err.message}`);
+  }
+
   if (!data || data.ok === false) {
     throw new Error(`GAS error: ${data?.error || 'Unknown GAS error'}`);
   }

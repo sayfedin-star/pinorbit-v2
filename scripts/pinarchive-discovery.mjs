@@ -113,7 +113,12 @@ async function supaQuery(table, params = '') {
     const txt = await res.text().catch(() => '');
     throw new Error(`Supabase ${table}: HTTP ${res.status}: ${txt}`);
   }
-  return res.json();
+  try {
+    return await res.json();
+  } catch (err) {
+    await res.body?.cancel().catch(() => {});
+    throw err;
+  }
 }
 
 async function supaPatch(table, matchParams, body) {
@@ -678,7 +683,13 @@ async function main() {
         }
 
         consecutiveErrors = 0;
-        const payload = await res.json();
+        let payload = null;
+        try {
+          payload = await res.json();
+        } catch (jErr) {
+          await res?.body?.cancel().catch(() => {});
+          throw jErr;
+        }
         const rr = payload?.resource_response || {};
         pagePins = rr.data || [];
         nextCursor = rr.bookmark || null;

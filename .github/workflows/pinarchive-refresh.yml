@@ -22,7 +22,7 @@ on:
         default: ''
 
 concurrency:
-  group: pinarchive-refresh
+  group: pinarchive-execution-gate
   cancel-in-progress: false
 
 jobs:

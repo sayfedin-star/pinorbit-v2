@@ -25,7 +25,7 @@ const CFG = {
   SLEEP_MS_MAX: 2500,
   BATCH_SIZE: 50,
   PUSH_SLEEP_MS: 500,
-  CIRCUIT_BREAKER: 3,
+  CIRCUIT_BREAKER: 10,
   CONCURRENCY: 4,
 };
 
@@ -61,7 +61,12 @@ async function supaQuery(table, params = '') {
     const txt = await res.text().catch(() => '');
     throw new Error(`Supabase ${table}: HTTP ${res.status}: ${txt}`);
   }
-  return res.json();
+  try {
+    return await res.json();
+  } catch (err) {
+    await res.body?.cancel().catch(() => {});
+    throw err;
+  }
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -218,6 +223,8 @@ async function main() {
               return;
             }
           }
+        } else {
+          await p1Res.text().catch(() => '');
         }
       }
     } catch (err) {
@@ -441,6 +448,7 @@ async function main() {
           }
 
           if (!fresh || !fresh.ok) {
+            const isSystemic = fresh?.code === 429 || fresh?.code === 503 || fresh?.error?.includes('timeout') || fresh?.error?.includes('fetch-failed');
             if (fresh?.code === 429) {
               const wasAlreadyInCooldown = Date.now() < rateLimitCooldownUntil;
               rateLimitCooldownUntil = Math.max(rateLimitCooldownUntil, Date.now() + 60000);
@@ -448,14 +456,14 @@ async function main() {
               if (!wasAlreadyInCooldown) {
                 consecutiveErrors++;
               }
-            } else if (fresh?.code === 403 || fresh?.code === 503 || fresh?.code === 500 || fresh?.error?.includes('timeout')) {
+            } else if (isSystemic) {
               consecutiveErrors++;
             }
 
             if (consecutiveErrors >= CFG.CIRCUIT_BREAKER) {
               circuitBroken = true;
               summary.errors.push(`circuit-breaker: ${acc.username}`);
-              console.error(`[CIRCUIT BREAKER] Hit ${CFG.CIRCUIT_BREAKER} consecutive errors on ${acc.username}. Aborting remaining pin fetches for this account.`);
+              console.error(`[CIRCUIT BREAKER] Hit ${CFG.CIRCUIT_BREAKER} consecutive systemic errors on ${acc.username}. Aborting remaining pin fetches for this account.`);
               return;
             }
 
@@ -700,7 +708,7 @@ async function main() {
     e.startsWith('push:') ||
     e.startsWith('circuit-breaker') ||
     e.includes('429') ||
-    e.includes('403') ||
+    e.includes('rate-limited') ||
     e.includes('timeout')
   );
   const allSystemicFailed = systemicErrors.length > 0 && summary.refreshed === 0;
