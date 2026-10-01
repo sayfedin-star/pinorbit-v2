@@ -76,13 +76,18 @@ export function savePinsToRunnerCache(pins, ttlMs = DEFAULT_TTL_MS) {
     count++;
   }
 
-  // Persist to disk atomically
+  // Persist to disk atomically with unique collision-free temp filename
   try {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
     const serialized = Object.fromEntries(inMemoryMap.entries());
-    const tempFile = `${CACHE_FILE}.${process.pid}.tmp`;
+    const tempFile = path.join(CACHE_DIR, `runner-pins.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
     fs.writeFileSync(tempFile, JSON.stringify(serialized), 'utf-8');
-    fs.renameSync(tempFile, CACHE_FILE);
+    try {
+      fs.renameSync(tempFile, CACHE_FILE);
+    } catch (renameErr) {
+      fs.copyFileSync(tempFile, CACHE_FILE);
+      try { fs.unlinkSync(tempFile); } catch (_) {}
+    }
     stats.saved += count;
   } catch (err) {
     console.warn(`[RunnerCache] Could not persist cache to disk: ${err.message}`);

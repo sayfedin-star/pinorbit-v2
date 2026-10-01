@@ -223,9 +223,13 @@ async function main() {
 
   // Intra-Account Pin-Level Modulo Sharding across all runners
   // All matrix runners iterate through eligible accounts, processing their deterministic slice of pins (idx % SHARD_COUNT === REFRESH_SHARD)
-  const shardedAccounts = accounts;
+  // Stagger/rotate account order by shard index to eliminate thundering herd and distribute load
+  const offset = REFRESH_SHARD % (accounts.length || 1);
+  const shardedAccounts = accounts.length > 1
+    ? [...accounts.slice(offset), ...accounts.slice(0, offset)]
+    : accounts;
 
-  console.log(`Found ${accounts.length} account(s) total — processing pin slice (shard ${REFRESH_SHARD + 1}/${SHARD_COUNT}) across eligible accounts\n`);
+  console.log(`Found ${accounts.length} account(s) total — processing pin slice (shard ${REFRESH_SHARD + 1}/${SHARD_COUNT}, account start offset=${offset}) across eligible accounts\n`);
 
   if (!shardedAccounts.length) {
     console.log('No accounts assigned to this shard.');
