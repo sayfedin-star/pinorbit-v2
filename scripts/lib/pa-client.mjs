@@ -288,14 +288,15 @@ export async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
       }
 
       // (3) Lock conflict check
-      if (data.ok === false && data.error === 'locked') {
+      const isLockConflict = data.ok === false && (data.error === 'locked' || (typeof data.error === 'string' && /lock/i.test(data.error)));
+      if (isLockConflict) {
         if (attempt < maxRetries) {
           const backoffMs = Math.floor(3000 * Math.pow(2, attempt) + Math.random() * 2000);
           console.warn(`⚠️ [GAS Write] Lock conflict detected on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${backoffMs}ms...`);
           await sleep(backoffMs);
           continue;
         }
-        return { ok: false, error: 'locked' };
+        return { ok: false, error: data.error || 'locked' };
       }
 
       // (4) Success telemetry

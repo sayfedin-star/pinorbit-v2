@@ -202,6 +202,18 @@ async function pinterestFetch(url, username, cookiePlain, vaultDb, cookieId, max
         });
       }
 
+      if (res.status >= 500 && res.status < 600) {
+        await res.text().catch(() => '');
+        if (attempt < maxRetries) {
+          const backoff = 2 ** attempt * 1500 + Math.floor(Math.random() * 1000);
+          console.warn(`⚠️ [Pinterest HTTP ${res.status}] Transient error for @${username} on attempt ${attempt + 1}/${maxRetries + 1}. Retrying in ${backoff}ms...`);
+          await sleep(backoff);
+          attempt++;
+          continue;
+        }
+        return res;
+      }
+
       return res;
     } catch (e) {
       if (attempt >= maxRetries) throw e;
