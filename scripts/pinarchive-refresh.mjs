@@ -55,6 +55,7 @@ async function supaQuery(table, params = '') {
   const url = `${PINARCHIVE_SUPABASE_URL}/rest/v1/${table}${params ? '?' + params : ''}`;
   const res = await fetch(url, {
     headers: { 'apikey': PINARCHIVE_SUPABASE_KEY, 'Authorization': `Bearer ${PINARCHIVE_SUPABASE_KEY}`, 'Accept': 'application/json' },
+    signal: AbortSignal.timeout(30000),
   });
   if (!res.ok) throw new Error(`Supabase ${table}: HTTP ${res.status}`);
   return res.json();
@@ -102,6 +103,7 @@ async function fetchPinFromPinterest(pinId, maxRetries = 2) {
       });
 
       if (res.status === 429) {
+        await res.text().catch(() => '');
         if (attempt < maxRetries) {
           const backoff = (attempt + 1) * 3000 + Math.floor(Math.random() * 2000);
           await sleep(backoff);
@@ -111,7 +113,10 @@ async function fetchPinFromPinterest(pinId, maxRetries = 2) {
         return { ok: false, code: 429, error: 'rate-limited-429' };
       }
 
-      if (res.status !== 200) return { ok: false, code: res.status };
+      if (res.status !== 200) {
+        await res.text().catch(() => '');
+        return { ok: false, code: res.status };
+      }
       const html = await res.text();
       const data = extractPinData(html, pinId);
       if (!data) {
@@ -187,6 +192,7 @@ async function main() {
       if (p1Url && p1Key) {
         const p1Res = await fetch(`${p1Url}/rest/v1/workspaces?select=id,is_master&is_master=eq.true&limit=1`, {
           headers: { apikey: p1Key, Authorization: `Bearer ${p1Key}`, Accept: 'application/json' },
+          signal: AbortSignal.timeout(15000),
         });
         if (p1Res.ok) {
           const masterWorkspaces = await p1Res.json();
@@ -340,18 +346,18 @@ async function main() {
 
     // True pagination loop (1000 per page) with deterministic order=pin_id.asc
     const allPins = [];
-    let offset = 0;
+    let pinOffset = 0;
     const PAGE = 1000;
     while (allPins.length < effectiveCap) {
       const fetchLimit = Math.min(PAGE, effectiveCap - allPins.length);
       const chunk = await supaQuery(
         'pa_pins',
-        `select=pin_id,saves,repins,comments,share_count,reactions,annotations,seo_category,canonical_pin_id,seo_alt_text,board_pin_count,board_last_modified_at,archived_at,title,description,link,utm_link,domain,board_name,board_id,created_at_pinterest,image_url,dominant_color,image_signature,node_id,is_video,velocity&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}${savesFilterQuery}&order=pin_id.asc&limit=${fetchLimit}&offset=${offset}`
+        `select=pin_id,saves,repins,comments,share_count,reactions,annotations,seo_category,canonical_pin_id,seo_alt_text,board_pin_count,board_last_modified_at,archived_at,title,description,link,utm_link,domain,board_name,board_id,created_at_pinterest,image_url,dominant_color,image_signature,node_id,is_video,velocity&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}${savesFilterQuery}&order=pin_id.asc&limit=${fetchLimit}&offset=${pinOffset}`
       );
       if (!Array.isArray(chunk) || chunk.length === 0) break;
       allPins.push(...chunk);
       if (chunk.length < fetchLimit) break;
-      offset += chunk.length;
+      pinOffset += chunk.length;
     }
 
     // Strictly deterministic in-memory sort by immutable pin_id before modulo partitioning
@@ -517,6 +523,13 @@ async function main() {
           ) {
             const changedItem = {
               pin_id: pinId,
+              title: fresh.title || p.title || null,
+              description: fresh.description || p.description || null,
+              link: fresh.link || p.link || null,
+              domain: fresh.domain || p.domain || null,
+              board_name: fresh.board_name || p.board_name || null,
+              created_at_pinterest: p.created_at_pinterest || fresh.created_at_pinterest || null,
+              image_url: fresh.image_url || p.image_url || null,
               saves: fresh.saves,
               repins: fresh.repins,
               comments: fresh.comments,
@@ -560,6 +573,7 @@ async function main() {
     flushRunnerCacheToDisk();
 
     // Two-Phase: Phase 2 (Sequential Batch Push)
+    // All batch pushes pass skipRunLog: true so Ingest API NEVER locks or updates pa_accounts
     if (changedPins.length > 0) {
       console.log(`[PUSH] Pushing ${changedPins.length} changed pins for @${acc.username} in batches of ${CFG.BATCH_SIZE}...`);
       for (let i = 0; i < changedPins.length; i += CFG.BATCH_SIZE) {
@@ -572,7 +586,7 @@ async function main() {
           accountFollowerCount,
           allPins.length,
           acc.id,
-          !isLastBatch,
+          true,
           changedPins.length
         );
         if (result.ok) {
@@ -585,15 +599,37 @@ async function main() {
           await sleep(CFG.PUSH_SLEEP_MS);
         }
       }
-    } else {
-      // Freshness Guarantee: If leader shard found 0 changed pins and was not circuit-broken, update pa_accounts and record pa_runs
-      const isLeader = (REFRESH_SHARD === 0 || SHARD_COUNT === 1) && !circuitBroken;
-      if (isLeader) {
-        const nowIso = new Date().toISOString();
-        try {
-          const patchData = { last_run_at: nowIso };
-          if (accountFollowerCount) patchData.follower_count = accountFollowerCount;
-          await supaPatch(PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, 'pa_accounts', `workspace_id=eq.${acc.workspace_id}&id=eq.${acc.id}`, patchData);
+
+      // Record this shard's completed telemetry directly in pa_runs
+      const nowIso = new Date().toISOString();
+      try {
+        await supaInsert(PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, 'pa_runs', {
+          workspace_id: acc.workspace_id,
+          account_id: acc.id,
+          trigger: 'refresh',
+          started_at: nowIso,
+          finished_at: nowIso,
+          pages_fetched: 1,
+          pins_added: 0,
+          pins_updated: changedPins.length,
+          pins_promoted: 0,
+          status: 'completed',
+          message: `refresh shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} (${changedPins.length} updated)`
+        });
+      } catch (err) {
+        console.warn(`[REFRESH] Could not record pa_runs for shard ${REFRESH_SHARD + 1}: ${err.message}`);
+      }
+    }
+
+    // Leader Shard Authority: ONLY the leader shard updates pa_accounts (zero lock contention)
+    const isLeader = (REFRESH_SHARD === 0 || SHARD_COUNT === 1) && !circuitBroken;
+    if (isLeader) {
+      const nowIso = new Date().toISOString();
+      try {
+        const patchData = { last_run_at: nowIso };
+        if (accountFollowerCount) patchData.follower_count = accountFollowerCount;
+        await supaPatch(PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, 'pa_accounts', `workspace_id=eq.${acc.workspace_id}&id=eq.${acc.id}`, patchData);
+        if (changedPins.length === 0) {
           await supaInsert(PINARCHIVE_SUPABASE_URL, PINARCHIVE_SUPABASE_KEY, 'pa_runs', {
             workspace_id: acc.workspace_id,
             account_id: acc.id,
@@ -608,9 +644,9 @@ async function main() {
             message: `refresh shard 1/${SHARD_COUNT} (0 changed)`
           });
           console.log(`[REFRESH] @${acc.username}: 0 changed pins, recorded freshness & run log as leader shard.`);
-        } catch (err) {
-          console.warn(`[REFRESH] Could not record zero-delta freshness for @${acc.username}: ${err.message}`);
         }
+      } catch (err) {
+        console.warn(`[REFRESH] Could not record leader freshness for @${acc.username}: ${err.message}`);
       }
     }
 

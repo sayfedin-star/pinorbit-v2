@@ -31,6 +31,7 @@ interface CachedAccount {
 
 const wsSettingsCache = new Map<string, CachedWsSettings>();
 const accountCache = new Map<string, CachedAccount>();
+const workspaceCache = new Map<string, { valid: boolean; expiresAt: number }>();
 
 function pruneCache<T extends { expiresAt: number }>(cache: Map<string, T>) {
   const now = Date.now();
@@ -53,6 +54,7 @@ function pruneCache<T extends { expiresAt: number }>(cache: Map<string, T>) {
 export function _clearIngestCachesForTesting() {
   wsSettingsCache.clear();
   accountCache.clear();
+  workspaceCache.clear();
 }
 
 export interface PinAnnotation {
@@ -246,25 +248,35 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   // 4. Verify workspace existence in Project 1 (Scheduling / Auth Authority)
-  try {
-    const admin = dbClients.getSchedulingAdmin(runtimeEnv);
-    const { data: ws, error: wsErr } = await admin
-      .from('workspaces')
-      .select('id')
-      .eq('id', workspaceId)
-      .maybeSingle();
+  const isTestEnv = typeof process !== 'undefined' && Boolean(process.env.VITEST);
+  const useCache = !isTestEnv || runtimeEnv?.ENABLE_INGEST_CACHE === 'true';
+  const now = Date.now();
+  let cachedWs = useCache ? workspaceCache.get(workspaceId) : undefined;
+  if (!cachedWs || now >= cachedWs.expiresAt) {
+    try {
+      const admin = dbClients.getSchedulingAdmin(runtimeEnv);
+      const { data: ws, error: wsErr } = await admin
+        .from('workspaces')
+        .select('id')
+        .eq('id', workspaceId)
+        .maybeSingle();
 
-    if (wsErr || !ws) {
+      if (wsErr || !ws) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Workspace not found or unauthorized.' }),
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (useCache) {
+        workspaceCache.set(workspaceId, { valid: true, expiresAt: now + WS_SETTINGS_TTL_MS });
+        pruneCache(workspaceCache);
+      }
+    } catch (err: any) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Workspace not found or unauthorized.' }),
-        { status: 403, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: 'Workspace verification failed.' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
-  } catch (err: any) {
-    return new Response(
-      JSON.stringify({ success: false, error: 'Workspace verification failed.' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
   }
 
   // 5. Ingest into Project 4 (PinArchive)

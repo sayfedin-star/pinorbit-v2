@@ -139,59 +139,80 @@ export async function pushToIngest({
     ...(typeof pinsAdded === 'number' ? { pins_added: pinsAdded } : {}),
   };
 
-  const effectiveSignal = signal || AbortSignal.timeout(20000);
   const endpoint = `${workerUrl.replace(/\/+$/, '')}/api/internal/pinarchive/ingest`;
 
-  let res;
-  try {
-    res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-ingest-secret': ingestSecret,
-      },
-      body: JSON.stringify(body),
-      signal: effectiveSignal,
-    });
-  } catch (err) {
-    const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
-    return {
-      ok: false,
-      code: 0,
-      terminal: false,
-      error: isTimeout ? 'ingest-timeout-20s' : (err?.message || 'ingest-fetch-failed'),
-    };
-  }
-
-  let error = '';
-  let json = null;
-  try {
-    json = await res.json();
-    error = json?.error || '';
-  } catch (_) {
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    const effectiveSignal = signal || AbortSignal.timeout(25000);
+    let res;
     try {
-      error = await res.text();
-    } catch (_) {}
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-ingest-secret': ingestSecret,
+        },
+        body: JSON.stringify(body),
+        signal: effectiveSignal,
+      });
+    } catch (err) {
+      const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+      if (attempt < 2) {
+        const backoffMs = (attempt + 1) * 1500 + Math.floor(Math.random() * 1000);
+        await sleep(backoffMs);
+        continue;
+      }
+      return {
+        ok: false,
+        code: 0,
+        terminal: false,
+        error: isTimeout ? 'ingest-timeout-25s' : (err?.message || 'ingest-fetch-failed'),
+      };
+    }
+
+    let error = '';
+    let json = null;
+    try {
+      json = await res.json();
+      error = json?.error || '';
+    } catch (_) {
+      try {
+        error = await res.text();
+      } catch (_) {}
+    }
+
+    if (res.status >= 200 && res.status < 300) {
+      if (json && json.skipped) {
+        return { ok: false, skipped: json.skipped, terminal: false, error: String(json.skipped) };
+      }
+      return { ok: true, pushed: pins.length };
+    }
+
+    if (res.status === 409) {
+      if (error === 'ingest_disabled') {
+        return { ok: false, code: 409, terminal: true, error: 'ingest_disabled (terminal)' };
+      }
+      if (error.indexOf('account_') === 0 || (json && json.skipped)) {
+        const skippedReason = (json && json.skipped) || error;
+        return { ok: false, code: 409, terminal: false, skipped: skippedReason, error: `${skippedReason} (account skipped)` };
+      }
+    }
+
+    // Client errors (400, 401, 403, 422) are non-retryable
+    if (res.status >= 400 && res.status < 500) {
+      return { ok: false, code: res.status, error: error || `http ${res.status}` };
+    }
+
+    // Transient server errors (500, 502, 503, 504) -> retry with backoff
+    if (res.status >= 500 && attempt < 2) {
+      const backoffMs = (attempt + 1) * 2000 + Math.floor(Math.random() * 1000);
+      await sleep(backoffMs);
+      continue;
+    }
+
+    return { ok: false, code: res.status, error: error || `http ${res.status}` };
   }
 
-  if (res.status >= 200 && res.status < 300) {
-    if (json && json.skipped) {
-      return { ok: false, skipped: json.skipped, terminal: false, error: String(json.skipped) };
-    }
-    return { ok: true, pushed: pins.length };
-  }
-
-  if (res.status === 409) {
-    if (error === 'ingest_disabled') {
-      return { ok: false, code: 409, terminal: true, error: 'ingest_disabled (terminal)' };
-    }
-    if (error.indexOf('account_') === 0 || (json && json.skipped)) {
-      const skippedReason = (json && json.skipped) || error;
-      return { ok: false, code: 409, terminal: false, skipped: skippedReason, error: `${skippedReason} (account skipped)` };
-    }
-  }
-
-  return { ok: false, code: res.status, error: error || `http ${res.status}` };
+  return { ok: false, error: 'ingest_retries_exhausted' };
 }
 
 /**
