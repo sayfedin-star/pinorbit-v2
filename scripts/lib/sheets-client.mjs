@@ -7,10 +7,10 @@
  *  1. Single-Flight Token Deduplication: Prevents OAuth token exchange thundering herd.
  *  2. In-Memory Token Caching: 50-minute bearer cache with auto-refresh and 401 eviction.
  *  3. Socket & Stream Leak Elimination: Enforces strict stream cancellation/consumption via `finally`.
- *  4. Cross-Runner Race Safety: Idempotent tab creation handles 400 "already exists" seamlessly.
- *  5. Tab-Existence Pre-Filtering: Prevents 400 "Unable to parse range" on `batchGet` for missing tabs.
- *  6. Safe Overwrite Appending: Eliminates empty-row inflation and table-pushing drifts.
- *  7. In-Process Per-Tab FIFO Mutex (`withTabLock`): Eliminates intra-process race conditions with timeout deadlock immunity.
+ *  4. Canonical FIFO Queue Mutex (`TabMutex`): Zero deadlock, self-pruning queue with timeout isolation.
+ *  5. Cross-Runner Race Safety: Idempotent tab creation handles 400 "already exists" seamlessly.
+ *  6. Username Normalization: Automatically strips leading `@` to avoid tab naming divergence.
+ *  7. Set-Union Tab Discovery: Merges fresh metadata into known set without cache invalidation races.
  *  8. Full Data Integrity: Preserves `first_seen_at`, `archived_at`, and unmutated fields on sparse updates.
  *  9. Chunked Batch Writes & Appends: Respects payload size limits (500 updates / 1000 appends).
  * 10. Jittered 5-Stage Exponential Backoff: Full 140-second recovery for HTTP 429 quota exhaustion.
@@ -54,8 +54,68 @@ let tokenInFlightPromise = null;
 // In-memory set of known tab titles per spreadsheetId: Map<spreadsheetId, Set<tabTitle>>
 const knownTabsCache = new Map();
 
-// Per-tab write serialization lock queue: Map<lockKey, Promise<void>>
-const tabWriteQueues = new Map();
+/**
+ * Canonical FIFO In-Process Mutex.
+ * Guarantees strict sequential execution for writes targeting the same tab.
+ * When a queued waiter times out, it cleanly removes itself from the queue
+ * without compromising or releasing the active lock held by the running task.
+ */
+class TabMutex {
+  constructor() {
+    this._queue = [];
+    this._locked = false;
+  }
+
+  async acquire(timeoutMs = 60000) {
+    if (!this._locked) {
+      this._locked = true;
+      return () => this._release();
+    }
+
+    return new Promise((resolve, reject) => {
+      let timerId = null;
+
+      const entry = {
+        resolve: releaseFn => {
+          if (timerId) clearTimeout(timerId);
+          resolve(releaseFn);
+        },
+        reject: err => {
+          if (timerId) clearTimeout(timerId);
+          reject(err);
+        },
+      };
+
+      if (timeoutMs > 0 && Number.isFinite(timeoutMs)) {
+        timerId = setTimeout(() => {
+          const idx = this._queue.indexOf(entry);
+          if (idx !== -1) {
+            this._queue.splice(idx, 1);
+            entry.reject(new Error(`Tab lock acquisition timed out after ${timeoutMs}ms`));
+          }
+        }, timeoutMs);
+      }
+
+      this._queue.push(entry);
+    });
+  }
+
+  _release() {
+    if (this._queue.length > 0) {
+      const next = this._queue.shift();
+      next.resolve(() => this._release());
+    } else {
+      this._locked = false;
+    }
+  }
+
+  isIdle() {
+    return !this._locked && this._queue.length === 0;
+  }
+}
+
+// Per-tab write serialization mutexes: Map<lockKey, TabMutex>
+const tabMutexes = new Map();
 
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -147,45 +207,31 @@ export function clearTokenCache() {
 }
 
 /**
- * Clear the in-memory tabs cache and active lock queues (useful for testing).
+ * Clear the in-memory tabs cache and active lock mutexes (useful for testing).
  */
 export function clearTabsCache() {
   knownTabsCache.clear();
-  tabWriteQueues.clear();
+  tabMutexes.clear();
 }
 
 /**
- * In-process per-tab FIFO mutex.
- * Guarantees strict sequential execution for writes targeting the same tab,
- * eliminating intra-process race conditions and lock collisions.
- * Features automatic queue cleanup and deadlock-prevention timeout.
+ * Execute an operation under a per-tab mutex to prevent concurrent write collisions
+ * within the same Node.js process.
  */
 export async function withTabLock(lockKey, operationFn, timeoutMs = 60000) {
-  const prev = tabWriteQueues.get(lockKey) || Promise.resolve();
-  let release;
-  const next = new Promise(resolve => {
-    release = resolve;
-  });
+  let mutex = tabMutexes.get(lockKey);
+  if (!mutex) {
+    mutex = new TabMutex();
+    tabMutexes.set(lockKey, mutex);
+  }
 
-  // Synchronously chain to prevent microtask race conditions
-  const nextQueuePromise = prev.then(() => next, () => next);
-  tabWriteQueues.set(lockKey, nextQueuePromise);
-
-  let timeoutId;
+  const release = await mutex.acquire(timeoutMs);
   try {
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new Error(`Tab lock acquisition timed out after ${timeoutMs}ms for ${lockKey}`));
-      }, timeoutMs);
-    });
-
-    await Promise.race([prev.catch(() => {}), timeoutPromise]);
     return await operationFn();
   } finally {
-    if (timeoutId) clearTimeout(timeoutId);
     release();
-    if (tabWriteQueues.get(lockKey) === nextQueuePromise) {
-      tabWriteQueues.delete(lockKey);
+    if (mutex.isIdle()) {
+      tabMutexes.delete(lockKey);
     }
   }
 }
@@ -403,8 +449,8 @@ export async function ensureSheetExists(accessToken, spreadsheetId, tabName) {
 
   // Tab not in local cache: verify with live metadata before attempting creation
   const freshTabs = await getSpreadsheetTabs(accessToken, spreadsheetId);
-  knownTabsCache.set(spreadsheetId, freshTabs);
-  if (freshTabs.has(tabName)) {
+  for (const t of freshTabs) known.add(t);
+  if (known.has(tabName)) {
     return true;
   }
 
@@ -441,13 +487,13 @@ export async function ensureSheetExists(accessToken, spreadsheetId, tabName) {
       }),
     });
 
-    freshTabs.add(tabName);
+    known.add(tabName);
     return true;
   } catch (err) {
     // Cross-runner race check: if another shard created the tab concurrently, treat as success
     const errText = String(err?.message || err?.detail || '');
     if (err.status === 400 && /already exists/i.test(errText)) {
-      freshTabs.add(tabName);
+      known.add(tabName);
       return true;
     }
     throw err;
@@ -626,10 +672,14 @@ export function rowNeedsUpdate(existRow, headerMap, r) {
  */
 export async function writeToSheetsApi(credentials, spreadsheetId, payload, options = {}) {
   const startedAt = Date.now();
-  const username = String(payload?.username || '').trim();
-  if (!username) {
+  const rawUsername = String(payload?.username || '').trim();
+  if (!rawUsername) {
     return { ok: false, error: 'username required' };
   }
+
+  const cleanUsername = rawUsername.toLowerCase().replace(/^@/, '');
+  const tabName = `pins_${cleanUsername}`;
+  const lockKey = `${spreadsheetId}::${tabName}`;
 
   const rawRows = Array.isArray(payload?.rows) ? payload.rows : [];
   if (rawRows.length === 0) {
@@ -647,9 +697,6 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
   if (!spreadsheetId) {
     return { ok: false, error: 'spreadsheetId required' };
   }
-
-  const tabName = `pins_${username.toLowerCase()}`;
-  const lockKey = `${spreadsheetId}::${tabName}`;
 
   // Execute under per-tab mutex to eliminate race conditions within this process
   return await withTabLock(lockKey, async () => {
@@ -700,7 +747,7 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
         }
 
         const elapsedMs = Date.now() - startedAt;
-        console.log(`✅ [Sheets API] @${username}: written=${rowsToAppend.length} (app=${rowsToAppend.length}, upd=0, unch=0) in ${elapsedMs}ms`);
+        console.log(`✅ [Sheets API] @${cleanUsername}: written=${rowsToAppend.length} (app=${rowsToAppend.length}, upd=0, unch=0) in ${elapsedMs}ms`);
         return {
           ok: true,
           version: '4.0.0-api',
@@ -788,7 +835,7 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
 
       const elapsedMs = Date.now() - startedAt;
       const written = toAppend.length + updatedCount;
-      console.log(`✅ [Sheets API] @${username}: written=${written} (app=${toAppend.length}, upd=${updatedCount}, unch=${unchangedCount}) in ${elapsedMs}ms`);
+      console.log(`✅ [Sheets API] @${cleanUsername}: written=${written} (app=${toAppend.length}, upd=${updatedCount}, unch=${unchangedCount}) in ${elapsedMs}ms`);
 
       return {
         ok: true,
@@ -802,7 +849,7 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
     } catch (err) {
       const elapsedMs = Date.now() - startedAt;
       const errMsg = err?.message || 'Sheets API error';
-      console.warn(`❌ [Sheets API] Failed for @${username} (${elapsedMs}ms): ${errMsg}`);
+      console.warn(`❌ [Sheets API] Failed for @${cleanUsername} (${elapsedMs}ms): ${errMsg}`);
       return { ok: false, error: errMsg };
     }
   });
@@ -835,6 +882,13 @@ export async function getAccountAgesFromSheetsApi(credentials, spreadsheetId, us
     if (!existingTabs) {
       existingTabs = await getSpreadsheetTabs(accessToken, spreadsheetId);
       knownTabsCache.set(spreadsheetId, existingTabs);
+    } else {
+      // If any requested usernames are not present in cache, refresh tabs once
+      const hasMissingTabs = validUsernames.some(u => !existingTabs.has(`pins_${u}`));
+      if (hasMissingTabs) {
+        const freshTabs = await getSpreadsheetTabs(accessToken, spreadsheetId);
+        for (const t of freshTabs) existingTabs.add(t);
+      }
     }
 
     const queryableUsernames = validUsernames.filter(u => existingTabs.has(`pins_${u}`));
