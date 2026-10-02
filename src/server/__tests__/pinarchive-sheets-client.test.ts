@@ -15,6 +15,7 @@ import {
   rowNeedsUpdate,
   writeToSheetsApi,
   getAccountAgesFromSheetsApi,
+  withTabLock,
 } from '../../../scripts/lib/sheets-client.mjs';
 import { writeToGoogleSheet } from '../../../scripts/lib/pa-client.mjs';
 
@@ -574,6 +575,15 @@ describe('PinArchive Sheets Client & Service Account API v4 Suite', () => {
         if (url.includes('oauth2.googleapis.com')) {
           return createMockResponse(200, { access_token: 'token', expires_in: 3600 });
         }
+        if (url.includes('fields=sheets.properties')) {
+          return createMockResponse(200, {
+            sheets: [
+              { properties: { title: 'pins_creator1' } },
+              { properties: { title: 'pins_creator2' } },
+              { properties: { title: 'pins_empty' } },
+            ],
+          });
+        }
         if (url.includes('values:batchGet')) {
           return createMockResponse(200, {
             valueRanges: [
@@ -674,4 +684,58 @@ describe('PinArchive Sheets Client & Service Account API v4 Suite', () => {
       expect(res).toEqual({ ok: true, skipped: true });
     });
   });
+
+  describe('8. Mutex FIFO Ordering, Error Isolation, Timeout & Zero-Leak Verification', () => {
+    it('executes tasks in strict sequential FIFO order under withTabLock', async () => {
+      const order: number[] = [];
+      const p1 = withTabLock('test-fifo', async () => {
+        await new Promise(r => setTimeout(r, 20));
+        order.push(1);
+      });
+      const p2 = withTabLock('test-fifo', async () => {
+        await new Promise(r => setTimeout(r, 10));
+        order.push(2);
+      });
+      const p3 = withTabLock('test-fifo', async () => {
+        order.push(3);
+      });
+
+      await Promise.all([p1, p2, p3]);
+      expect(order).toEqual([1, 2, 3]);
+    });
+
+    it('isolates errors so subsequent queued operations still execute when predecessor throws', async () => {
+      let task2Ran = false;
+      const p1 = withTabLock('test-error-iso', async () => {
+        throw new Error('Boom in task 1');
+      });
+      const p2 = withTabLock('test-error-iso', async () => {
+        task2Ran = true;
+        return 'success-from-2';
+      });
+
+      await expect(p1).rejects.toThrow('Boom in task 1');
+      const res2 = await p2;
+      expect(task2Ran).toBe(true);
+      expect(res2).toBe('success-from-2');
+    });
+
+    it('times out lock acquisition if predecessor hangs past timeoutMs', async () => {
+      let releaseHang: () => void;
+      const hangPromise = new Promise<void>(resolve => { releaseHang = resolve; });
+
+      // Task 1 hangs
+      const p1 = withTabLock('test-hang', () => hangPromise);
+
+      // Task 2 waits with 50ms timeout
+      const p2 = withTabLock('test-hang', async () => 'never-runs', 50);
+
+      await expect(p2).rejects.toThrow(/Tab lock acquisition timed out after 50ms/);
+
+      // Clean up hanging task
+      releaseHang!();
+      await p1;
+    });
+  });
 });
+

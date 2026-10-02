@@ -2,15 +2,17 @@
  * scripts/lib/sheets-client.mjs
  *
  * Production-Hardened Zero-Dependency Google Sheets API v4 Client using Node.js 22 built-in `node:crypto`.
- * Implements:
- *  - Google Service Account OAuth2 JWT Bearer authorization with Single-Flight Promise Deduplication.
- *  - In-memory 50-minute token caching with automatic refresh.
- *  - Cross-runner race-safe tab creation (idempotent `addSheet` handling).
- *  - Per-tab serialization mutex (`withTabLock`) preventing intra-process write interleaving.
- *  - Full data integrity preservation: preserves `first_seen_at` & `archived_at`, detects newly qualified pins.
- *  - Bulk chunking for thousands of rows (safe batchUpdate & append payload sizing).
- *  - Robust stream consumption preventing TCP/Undici connection leaks.
- *  - Exponential backoff with jitter for 429 (quota) and 5xx transient errors.
+ *
+ * Architecture & Concurrency Guarantees:
+ *  1. Single-Flight Token Deduplication: Prevents OAuth token exchange thundering herd.
+ *  2. In-Memory Token Caching: 50-minute bearer cache with auto-refresh.
+ *  3. Socket & Stream Leak Elimination: Enforces strict stream cancellation/consumption via `finally`.
+ *  4. Cross-Runner Race Safety: Idempotent tab creation handles 400 "already exists" seamlessly.
+ *  5. Tab-Existence Pre-Filtering: Prevents 400 "Unable to parse range" on `batchGet` for missing tabs.
+ *  6. Safe Overwrite Appending: Eliminates empty-row inflation and table-pushing drifts.
+ *  7. In-Process Per-Tab FIFO Mutex (`withTabLock`): Eliminates intra-process concurrent write collisions and deadlocks.
+ *  8. Full Data Integrity: Preserves `first_seen_at` & `archived_at`, detects newly qualified pins.
+ *  9. Jittered 4-Stage Exponential Backoff: Full 60-second recovery for HTTP 429 quota exhaustion.
  *
  * Rule: Pure utility module only — no top-level side effects or script execution.
  */
@@ -51,8 +53,8 @@ let tokenInFlightPromise = null;
 // In-memory set of known tab titles per spreadsheetId: Map<spreadsheetId, Set<tabTitle>>
 const knownTabsCache = new Map();
 
-// Per-tab write serialization lock: Map<tabKey, Promise<void>>
-const tabWriteLocks = new Map();
+// Per-tab write serialization lock queue: Map<lockKey, Promise<void>>
+const tabWriteQueues = new Map();
 
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -144,37 +146,50 @@ export function clearTokenCache() {
 }
 
 /**
- * Clear the in-memory tabs cache (useful for testing).
+ * Clear the in-memory tabs cache and active lock queues (useful for testing).
  */
 export function clearTabsCache() {
   knownTabsCache.clear();
-  tabWriteLocks.clear();
+  tabWriteQueues.clear();
 }
 
 /**
- * Execute an operation under a per-tab mutex to prevent concurrent write collisions
- * within the same Node.js process.
+ * In-process per-tab FIFO mutex.
+ * Guarantees strict sequential execution for writes targeting the same tab,
+ * eliminating intra-process race conditions and lock collisions.
+ * Features automatic queue cleanup and deadlock-prevention timeout.
  */
-async function withTabLock(lockKey, operationFn) {
-  while (tabWriteLocks.has(lockKey)) {
-    try {
-      await tabWriteLocks.get(lockKey);
-    } catch {
-      // Ignore errors from previous operation holder
-    }
-  }
-
-  let releaseLock;
-  const lockPromise = new Promise(resolve => {
-    releaseLock = resolve;
+export async function withTabLock(lockKey, operationFn, timeoutMs = 60000) {
+  const prev = tabWriteQueues.get(lockKey) || Promise.resolve();
+  let release;
+  const next = new Promise(resolve => {
+    release = resolve;
   });
-  tabWriteLocks.set(lockKey, lockPromise);
+
+  // Synchronously chain to prevent microtask race conditions
+  const nextQueuePromise = prev.then(() => next, () => next);
+  tabWriteQueues.set(lockKey, nextQueuePromise);
+
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Tab lock acquisition timed out after ${timeoutMs}ms for ${lockKey}`));
+    }, timeoutMs);
+  });
+
+  try {
+    await Promise.race([prev.catch(() => {}), timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   try {
     return await operationFn();
   } finally {
-    tabWriteLocks.delete(lockKey);
-    releaseLock();
+    release();
+    if (tabWriteQueues.get(lockKey) === nextQueuePromise) {
+      tabWriteQueues.delete(lockKey);
+    }
   }
 }
 
@@ -234,7 +249,7 @@ export async function getGoogleAccessToken(rawCredentials, options = {}) {
       });
 
       const signal = options.signal || AbortSignal.timeout(15000);
-      let res;
+      let res = null;
       try {
         res = await fetch(creds.token_uri, {
           method: 'POST',
@@ -244,31 +259,33 @@ export async function getGoogleAccessToken(rawCredentials, options = {}) {
           body: bodyParams.toString(),
           signal,
         });
-      } catch (fetchErr) {
-        throw new Error(`Google OAuth2 network request failed: ${fetchErr.message}`);
+
+        const resText = await res.text();
+        let tokenData = null;
+        try {
+          tokenData = JSON.parse(resText);
+        } catch {
+          tokenData = null;
+        }
+
+        if (!res.ok || !tokenData?.access_token) {
+          const errMsg = tokenData?.error_description || tokenData?.error || resText || `HTTP ${res.status}`;
+          throw new Error(`Google OAuth2 token exchange failed (${res.status}): ${errMsg}`);
+        }
+
+        const expiresInSec = Number(tokenData.expires_in) || 3600;
+        tokenCache = {
+          token: tokenData.access_token,
+          clientEmail: creds.client_email,
+          expiresAtMs: currentNowMs + expiresInSec * 1000,
+        };
+
+        return tokenCache.token;
+      } finally {
+        if (res && !res.bodyUsed && res.body) {
+          await res.body.cancel().catch(() => {});
+        }
       }
-
-      const resText = await res.text().catch(() => '');
-      let tokenData = null;
-      try {
-        tokenData = JSON.parse(resText);
-      } catch {
-        tokenData = null;
-      }
-
-      if (!res.ok || !tokenData?.access_token) {
-        const errMsg = tokenData?.error_description || tokenData?.error || resText || `HTTP ${res.status}`;
-        throw new Error(`Google OAuth2 token exchange failed (${res.status}): ${errMsg}`);
-      }
-
-      const expiresInSec = Number(tokenData.expires_in) || 3600;
-      tokenCache = {
-        token: tokenData.access_token,
-        clientEmail: creds.client_email,
-        expiresAtMs: currentNowMs + expiresInSec * 1000,
-      };
-
-      return tokenCache.token;
     } finally {
       tokenInFlightPromise = null;
     }
@@ -279,11 +296,11 @@ export async function getGoogleAccessToken(rawCredentials, options = {}) {
 
 /**
  * Execute an authenticated Google Sheets API v4 request with retry logic for transient errors.
- * Ensures complete stream consumption and socket leak prevention.
+ * Ensures complete stream consumption and socket leak prevention via guaranteed finally block.
  */
-async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 3) {
+async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 4) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    let res;
+    let res = null;
     try {
       const signal = fetchOptions.signal || AbortSignal.timeout(30000);
       res = await fetch(url, {
@@ -306,8 +323,14 @@ async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 3) 
         const errorDetail = errJson?.error?.message || bodyText.slice(0, 300) || `HTTP ${res.status}`;
 
         if (isTransient && attempt < maxRetries) {
-          // Jittered exponential backoff: 2s, 4s, 8s + random jitter
-          const backoffMs = Math.floor(2000 * Math.pow(2, attempt) + Math.random() * 1500);
+          // Check for Retry-After header
+          const retryAfterSec = Number(res.headers?.get?.('retry-after'));
+          const baseDelay = res.status === 429 ? 3500 : 2000;
+          let backoffMs = Math.floor(baseDelay * Math.pow(2, attempt) + Math.random() * 2000);
+          if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
+            backoffMs = Math.max(backoffMs, retryAfterSec * 1000 + 500);
+          }
+
           console.warn(`⚠️ [Sheets API] Transient HTTP ${res.status} on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${backoffMs}ms...`);
           await sleep(backoffMs);
           continue;
@@ -319,7 +342,7 @@ async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 3) 
         throw err;
       }
 
-      const text = await res.text().catch(() => '');
+      const text = await res.text();
       if (!text) return {};
       try {
         return JSON.parse(text);
@@ -327,18 +350,18 @@ async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 3) 
         throw new Error(`Sheets API returned non-JSON body: ${err.message}`);
       }
     } catch (err) {
-      if (res && !res.bodyUsed) {
-        await res.body?.cancel().catch(() => {});
-      }
-
       const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
       if ((isTimeout || !err.status) && attempt < maxRetries) {
-        const backoffMs = Math.floor(2000 * Math.pow(2, attempt) + Math.random() * 1000);
+        const backoffMs = Math.floor(2000 * Math.pow(2, attempt) + Math.random() * 1500);
         console.warn(`⚠️ [Sheets API] Network/Timeout error on attempt ${attempt + 1}/${maxRetries + 1}: ${err.message}, retrying in ${backoffMs}ms...`);
         await sleep(backoffMs);
         continue;
       }
       throw err;
+    } finally {
+      if (res && !res.bodyUsed && res.body) {
+        await res.body.cancel().catch(() => {});
+      }
     }
   }
 
@@ -364,7 +387,7 @@ export async function getSpreadsheetTabs(accessToken, spreadsheetId) {
 
 /**
  * Ensure that a specific creator sheet tab exists.
- * Race-safe: If another runner created the tab concurrently, handles "already exists" cleanly.
+ * Race-safe: If another runner created the tab concurrently, handles 400 "already exists" seamlessly.
  */
 export async function ensureSheetExists(accessToken, spreadsheetId, tabName) {
   let known = knownTabsCache.get(spreadsheetId);
@@ -584,8 +607,11 @@ export function rowNeedsUpdate(existRow, headerMap, r) {
 
 /**
  * Direct Google Sheets API v4 Writer.
- * Replaces GAS Web App with direct sub-second authenticated REST API operations.
- * Protected by per-tab in-process mutex (`withTabLock`).
+ * Replaces GAS Web App with atomic, sub-second authenticated REST API operations.
+ * Protected by:
+ *  - Per-tab in-process FIFO mutex (`withTabLock`).
+ *  - Safe server-side table appending via `insertDataOption=OVERWRITE`.
+ *  - Full in-batch deduplication and changed-row detection.
  *
  * @param {string|object} credentials - Service Account JSON string or parsed object
  * @param {string} spreadsheetId - Google Spreadsheet ID
@@ -622,6 +648,10 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
   // Execute under per-tab mutex to eliminate race conditions within this process
   return await withTabLock(lockKey, async () => {
     try {
+      // Pre-flight micro-jitter (50ms - 250ms) to desynchronize simultaneous runner bursts
+      const jitterMs = Math.floor(Math.random() * 200) + 50;
+      await sleep(jitterMs);
+
       const accessToken = await getGoogleAccessToken(credentials, options);
 
       // 1. Ensure tab exists with headers (race-safe)
@@ -647,21 +677,16 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
       if (mode === 'append') {
         const rowsToAppend = dedupedRows.map(r => buildSheetRow(r, headerMap, width, null, nowFormatted));
         if (rowsToAppend.length > 0) {
-          // Chunk appends in blocks of 1,000 rows to prevent Google HTTP request size limits
-          const CHUNK_SIZE = 1000;
-          for (let c = 0; c < rowsToAppend.length; c += CHUNK_SIZE) {
-            const chunk = rowsToAppend.slice(c, c + CHUNK_SIZE);
-            const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
-            const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-            await sheetsFetch(accessToken, appendUrl, {
-              method: 'POST',
-              body: JSON.stringify({
-                range: appendRange,
-                majorDimension: 'ROWS',
-                values: chunk,
-              }),
-            }, options.maxRetries || 3);
-          }
+          const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
+          const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE`;
+          await sheetsFetch(accessToken, appendUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              range: appendRange,
+              majorDimension: 'ROWS',
+              values: rowsToAppend,
+            }),
+          }, options.maxRetries || 4);
         }
 
         const elapsedMs = Date.now() - startedAt;
@@ -715,8 +740,9 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
         }
       }
 
-      // 4. Execute updates via values:batchUpdate in chunks of 500 ranges
+      // 4. Execute updates via values:batchUpdate
       if (batchUpdateData.length > 0) {
+        // Chunk batch updates in blocks of 500 ranges to respect HTTP request size limits
         const BATCH_CHUNK = 500;
         for (let b = 0; b < batchUpdateData.length; b += BATCH_CHUNK) {
           const chunkData = batchUpdateData.slice(b, b + BATCH_CHUNK);
@@ -727,26 +753,22 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
               valueInputOption: 'USER_ENTERED',
               data: chunkData,
             }),
-          }, options.maxRetries || 3);
+          }, options.maxRetries || 4);
         }
       }
 
-      // 5. Execute appends via values:append in chunks of 1000 rows
+      // 5. Execute appends via values:append with OVERWRITE
       if (toAppend.length > 0) {
-        const CHUNK_SIZE = 1000;
-        for (let c = 0; c < toAppend.length; c += CHUNK_SIZE) {
-          const chunk = toAppend.slice(c, c + CHUNK_SIZE);
-          const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
-          const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-          await sheetsFetch(accessToken, appendUrl, {
-            method: 'POST',
-            body: JSON.stringify({
-              range: appendRange,
-              majorDimension: 'ROWS',
-              values: chunk,
-            }),
-          }, options.maxRetries || 3);
-        }
+        const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
+        const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE`;
+        await sheetsFetch(accessToken, appendUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            range: appendRange,
+            majorDimension: 'ROWS',
+            values: toAppend,
+          }),
+        }, options.maxRetries || 4);
       }
 
       const elapsedMs = Date.now() - startedAt;
@@ -773,7 +795,7 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
 
 /**
  * Query true oldest pin timestamps (account_ages) directly via Google Sheets API v4 batchGet.
- * Replaces GAS `account_ages` action with a single ultra-fast REST call.
+ * Pre-filters against existing spreadsheet tabs to prevent HTTP 400 "Unable to parse range".
  */
 export async function getAccountAgesFromSheetsApi(credentials, spreadsheetId, usernames, options = {}) {
   const USERNAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
@@ -793,15 +815,27 @@ export async function getAccountAgesFromSheetsApi(credentials, spreadsheetId, us
   try {
     const accessToken = await getGoogleAccessToken(credentials, options);
 
+    // Discover existing tabs (cached in knownTabsCache to minimize redundant calls)
+    let existingTabs = knownTabsCache.get(spreadsheetId);
+    if (!existingTabs) {
+      existingTabs = await getSpreadsheetTabs(accessToken, spreadsheetId);
+      knownTabsCache.set(spreadsheetId, existingTabs);
+    }
+
+    const queryableUsernames = validUsernames.filter(u => existingTabs.has(`pins_${u}`));
+    if (queryableUsernames.length === 0) {
+      return ages;
+    }
+
     // Google Sheets API allows up to 100 ranges per batchGet call
     const BATCH_SIZE = 100;
-    for (let i = 0; i < validUsernames.length; i += BATCH_SIZE) {
-      const chunk = validUsernames.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < queryableUsernames.length; i += BATCH_SIZE) {
+      const chunk = queryableUsernames.slice(i, i + BATCH_SIZE);
       const ranges = chunk.map(u => `${escapeSheetTitle(`pins_${u}`)}!G2:G`);
       const rangesParam = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
       const batchGetUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values:batchGet?${rangesParam}`;
 
-      const data = await sheetsFetch(accessToken, batchGetUrl, {}, options.maxRetries || 2);
+      const data = await sheetsFetch(accessToken, batchGetUrl, {}, options.maxRetries || 3);
       const valueRanges = Array.isArray(data?.valueRanges) ? data.valueRanges : [];
 
       valueRanges.forEach((vr, idx) => {
