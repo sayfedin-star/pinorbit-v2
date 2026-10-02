@@ -156,6 +156,40 @@ describe('PinArchive Sheets Client & Service Account API v4 Suite', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it('deduplicates concurrent in-flight token requests (Single-Flight)', async () => {
+      let callCount = 0;
+      const fetchMock = vi.fn().mockImplementation(async () => {
+        callCount++;
+        // Introduce small async delay to test concurrency race
+        await new Promise(r => setTimeout(r, 10));
+        return createMockResponse(200, {
+          access_token: 'single-flight-token',
+          expires_in: 3600,
+        });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      // Fire 5 concurrent token requests at the exact same millisecond
+      const results = await Promise.all([
+        getGoogleAccessToken(validCreds),
+        getGoogleAccessToken(validCreds),
+        getGoogleAccessToken(validCreds),
+        getGoogleAccessToken(validCreds),
+        getGoogleAccessToken(validCreds),
+      ]);
+
+      expect(results).toEqual([
+        'single-flight-token',
+        'single-flight-token',
+        'single-flight-token',
+        'single-flight-token',
+        'single-flight-token',
+      ]);
+      // Exactly 1 network fetch despite 5 concurrent callers
+      expect(callCount).toBe(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('throws error when token exchange returns HTTP error', async () => {
       const fetchMock = vi.fn().mockResolvedValue(
         createMockResponse(400, { error: 'invalid_grant', error_description: 'Invalid signature' })
@@ -242,6 +276,9 @@ describe('PinArchive Sheets Client & Service Account API v4 Suite', () => {
 
       // Tags change -> true
       expect(rowNeedsUpdate(baseRow, headerMap, { saves: 50, repins: 5, comments: 1, title: 'Original Title', tags: ['tag1', 'tag3'] })).toBe(true);
+
+      // Data Integrity: newly qualified pin with archived_at -> true
+      expect(rowNeedsUpdate(baseRow, headerMap, { saves: 50, repins: 5, comments: 1, title: 'Original Title', archived_at: '2026-10-02 12:00:00' })).toBe(true);
     });
   });
 
@@ -295,6 +332,30 @@ describe('PinArchive Sheets Client & Service Account API v4 Suite', () => {
 
       await ensureSheetExists('token', mockSpreadsheetId, 'pins_newuser');
       expect(calls).toEqual(['getSpreadsheetTabs', 'getSpreadsheetTabs', 'addSheet', 'writeHeaders']);
+    });
+
+    it('gracefully handles cross-runner race condition when tab is created concurrently (already exists)', async () => {
+      const fetchMock = vi.fn().mockImplementation(async (url) => {
+        if (url.includes('fields=sheets.properties')) {
+          // Tab not visible in initial metadata
+          return createMockResponse(200, { sheets: [{ properties: { title: 'Control' } }] });
+        }
+        if (url.includes(':batchUpdate')) {
+          // Another runner created it right before this call! Google responds 400 "already exists"
+          return createMockResponse(400, {
+            error: {
+              code: 400,
+              message: 'Invalid requests[0].addSheet: A sheet with the name "pins_racinguser" already exists.',
+            },
+          });
+        }
+        return createMockResponse(404, {});
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      // Must succeed without throwing
+      const result = await ensureSheetExists('token', mockSpreadsheetId, 'pins_racinguser');
+      expect(result).toBe(true);
     });
   });
 
@@ -466,6 +527,44 @@ describe('PinArchive Sheets Client & Service Account API v4 Suite', () => {
 
       expect(res.ok).toBe(false);
       expect(res.error).toContain('Invalid range');
+    });
+
+    it('serializes concurrent writes to the same tab under per-tab mutex (withTabLock)', async () => {
+      const activeOperations: number[] = [];
+      let maxConcurrencyObserved = 0;
+
+      const fetchMock = vi.fn().mockImplementation(async (url) => {
+        if (url.includes('oauth2.googleapis.com')) {
+          return createMockResponse(200, { access_token: 'token', expires_in: 3600 });
+        }
+        if (url.includes('fields=sheets.properties')) {
+          return createMockResponse(200, { sheets: [{ properties: { title: 'pins_concurrentuser' } }] });
+        }
+        if (url.includes('/values/') && !url.includes(':append')) {
+          activeOperations.push(1);
+          maxConcurrencyObserved = Math.max(maxConcurrencyObserved, activeOperations.length);
+          // Simulate network latency inside write
+          await new Promise(r => setTimeout(r, 15));
+          activeOperations.pop();
+          return createMockResponse(200, { values: [PINARCHIVE_SHEET_HEADERS] });
+        }
+        if (url.includes(':append')) {
+          return createMockResponse(200, { updates: { updatedRows: 1 } });
+        }
+        return createMockResponse(404, {});
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      // Launch 3 concurrent writes to the EXACT same tab
+      const writes = await Promise.all([
+        writeToSheetsApi(validCreds, mockSpreadsheetId, { username: 'concurrentuser', mode: 'append', rows: [{ pin_id: 'a1' }] }),
+        writeToSheetsApi(validCreds, mockSpreadsheetId, { username: 'concurrentuser', mode: 'append', rows: [{ pin_id: 'a2' }] }),
+        writeToSheetsApi(validCreds, mockSpreadsheetId, { username: 'concurrentuser', mode: 'append', rows: [{ pin_id: 'a3' }] }),
+      ]);
+
+      expect(writes.every(w => w.ok)).toBe(true);
+      // Because withTabLock serializes writes for the same tab, max concurrency is strictly 1!
+      expect(maxConcurrencyObserved).toBe(1);
     });
   });
 

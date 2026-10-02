@@ -1,9 +1,16 @@
 /**
  * scripts/lib/sheets-client.mjs
  *
- * Zero-dependency Google Sheets API v4 Client using Node.js 22 built-in `node:crypto`.
- * Implements Google Service Account OAuth2 JWT Bearer authorization and REST API calls
- * for ultra-low latency, concurrent, conflict-free spreadsheet reading and writing.
+ * Production-Hardened Zero-Dependency Google Sheets API v4 Client using Node.js 22 built-in `node:crypto`.
+ * Implements:
+ *  - Google Service Account OAuth2 JWT Bearer authorization with Single-Flight Promise Deduplication.
+ *  - In-memory 50-minute token caching with automatic refresh.
+ *  - Cross-runner race-safe tab creation (idempotent `addSheet` handling).
+ *  - Per-tab serialization mutex (`withTabLock`) preventing intra-process write interleaving.
+ *  - Full data integrity preservation: preserves `first_seen_at` & `archived_at`, detects newly qualified pins.
+ *  - Bulk chunking for thousands of rows (safe batchUpdate & append payload sizing).
+ *  - Robust stream consumption preventing TCP/Undici connection leaks.
+ *  - Exponential backoff with jitter for 429 (quota) and 5xx transient errors.
  *
  * Rule: Pure utility module only — no top-level side effects or script execution.
  */
@@ -38,8 +45,14 @@ const GOOGLE_SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 // In-memory token cache: { token, expiresAtMs, clientEmail }
 let tokenCache = null;
 
+// Single-Flight deduplication promise for token exchange (prevents thundering herd)
+let tokenInFlightPromise = null;
+
 // In-memory set of known tab titles per spreadsheetId: Map<spreadsheetId, Set<tabTitle>>
 const knownTabsCache = new Map();
+
+// Per-tab write serialization lock: Map<tabKey, Promise<void>>
+const tabWriteLocks = new Map();
 
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -127,6 +140,7 @@ export function parseCredentials(raw) {
  */
 export function clearTokenCache() {
   tokenCache = null;
+  tokenInFlightPromise = null;
 }
 
 /**
@@ -134,11 +148,40 @@ export function clearTokenCache() {
  */
 export function clearTabsCache() {
   knownTabsCache.clear();
+  tabWriteLocks.clear();
+}
+
+/**
+ * Execute an operation under a per-tab mutex to prevent concurrent write collisions
+ * within the same Node.js process.
+ */
+async function withTabLock(lockKey, operationFn) {
+  while (tabWriteLocks.has(lockKey)) {
+    try {
+      await tabWriteLocks.get(lockKey);
+    } catch {
+      // Ignore errors from previous operation holder
+    }
+  }
+
+  let releaseLock;
+  const lockPromise = new Promise(resolve => {
+    releaseLock = resolve;
+  });
+  tabWriteLocks.set(lockKey, lockPromise);
+
+  try {
+    return await operationFn();
+  } finally {
+    tabWriteLocks.delete(lockKey);
+    releaseLock();
+  }
 }
 
 /**
  * Generate a Google OAuth2 Access Token using Service Account JWT bearer assertion.
  * Pure Node.js 22 built-in `node:crypto` implementation.
+ * Single-Flight pattern guarantees zero duplicate token exchanges under concurrent calls.
  */
 export async function getGoogleAccessToken(rawCredentials, options = {}) {
   const creds = parseCredentials(rawCredentials);
@@ -153,77 +196,97 @@ export async function getGoogleAccessToken(rawCredentials, options = {}) {
     return tokenCache.token;
   }
 
-  const nowSec = Math.floor(nowMs / 1000);
-  const headerObj = { alg: 'RS256', typ: 'JWT' };
-  const claimsObj = {
-    iss: creds.client_email,
-    scope: GOOGLE_SHEETS_SCOPE,
-    aud: creds.token_uri,
-    exp: nowSec + 3600,
-    iat: nowSec,
-  };
-
-  const encodedHeader = Buffer.from(JSON.stringify(headerObj)).toString('base64url');
-  const encodedClaims = Buffer.from(JSON.stringify(claimsObj)).toString('base64url');
-  const unsignedToken = `${encodedHeader}.${encodedClaims}`;
-
-  let signature = '';
-  try {
-    const signer = crypto.createSign('RSA-SHA256');
-    signer.update(unsignedToken);
-    signature = signer.sign(creds.private_key, 'base64url');
-  } catch (err) {
-    throw new Error(`Failed to sign Google OAuth JWT with private key: ${err.message}`);
+  // If a token exchange is already in progress, await the in-flight promise
+  if (tokenInFlightPromise) {
+    return await tokenInFlightPromise;
   }
 
-  const signedJwt = `${unsignedToken}.${signature}`;
+  tokenInFlightPromise = (async () => {
+    try {
+      const currentNowMs = Date.now();
+      const nowSec = Math.floor(currentNowMs / 1000);
+      const headerObj = { alg: 'RS256', typ: 'JWT' };
+      const claimsObj = {
+        iss: creds.client_email,
+        scope: GOOGLE_SHEETS_SCOPE,
+        aud: creds.token_uri,
+        exp: nowSec + 3600,
+        iat: nowSec,
+      };
 
-  const bodyParams = new URLSearchParams({
-    grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-    assertion: signedJwt,
-  });
+      const encodedHeader = Buffer.from(JSON.stringify(headerObj)).toString('base64url');
+      const encodedClaims = Buffer.from(JSON.stringify(claimsObj)).toString('base64url');
+      const unsignedToken = `${encodedHeader}.${encodedClaims}`;
 
-  const signal = options.signal || AbortSignal.timeout(15000);
-  const res = await fetch(creds.token_uri, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: bodyParams.toString(),
-    signal,
-  });
+      let signature = '';
+      try {
+        const signer = crypto.createSign('RSA-SHA256');
+        signer.update(unsignedToken);
+        signature = signer.sign(creds.private_key, 'base64url');
+      } catch (err) {
+        throw new Error(`Failed to sign Google OAuth JWT with private key: ${err.message}`);
+      }
 
-  const resText = await res.text().catch(() => '');
-  let tokenData = null;
-  try {
-    tokenData = JSON.parse(resText);
-  } catch {
-    tokenData = null;
-  }
+      const signedJwt = `${unsignedToken}.${signature}`;
+      const bodyParams = new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion: signedJwt,
+      });
 
-  if (!res.ok || !tokenData?.access_token) {
-    const errMsg = tokenData?.error_description || tokenData?.error || resText || `HTTP ${res.status}`;
-    throw new Error(`Google OAuth2 token exchange failed (${res.status}): ${errMsg}`);
-  }
+      const signal = options.signal || AbortSignal.timeout(15000);
+      let res;
+      try {
+        res = await fetch(creds.token_uri, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: bodyParams.toString(),
+          signal,
+        });
+      } catch (fetchErr) {
+        throw new Error(`Google OAuth2 network request failed: ${fetchErr.message}`);
+      }
 
-  const expiresInSec = Number(tokenData.expires_in) || 3600;
-  tokenCache = {
-    token: tokenData.access_token,
-    clientEmail: creds.client_email,
-    expiresAtMs: nowMs + expiresInSec * 1000,
-  };
+      const resText = await res.text().catch(() => '');
+      let tokenData = null;
+      try {
+        tokenData = JSON.parse(resText);
+      } catch {
+        tokenData = null;
+      }
 
-  return tokenCache.token;
+      if (!res.ok || !tokenData?.access_token) {
+        const errMsg = tokenData?.error_description || tokenData?.error || resText || `HTTP ${res.status}`;
+        throw new Error(`Google OAuth2 token exchange failed (${res.status}): ${errMsg}`);
+      }
+
+      const expiresInSec = Number(tokenData.expires_in) || 3600;
+      tokenCache = {
+        token: tokenData.access_token,
+        clientEmail: creds.client_email,
+        expiresAtMs: currentNowMs + expiresInSec * 1000,
+      };
+
+      return tokenCache.token;
+    } finally {
+      tokenInFlightPromise = null;
+    }
+  })();
+
+  return await tokenInFlightPromise;
 }
 
 /**
  * Execute an authenticated Google Sheets API v4 request with retry logic for transient errors.
+ * Ensures complete stream consumption and socket leak prevention.
  */
 async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 3) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let res;
     try {
       const signal = fetchOptions.signal || AbortSignal.timeout(30000);
-      const res = await fetch(url, {
+      res = await fetch(url, {
         ...fetchOptions,
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -243,7 +306,8 @@ async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 3) 
         const errorDetail = errJson?.error?.message || bodyText.slice(0, 300) || `HTTP ${res.status}`;
 
         if (isTransient && attempt < maxRetries) {
-          const backoffMs = Math.floor(1500 * Math.pow(2, attempt) + Math.random() * 1000);
+          // Jittered exponential backoff: 2s, 4s, 8s + random jitter
+          const backoffMs = Math.floor(2000 * Math.pow(2, attempt) + Math.random() * 1500);
           console.warn(`⚠️ [Sheets API] Transient HTTP ${res.status} on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${backoffMs}ms...`);
           await sleep(backoffMs);
           continue;
@@ -263,9 +327,13 @@ async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 3) 
         throw new Error(`Sheets API returned non-JSON body: ${err.message}`);
       }
     } catch (err) {
+      if (res && !res.bodyUsed) {
+        await res.body?.cancel().catch(() => {});
+      }
+
       const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
       if ((isTimeout || !err.status) && attempt < maxRetries) {
-        const backoffMs = Math.floor(1500 * Math.pow(2, attempt) + Math.random() * 1000);
+        const backoffMs = Math.floor(2000 * Math.pow(2, attempt) + Math.random() * 1000);
         console.warn(`⚠️ [Sheets API] Network/Timeout error on attempt ${attempt + 1}/${maxRetries + 1}: ${err.message}, retrying in ${backoffMs}ms...`);
         await sleep(backoffMs);
         continue;
@@ -296,7 +364,7 @@ export async function getSpreadsheetTabs(accessToken, spreadsheetId) {
 
 /**
  * Ensure that a specific creator sheet tab exists.
- * If not present, creates the tab and writes the canonical 18 headers in row 1.
+ * Race-safe: If another runner created the tab concurrently, handles "already exists" cleanly.
  */
 export async function ensureSheetExists(accessToken, spreadsheetId, tabName) {
   let known = knownTabsCache.get(spreadsheetId);
@@ -309,47 +377,57 @@ export async function ensureSheetExists(accessToken, spreadsheetId, tabName) {
     return true;
   }
 
-  // Tab not in cache: verify with live metadata before creating
+  // Tab not in local cache: verify with live metadata before attempting creation
   const freshTabs = await getSpreadsheetTabs(accessToken, spreadsheetId);
   knownTabsCache.set(spreadsheetId, freshTabs);
   if (freshTabs.has(tabName)) {
     return true;
   }
 
-  // Create sheet with frozen header row
+  // Attempt creation of sheet with frozen header row
   const addUrl = `${SHEETS_BASE_URL}/${spreadsheetId}:batchUpdate`;
-  await sheetsFetch(accessToken, addUrl, {
-    method: 'POST',
-    body: JSON.stringify({
-      requests: [
-        {
-          addSheet: {
-            properties: {
-              title: tabName,
-              gridProperties: {
-                frozenRowCount: 1,
+  try {
+    await sheetsFetch(accessToken, addUrl, {
+      method: 'POST',
+      body: JSON.stringify({
+        requests: [
+          {
+            addSheet: {
+              properties: {
+                title: tabName,
+                gridProperties: {
+                  frozenRowCount: 1,
+                },
               },
             },
           },
-        },
-      ],
-    }),
-  });
+        ],
+      }),
+    });
 
-  // Write header row
-  const headerRange = `${escapeSheetTitle(tabName)}!A1:R1`;
-  const headerUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(headerRange)}?valueInputOption=USER_ENTERED`;
-  await sheetsFetch(accessToken, headerUrl, {
-    method: 'PUT',
-    body: JSON.stringify({
-      range: headerRange,
-      majorDimension: 'ROWS',
-      values: [PINARCHIVE_SHEET_HEADERS],
-    }),
-  });
+    // Write canonical header row into newly created sheet
+    const headerRange = `${escapeSheetTitle(tabName)}!A1:R1`;
+    const headerUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(headerRange)}?valueInputOption=USER_ENTERED`;
+    await sheetsFetch(accessToken, headerUrl, {
+      method: 'PUT',
+      body: JSON.stringify({
+        range: headerRange,
+        majorDimension: 'ROWS',
+        values: [PINARCHIVE_SHEET_HEADERS],
+      }),
+    });
 
-  freshTabs.add(tabName);
-  return true;
+    freshTabs.add(tabName);
+    return true;
+  } catch (err) {
+    // Cross-runner race check: if another shard created the tab concurrently, treat as success
+    const errText = String(err?.message || err?.detail || '');
+    if (err.status === 400 && /already exists/i.test(errText)) {
+      freshTabs.add(tabName);
+      return true;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -444,8 +522,17 @@ export function buildSheetRow(pinObj, headerMap, width = PINARCHIVE_SHEET_HEADER
 
 /**
  * Determine whether an existing sheet row needs an update based on changed fields.
+ * Includes data integrity guard for newly qualified pins (`archived_at`).
  */
 export function rowNeedsUpdate(existRow, headerMap, r) {
+  // 1. Data Integrity: Check if pin newly became archived
+  const existArchived = headerMap['archived_at'] !== undefined ? String(existRow[headerMap['archived_at']] ?? '').trim() : '';
+  const newArchived = String(r.archived_at ?? '').trim();
+  if (newArchived && !existArchived) {
+    return true;
+  }
+
+  // 2. Metrics & Metadata comparison
   const compareFields = [
     'title',
     'description',
@@ -498,6 +585,7 @@ export function rowNeedsUpdate(existRow, headerMap, r) {
 /**
  * Direct Google Sheets API v4 Writer.
  * Replaces GAS Web App with direct sub-second authenticated REST API operations.
+ * Protected by per-tab in-process mutex (`withTabLock`).
  *
  * @param {string|object} credentials - Service Account JSON string or parsed object
  * @param {string} spreadsheetId - Google Spreadsheet ID
@@ -528,141 +616,159 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
     return { ok: false, error: 'spreadsheetId required' };
   }
 
-  try {
-    const accessToken = await getGoogleAccessToken(credentials, options);
-    const tabName = `pins_${username.toLowerCase()}`;
+  const tabName = `pins_${username.toLowerCase()}`;
+  const lockKey = `${spreadsheetId}::${tabName}`;
 
-    // 1. Ensure tab exists with headers
-    await ensureSheetExists(accessToken, spreadsheetId, tabName);
+  // Execute under per-tab mutex to eliminate race conditions within this process
+  return await withTabLock(lockKey, async () => {
+    try {
+      const accessToken = await getGoogleAccessToken(credentials, options);
 
-    // 2. Read existing rows
-    const { headerMap, rows: existingRows } = await readSheetRows(accessToken, spreadsheetId, tabName);
-    const width = Math.max(PINARCHIVE_SHEET_HEADERS.length, Object.keys(headerMap).length);
-    const nowFormatted = formatSheetDate();
+      // 1. Ensure tab exists with headers (race-safe)
+      await ensureSheetExists(accessToken, spreadsheetId, tabName);
 
-    // 3. In-batch deduplication of input pins
-    const dedupedRows = [];
-    const seenInputIds = new Set();
-    for (const r of rawRows) {
-      const id = String(r?.pin_id || '').trim();
-      if (!id || seenInputIds.has(id)) continue;
-      seenInputIds.add(id);
-      dedupedRows.push(r);
-    }
+      // 2. Read existing rows
+      const { headerMap, rows: existingRows } = await readSheetRows(accessToken, spreadsheetId, tabName);
+      const width = Math.max(PINARCHIVE_SHEET_HEADERS.length, Object.keys(headerMap).length);
+      const nowFormatted = formatSheetDate();
 
-    const mode = payload.mode === 'update' ? 'update' : 'append';
+      // 3. In-batch deduplication of input pins
+      const dedupedRows = [];
+      const seenInputIds = new Set();
+      for (const r of rawRows) {
+        const id = String(r?.pin_id || '').trim();
+        if (!id || seenInputIds.has(id)) continue;
+        seenInputIds.add(id);
+        dedupedRows.push(r);
+      }
 
-    if (mode === 'append') {
-      const rowsToAppend = dedupedRows.map(r => buildSheetRow(r, headerMap, width, null, nowFormatted));
-      if (rowsToAppend.length > 0) {
-        const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
-        const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-        await sheetsFetch(accessToken, appendUrl, {
-          method: 'POST',
-          body: JSON.stringify({
-            range: appendRange,
+      const mode = payload.mode === 'update' ? 'update' : 'append';
+
+      if (mode === 'append') {
+        const rowsToAppend = dedupedRows.map(r => buildSheetRow(r, headerMap, width, null, nowFormatted));
+        if (rowsToAppend.length > 0) {
+          // Chunk appends in blocks of 1,000 rows to prevent Google HTTP request size limits
+          const CHUNK_SIZE = 1000;
+          for (let c = 0; c < rowsToAppend.length; c += CHUNK_SIZE) {
+            const chunk = rowsToAppend.slice(c, c + CHUNK_SIZE);
+            const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
+            const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+            await sheetsFetch(accessToken, appendUrl, {
+              method: 'POST',
+              body: JSON.stringify({
+                range: appendRange,
+                majorDimension: 'ROWS',
+                values: chunk,
+              }),
+            }, options.maxRetries || 3);
+          }
+        }
+
+        const elapsedMs = Date.now() - startedAt;
+        console.log(`✅ [Sheets API] @${username}: written=${rowsToAppend.length} (app=${rowsToAppend.length}, upd=0, unch=0) in ${elapsedMs}ms`);
+        return {
+          ok: true,
+          version: '4.0.0-api',
+          total_received: rawRows.length,
+          written: rowsToAppend.length,
+          appended: rowsToAppend.length,
+          updated: 0,
+          unchanged: 0,
+        };
+      }
+
+      // mode === 'update'
+      // Build index of existing pin IDs: pin_id -> { index (0-based within existingRows), row }
+      const pinIdColIdx = headerMap['pin_id'] !== undefined ? headerMap['pin_id'] : 0;
+      const existingIndex = new Map();
+      existingRows.forEach((row, i) => {
+        const id = String(row[pinIdColIdx] || '').trim();
+        if (id) existingIndex.set(id, { index: i, row });
+      });
+
+      const toAppend = [];
+      const batchUpdateData = [];
+      let updatedCount = 0;
+      let unchangedCount = 0;
+
+      for (const r of dedupedRows) {
+        const pinId = String(r.pin_id || '').trim();
+        if (!pinId) continue;
+
+        const existing = existingIndex.get(pinId);
+        if (existing) {
+          if (!rowNeedsUpdate(existing.row, headerMap, r)) {
+            unchangedCount++;
+            continue;
+          }
+
+          const builtRow = buildSheetRow(r, headerMap, width, existing.row, nowFormatted);
+          const rowNumber = existing.index + 2; // 1-based, row 1 is header
+          batchUpdateData.push({
+            range: `${escapeSheetTitle(tabName)}!A${rowNumber}:R${rowNumber}`,
             majorDimension: 'ROWS',
-            values: rowsToAppend,
-          }),
-        }, options.maxRetries || 3);
+            values: [builtRow],
+          });
+          updatedCount++;
+        } else {
+          toAppend.push(buildSheetRow(r, headerMap, width, null, nowFormatted));
+        }
+      }
+
+      // 4. Execute updates via values:batchUpdate in chunks of 500 ranges
+      if (batchUpdateData.length > 0) {
+        const BATCH_CHUNK = 500;
+        for (let b = 0; b < batchUpdateData.length; b += BATCH_CHUNK) {
+          const chunkData = batchUpdateData.slice(b, b + BATCH_CHUNK);
+          const batchUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values:batchUpdate`;
+          await sheetsFetch(accessToken, batchUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              valueInputOption: 'USER_ENTERED',
+              data: chunkData,
+            }),
+          }, options.maxRetries || 3);
+        }
+      }
+
+      // 5. Execute appends via values:append in chunks of 1000 rows
+      if (toAppend.length > 0) {
+        const CHUNK_SIZE = 1000;
+        for (let c = 0; c < toAppend.length; c += CHUNK_SIZE) {
+          const chunk = toAppend.slice(c, c + CHUNK_SIZE);
+          const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
+          const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+          await sheetsFetch(accessToken, appendUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              range: appendRange,
+              majorDimension: 'ROWS',
+              values: chunk,
+            }),
+          }, options.maxRetries || 3);
+        }
       }
 
       const elapsedMs = Date.now() - startedAt;
-      console.log(`✅ [Sheets API] @${username}: written=${rowsToAppend.length} (app=${rowsToAppend.length}, upd=0, unch=0) in ${elapsedMs}ms`);
+      const written = toAppend.length + updatedCount;
+      console.log(`✅ [Sheets API] @${username}: written=${written} (app=${toAppend.length}, upd=${updatedCount}, unch=${unchangedCount}) in ${elapsedMs}ms`);
+
       return {
         ok: true,
         version: '4.0.0-api',
         total_received: rawRows.length,
-        written: rowsToAppend.length,
-        appended: rowsToAppend.length,
-        updated: 0,
-        unchanged: 0,
+        written,
+        appended: toAppend.length,
+        updated: updatedCount,
+        unchanged: unchangedCount,
       };
+    } catch (err) {
+      const elapsedMs = Date.now() - startedAt;
+      const errMsg = err?.message || 'Sheets API error';
+      console.warn(`❌ [Sheets API] Failed for @${username} (${elapsedMs}ms): ${errMsg}`);
+      return { ok: false, error: errMsg };
     }
-
-    // mode === 'update'
-    // Build index of existing pin IDs: pin_id -> { index (0-based within existingRows), row }
-    const pinIdColIdx = headerMap['pin_id'] !== undefined ? headerMap['pin_id'] : 0;
-    const existingIndex = new Map();
-    existingRows.forEach((row, i) => {
-      const id = String(row[pinIdColIdx] || '').trim();
-      if (id) existingIndex.set(id, { index: i, row });
-    });
-
-    const toAppend = [];
-    const batchUpdateData = [];
-    let updatedCount = 0;
-    let unchangedCount = 0;
-
-    for (const r of dedupedRows) {
-      const pinId = String(r.pin_id || '').trim();
-      if (!pinId) continue;
-
-      const existing = existingIndex.get(pinId);
-      if (existing) {
-        if (!rowNeedsUpdate(existing.row, headerMap, r)) {
-          unchangedCount++;
-          continue;
-        }
-
-        const builtRow = buildSheetRow(r, headerMap, width, existing.row, nowFormatted);
-        const rowNumber = existing.index + 2; // 1-based, row 1 is header
-        batchUpdateData.push({
-          range: `${escapeSheetTitle(tabName)}!A${rowNumber}:R${rowNumber}`,
-          majorDimension: 'ROWS',
-          values: [builtRow],
-        });
-        updatedCount++;
-      } else {
-        toAppend.push(buildSheetRow(r, headerMap, width, null, nowFormatted));
-      }
-    }
-
-    // 4. Execute updates via values:batchUpdate
-    if (batchUpdateData.length > 0) {
-      const batchUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values:batchUpdate`;
-      await sheetsFetch(accessToken, batchUrl, {
-        method: 'POST',
-        body: JSON.stringify({
-          valueInputOption: 'USER_ENTERED',
-          data: batchUpdateData,
-        }),
-      }, options.maxRetries || 3);
-    }
-
-    // 5. Execute appends via values:append
-    if (toAppend.length > 0) {
-      const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
-      const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-      await sheetsFetch(accessToken, appendUrl, {
-        method: 'POST',
-        body: JSON.stringify({
-          range: appendRange,
-          majorDimension: 'ROWS',
-          values: toAppend,
-        }),
-      }, options.maxRetries || 3);
-    }
-
-    const elapsedMs = Date.now() - startedAt;
-    const written = toAppend.length + updatedCount;
-    console.log(`✅ [Sheets API] @${username}: written=${written} (app=${toAppend.length}, upd=${updatedCount}, unch=${unchangedCount}) in ${elapsedMs}ms`);
-
-    return {
-      ok: true,
-      version: '4.0.0-api',
-      total_received: rawRows.length,
-      written,
-      appended: toAppend.length,
-      updated: updatedCount,
-      unchanged: unchangedCount,
-    };
-  } catch (err) {
-    const elapsedMs = Date.now() - startedAt;
-    const errMsg = err?.message || 'Sheets API error';
-    console.warn(`❌ [Sheets API] Failed for @${username} (${elapsedMs}ms): ${errMsg}`);
-    return { ok: false, error: errMsg };
-  }
+  });
 }
 
 /**
@@ -687,36 +793,40 @@ export async function getAccountAgesFromSheetsApi(credentials, spreadsheetId, us
   try {
     const accessToken = await getGoogleAccessToken(credentials, options);
 
-    // Build batchGet ranges for created_at column (column G)
-    const ranges = validUsernames.map(u => `${escapeSheetTitle(`pins_${u}`)}!G2:G`);
-    const rangesParam = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
-    const batchGetUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values:batchGet?${rangesParam}`;
+    // Google Sheets API allows up to 100 ranges per batchGet call
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < validUsernames.length; i += BATCH_SIZE) {
+      const chunk = validUsernames.slice(i, i + BATCH_SIZE);
+      const ranges = chunk.map(u => `${escapeSheetTitle(`pins_${u}`)}!G2:G`);
+      const rangesParam = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
+      const batchGetUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values:batchGet?${rangesParam}`;
 
-    const data = await sheetsFetch(accessToken, batchGetUrl, {}, options.maxRetries || 2);
-    const valueRanges = Array.isArray(data?.valueRanges) ? data.valueRanges : [];
+      const data = await sheetsFetch(accessToken, batchGetUrl, {}, options.maxRetries || 2);
+      const valueRanges = Array.isArray(data?.valueRanges) ? data.valueRanges : [];
 
-    valueRanges.forEach((vr, i) => {
-      const username = validUsernames[i];
-      if (!username) return;
+      valueRanges.forEach((vr, idx) => {
+        const username = chunk[idx];
+        if (!username) return;
 
-      const cells = Array.isArray(vr?.values) ? vr.values : [];
-      let minMs = Infinity;
-      let minIso = null;
+        const cells = Array.isArray(vr?.values) ? vr.values : [];
+        let minMs = Infinity;
+        let minIso = null;
 
-      for (const row of cells) {
-        const cell = row[0];
-        if (cell === '' || cell === null || cell === undefined) continue;
-        const t = parseSheetTimestamp(cell);
-        if (Number.isFinite(t) && t < minMs) {
-          minMs = t;
-          minIso = new Date(t).toISOString();
+        for (const row of cells) {
+          const cell = row[0];
+          if (cell === '' || cell === null || cell === undefined) continue;
+          const t = parseSheetTimestamp(cell);
+          if (Number.isFinite(t) && t < minMs) {
+            minMs = t;
+            minIso = new Date(t).toISOString();
+          }
         }
-      }
 
-      if (Number.isFinite(minMs)) {
-        ages[username] = minIso;
-      }
-    });
+        if (Number.isFinite(minMs)) {
+          ages[username] = minIso;
+        }
+      });
+    }
 
     return ages;
   } catch (err) {

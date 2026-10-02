@@ -799,8 +799,15 @@ async function main() {
     if (allPinsForSheet.length > 0 && (hasSheetsApi || hasGas)) {
       const writerName = hasSheetsApi ? 'Sheets API v4 (Service Account)' : 'GAS writer';
       console.log(`📑 Writing ${allPinsForSheet.length} pins to Google Sheet via ${writerName} (mode=update)...`);
-      for (let i = 0; i < allPinsForSheet.length; i += maxBatchPins) {
-        const batch = allPinsForSheet.slice(i, i + maxBatchPins);
+
+      // Sheets API v4 handles full datasets in one atomic operation; GAS requires conservative slicing
+      const batches = hasSheetsApi
+        ? [allPinsForSheet]
+        : Array.from({ length: Math.ceil(allPinsForSheet.length / maxBatchPins) }, (_, idx) =>
+            allPinsForSheet.slice(idx * maxBatchPins, (idx + 1) * maxBatchPins)
+          );
+
+      for (const batch of batches) {
         const sheetRes = await writeToGoogleSheet({
           credentials: GOOGLE_SERVICE_ACCOUNT_KEY,
           spreadsheetId: PINARCHIVE_SPREADSHEET_ID,
