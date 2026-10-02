@@ -25,7 +25,7 @@ const CFG = {
   SLEEP_MS_MAX: 2500,
   BATCH_SIZE: 50,
   PUSH_SLEEP_MS: 500,
-  CIRCUIT_BREAKER: 3,
+  CIRCUIT_BREAKER: 10,
   CONCURRENCY: 4,
 };
 
@@ -57,8 +57,16 @@ async function supaQuery(table, params = '') {
     headers: { 'apikey': PINARCHIVE_SUPABASE_KEY, 'Authorization': `Bearer ${PINARCHIVE_SUPABASE_KEY}`, 'Accept': 'application/json' },
     signal: AbortSignal.timeout(30000),
   });
-  if (!res.ok) throw new Error(`Supabase ${table}: HTTP ${res.status}`);
-  return res.json();
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`Supabase ${table}: HTTP ${res.status}: ${txt}`);
+  }
+  try {
+    return await res.json();
+  } catch (err) {
+    await res.body?.cancel().catch(() => {});
+    throw err;
+  }
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -111,6 +119,17 @@ async function fetchPinFromPinterest(pinId, maxRetries = 2) {
           continue;
         }
         return { ok: false, code: 429, error: 'rate-limited-429' };
+      }
+
+      if (res.status >= 500 && res.status < 600) {
+        await res.text().catch(() => '');
+        if (attempt < maxRetries) {
+          const backoff = (attempt + 1) * 2000 + Math.floor(Math.random() * 1500);
+          await sleep(backoff);
+          attempt++;
+          continue;
+        }
+        return { ok: false, code: res.status, error: `http-${res.status}` };
       }
 
       if (res.status !== 200) {
@@ -204,6 +223,8 @@ async function main() {
               return;
             }
           }
+        } else {
+          await p1Res.text().catch(() => '');
         }
       }
     } catch (err) {
@@ -344,30 +365,49 @@ async function main() {
       : (settingsRefreshMinSaves !== null && !isNaN(settingsRefreshMinSaves) ? Math.max(0, settingsRefreshMinSaves) : 0);
     const savesFilterQuery = effectiveMinSaves > 0 ? `&saves=gte.${effectiveMinSaves}` : '';
 
-    // True pagination loop (1000 per page) with deterministic order=pin_id.asc
-    const allPins = [];
+    // Two-Phase Hydration: Phase 1 (Lean keyset discovery of pin_ids only — 100x lighter on DB & network)
+    const allPinIds = [];
     let pinOffset = 0;
     const PAGE = 1000;
-    while (allPins.length < effectiveCap) {
-      const fetchLimit = Math.min(PAGE, effectiveCap - allPins.length);
+    while (allPinIds.length < effectiveCap) {
+      const fetchLimit = Math.min(PAGE, effectiveCap - allPinIds.length);
       const chunk = await supaQuery(
         'pa_pins',
-        `select=pin_id,saves,repins,comments,share_count,reactions,annotations,seo_category,canonical_pin_id,seo_alt_text,board_pin_count,board_last_modified_at,archived_at,title,description,link,utm_link,domain,board_name,board_id,created_at_pinterest,image_url,dominant_color,image_signature,node_id,is_video,velocity&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}${savesFilterQuery}&order=pin_id.asc&limit=${fetchLimit}&offset=${pinOffset}`
+        `select=pin_id&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}${savesFilterQuery}&order=pin_id.asc&limit=${fetchLimit}&offset=${pinOffset}`
       );
       if (!Array.isArray(chunk) || chunk.length === 0) break;
-      allPins.push(...chunk);
+      for (const c of chunk) {
+        if (c.pin_id) allPinIds.push(String(c.pin_id));
+      }
       if (chunk.length < fetchLimit) break;
       pinOffset += chunk.length;
     }
 
     // Strictly deterministic in-memory sort by immutable pin_id before modulo partitioning
-    allPins.sort((a, b) => String(a.pin_id).localeCompare(String(b.pin_id)));
+    allPinIds.sort((a, b) => a.localeCompare(b));
 
     // Intra-account pin-level modulo sharding across all runners
-    const pins = allPins.filter((_, idx) => idx % SHARD_COUNT === REFRESH_SHARD);
+    const targetPinIds = allPinIds.filter((_, idx) => idx % SHARD_COUNT === REFRESH_SHARD);
+
+    if (!targetPinIds.length) continue;
+
+    // Two-Phase Hydration: Phase 2 (Targeted hydration — fetch full records ONLY for pins assigned to this shard)
+    const pins = [];
+    const HYDRATE_CHUNK = 100;
+    for (let i = 0; i < targetPinIds.length; i += HYDRATE_CHUNK) {
+      const chunkIds = targetPinIds.slice(i, i + HYDRATE_CHUNK);
+      const encodedIds = chunkIds.map(encodeURIComponent).join(',');
+      const rows = await supaQuery(
+        'pa_pins',
+        `select=pin_id,saves,repins,comments,share_count,reactions,annotations,seo_category,canonical_pin_id,seo_alt_text,board_pin_count,board_last_modified_at,archived_at,title,description,link,utm_link,domain,board_name,board_id,created_at_pinterest,image_url,dominant_color,image_signature,node_id,is_video,velocity&workspace_id=eq.${acc.workspace_id}&account_id=eq.${acc.id}&pin_id=in.(${encodedIds})`
+      );
+      if (Array.isArray(rows)) {
+        pins.push(...rows);
+      }
+    }
 
     if (!pins.length) continue;
-    console.log(`${acc.username}: ${pins.length} pins to refresh (min saves: ${effectiveMinSaves > 0 ? effectiveMinSaves : 'all'}, shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} of ${allPins.length} total)`);
+    console.log(`${acc.username}: ${pins.length} pins to refresh (min saves: ${effectiveMinSaves > 0 ? effectiveMinSaves : 'all'}, shard ${REFRESH_SHARD + 1}/${SHARD_COUNT} of ${allPinIds.length} total)`);
 
     let consecutiveErrors = 0;
     let rateLimitCooldownUntil = 0;
@@ -408,6 +448,7 @@ async function main() {
           }
 
           if (!fresh || !fresh.ok) {
+            const isSystemic = fresh?.code === 429 || fresh?.code === 503 || fresh?.error?.includes('timeout') || fresh?.error?.includes('fetch-failed');
             if (fresh?.code === 429) {
               const wasAlreadyInCooldown = Date.now() < rateLimitCooldownUntil;
               rateLimitCooldownUntil = Math.max(rateLimitCooldownUntil, Date.now() + 60000);
@@ -415,14 +456,14 @@ async function main() {
               if (!wasAlreadyInCooldown) {
                 consecutiveErrors++;
               }
-            } else if (fresh?.code === 403 || fresh?.code === 503 || fresh?.code === 500 || fresh?.error?.includes('timeout')) {
+            } else if (isSystemic) {
               consecutiveErrors++;
             }
 
             if (consecutiveErrors >= CFG.CIRCUIT_BREAKER) {
               circuitBroken = true;
               summary.errors.push(`circuit-breaker: ${acc.username}`);
-              console.error(`[CIRCUIT BREAKER] Hit ${CFG.CIRCUIT_BREAKER} consecutive errors on ${acc.username}. Aborting remaining pin fetches for this account.`);
+              console.error(`[CIRCUIT BREAKER] Hit ${CFG.CIRCUIT_BREAKER} consecutive systemic errors on ${acc.username}. Aborting remaining pin fetches for this account.`);
               return;
             }
 
@@ -584,7 +625,7 @@ async function main() {
           acc.username,
           batch,
           accountFollowerCount,
-          allPins.length,
+          allPinIds.length,
           acc.id,
           true,
           changedPins.length
@@ -667,7 +708,7 @@ async function main() {
     e.startsWith('push:') ||
     e.startsWith('circuit-breaker') ||
     e.includes('429') ||
-    e.includes('403') ||
+    e.includes('rate-limited') ||
     e.includes('timeout')
   );
   const allSystemicFailed = systemicErrors.length > 0 && summary.refreshed === 0;

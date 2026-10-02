@@ -22,9 +22,9 @@ import path from 'path';
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { aesKey, decryptCookieValue, resolveKek, getVaultCookie } from './lib/vault.mjs';
-import { writeToGas, pushToIngest as pushToIngestClient, fetchAllAccounts } from './lib/pa-client.mjs';
+import { writeToGas, writeToGoogleSheet, pushToIngest as pushToIngestClient, fetchAllAccounts, partitionAccountsLPT } from './lib/pa-client.mjs';
 import { formatPin } from './lib/pinterest.mjs';
-import { savePinsToRunnerCache } from './lib/runner-cache.mjs';
+import { savePinsToRunnerCache, flushRunnerCacheToDisk } from './lib/runner-cache.mjs';
 
 const CFG = {
   PAGE_SIZE: 50,
@@ -46,6 +46,8 @@ const {
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
   PINARCHIVE_GAS_URL,
+  GOOGLE_SERVICE_ACCOUNT_KEY,
+  PINARCHIVE_SPREADSHEET_ID,
 } = process.env;
 
 const DISCOVERY_WORKSPACE_ID = (process.env.DISCOVERY_WORKSPACE_ID || process.env.WORKSPACE_ID || process.env.WORKSPACE_FILTER || process.env.DISCOVERY_WORKSPACE_FILTER || '').trim();
@@ -75,6 +77,8 @@ async function logEgressIp() {
     if (res.ok) {
       const data = await res.json();
       console.log(`🌐 Runner Egress IP: ${data.ip}`);
+    } else {
+      await res.text().catch(() => '');
     }
   } catch (e) {
     console.warn(`⚠️ Could not determine egress IP: ${e.message}`);
@@ -107,8 +111,16 @@ async function supaQuery(table, params = '') {
     },
     signal: AbortSignal.timeout(30000),
   });
-  if (!res.ok) throw new Error(`Supabase ${table}: HTTP ${res.status}`);
-  return res.json();
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`Supabase ${table}: HTTP ${res.status}: ${txt}`);
+  }
+  try {
+    return await res.json();
+  } catch (err) {
+    await res.body?.cancel().catch(() => {});
+    throw err;
+  }
 }
 
 async function supaPatch(table, matchParams, body) {
@@ -127,6 +139,8 @@ async function supaPatch(table, matchParams, body) {
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
     console.warn(`⚠️ Supabase PATCH ${table} failed (${res.status}): ${txt}`);
+  } else {
+    await res.text().catch(() => '');
   }
 }
 
@@ -146,6 +160,8 @@ async function supaInsert(table, body) {
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
     console.warn(`⚠️ Supabase POST ${table} failed (${res.status}): ${txt}`);
+  } else {
+    await res.text().catch(() => '');
   }
 }
 
@@ -191,6 +207,18 @@ async function pinterestFetch(url, username, cookiePlain, vaultDb, cookieId, max
           headers: getDiscoveryHeaders(username, ''),
           signal: AbortSignal.timeout(15000),
         });
+      }
+
+      if (res.status >= 500 && res.status < 600) {
+        await res.text().catch(() => '');
+        if (attempt < maxRetries) {
+          const backoff = 2 ** attempt * 1500 + Math.floor(Math.random() * 1000);
+          console.warn(`⚠️ [Pinterest HTTP ${res.status}] Transient error for @${username} on attempt ${attempt + 1}/${maxRetries + 1}. Retrying in ${backoff}ms...`);
+          await sleep(backoff);
+          attempt++;
+          continue;
+        }
+        return res;
       }
 
       return res;
@@ -403,6 +431,8 @@ async function main() {
               return;
             }
           }
+        } else {
+          await p1Res.text().catch(() => '');
         }
       }
     } catch (err) {
@@ -469,8 +499,10 @@ async function main() {
   }
   console.log('');
 
-  // Sharding across runner matrix
-  const shardedAccounts = accounts.filter((_, idx) => idx % SHARD_COUNT === DISCOVERY_SHARD);
+  // Deterministic Greedy Bin-Packing (LPT) across runner matrix:
+  // Balances pin workload so heavy accounts (@recipestower, @whispe_sad, @zollinsadru)
+  // are isolated and smaller accounts are packed into shards with lowest accumulated weight.
+  const shardedAccounts = partitionAccountsLPT(accounts, SHARD_COUNT, DISCOVERY_SHARD);
   console.log(`Shard ${DISCOVERY_SHARD + 1}/${SHARD_COUNT}: Processing ${shardedAccounts.length} of ${accounts.length} total accounts.\n`);
 
   if (!shardedAccounts.length) {
@@ -501,7 +533,10 @@ async function main() {
     const isGhScheduledEvent = (process.env.GITHUB_EVENT_NAME || '').trim().toLowerCase() === 'schedule';
     const pausedPolicy = wsSetting.paused_account_policy ?? 'reject';
     const discoveryStopPages = Number(wsSetting.discovery_stop_pages ?? 3);
-    const maxBatchPins = Math.min(Number(wsSetting.max_batch_pins || CFG.MAX_BATCH_PINS), 500);
+    const maxBatchPins = Math.min(
+      Number(wsSetting.max_batch_pins || (IS_AUDIT_SWEEP ? 500 : CFG.MAX_BATCH_PINS)),
+      500
+    );
     const discoveryMaxPages = Math.min(
       Math.max(1, Number(process.env.DISCOVERY_MAX_PAGES || wsSetting.discovery_max_pages || CFG.MAX_PAGES_DEFAULT)),
       500
@@ -650,7 +685,13 @@ async function main() {
         }
 
         consecutiveErrors = 0;
-        const payload = await res.json();
+        let payload = null;
+        try {
+          payload = await res.json();
+        } catch (jErr) {
+          await res?.body?.cancel().catch(() => {});
+          throw jErr;
+        }
         const rr = payload?.resource_response || {};
         pagePins = rr.data || [];
         nextCursor = rr.bookmark || null;
@@ -674,7 +715,7 @@ async function main() {
       // Check how many pins on this page are already known / after watermark
       let pageNewPinsCount = 0;
       const formattedPagePins = pagePins.map(mapDiscoveryPin);
-      savePinsToRunnerCache(formattedPagePins);
+      savePinsToRunnerCache(formattedPagePins, undefined, false);
 
       for (const p of formattedPagePins) {
         if (!p.pin_id) continue;
@@ -749,36 +790,53 @@ async function main() {
       }
     }
 
-    // 5. Push all pins to GAS writer (sheet_write mode=update)
+    // 5. Push all pins to Google Sheet (Sheets API v4 or GAS writer fallback, mode=update)
     let sheetPushed = 0;
     let sheetBreakdown = '';
-    if (allPinsForSheet.length > 0 && PINARCHIVE_GAS_URL) {
-      console.log(`📑 Writing ${allPinsForSheet.length} pins to Google Sheet via GAS writer (mode=update)...`);
-      for (let i = 0; i < allPinsForSheet.length; i += maxBatchPins) {
-        const batch = allPinsForSheet.slice(i, i + maxBatchPins);
-        const gasRes = await writeToGas(PINARCHIVE_GAS_URL, PINARCHIVE_INGEST_SECRET, {
-          workspace_id: acc.workspace_id,
-          username: acc.username,
-          mode: 'update',
-          rows: batch,
+    const hasSheetsApi = Boolean(GOOGLE_SERVICE_ACCOUNT_KEY && PINARCHIVE_SPREADSHEET_ID);
+    const hasGas = Boolean(PINARCHIVE_GAS_URL);
+
+    if (allPinsForSheet.length > 0 && (hasSheetsApi || hasGas)) {
+      const writerName = hasSheetsApi ? 'Sheets API v4 (Service Account)' : 'GAS writer';
+      console.log(`📑 Writing ${allPinsForSheet.length} pins to Google Sheet via ${writerName} (mode=update)...`);
+
+      // Sheets API v4 handles full datasets in one atomic operation; GAS requires conservative slicing
+      const batches = hasSheetsApi
+        ? [allPinsForSheet]
+        : Array.from({ length: Math.ceil(allPinsForSheet.length / maxBatchPins) }, (_, idx) =>
+            allPinsForSheet.slice(idx * maxBatchPins, (idx + 1) * maxBatchPins)
+          );
+
+      for (const batch of batches) {
+        const sheetRes = await writeToGoogleSheet({
+          credentials: GOOGLE_SERVICE_ACCOUNT_KEY,
+          spreadsheetId: PINARCHIVE_SPREADSHEET_ID,
+          gasUrl: PINARCHIVE_GAS_URL,
+          secret: PINARCHIVE_INGEST_SECRET,
+          payload: {
+            workspace_id: acc.workspace_id,
+            username: acc.username,
+            mode: 'update',
+            rows: batch,
+          },
         });
-        if (gasRes?.ok) {
-          const writtenCount = typeof gasRes.written === 'number'
-            ? gasRes.written
-            : (Number(gasRes.appended) || 0) + (Number(gasRes.updated) || 0);
+        if (sheetRes?.ok) {
+          const writtenCount = typeof sheetRes.written === 'number'
+            ? sheetRes.written
+            : (Number(sheetRes.appended) || 0) + (Number(sheetRes.updated) || 0);
           sheetPushed += writtenCount;
           grandSummary.sheetPushed += writtenCount;
 
-          if (typeof gasRes.appended === 'number' && typeof gasRes.updated === 'number') {
-            if (typeof gasRes.unchanged === 'number') {
-              sheetBreakdown = ` (app=${gasRes.appended}, upd=${gasRes.updated}, unch=${gasRes.unchanged})`;
+          if (typeof sheetRes.appended === 'number' && typeof sheetRes.updated === 'number') {
+            if (typeof sheetRes.unchanged === 'number') {
+              sheetBreakdown = ` (app=${sheetRes.appended}, upd=${sheetRes.updated}, unch=${sheetRes.unchanged})`;
             } else {
-              sheetBreakdown = ` (app=${gasRes.appended}, upd=${gasRes.updated})`;
+              sheetBreakdown = ` (app=${sheetRes.appended}, upd=${sheetRes.updated})`;
             }
           }
         } else {
-          const errMsg = gasRes?.error || 'gas_write_failed';
-          console.error(`❌ [GAS Write] Failed for @${acc.username}: ${errMsg}`);
+          const errMsg = sheetRes?.error || 'sheet_write_failed';
+          console.error(`❌ [Sheet Write] Failed for @${acc.username}: ${errMsg}`);
           grandSummary.errors.push(`sheet: @${acc.username} - ${errMsg}`);
           sheetBreakdown = ` (sheet_err: ${errMsg})`;
         }
@@ -832,6 +890,9 @@ async function main() {
       sheetPushed,
       circuitBroken,
     });
+
+    // Flush runner cache to disk once per account (eliminating redundant disk writes per page)
+    flushRunnerCacheToDisk();
   }
 
   console.log(`\n==================================================`);
@@ -877,6 +938,7 @@ export {
   decryptCookieValue,
   resolveKek,
   writeToGas,
+  writeToGoogleSheet,
   checkCalendarEligibility,
   computeNextRunDate,
   computeOldestPinAt,

@@ -50,7 +50,7 @@ on:
         default: ''
 
 concurrency:
-  group: pinarchive-pipeline
+  group: pinarchive-execution-gate
   cancel-in-progress: false
 
 jobs:
@@ -85,7 +85,7 @@ jobs:
 
       - name: Stagger Job Start (IP & DB distribution)
         run: |
-          DELAY=$(( ${{ matrix.shard }} * 3 ))
+          DELAY=$(( ${{ matrix.shard }} * 2 ))
           echo "Stagger delay for shard ${{ matrix.shard }}: ${DELAY}s"
           sleep $DELAY
 
@@ -96,6 +96,8 @@ jobs:
           PINORBIT_WORKER_URL: ${{ secrets.PINORBIT_WORKER_URL }}
           PINARCHIVE_INGEST_SECRET: ${{ secrets.PINARCHIVE_INGEST_SECRET }}
           PINARCHIVE_GAS_URL: ${{ secrets.PINARCHIVE_GAS_URL }}
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          PINARCHIVE_SPREADSHEET_ID: ${{ secrets.PINARCHIVE_SPREADSHEET_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           DISCOVERY_WORKSPACE_ID: ${{ github.event.inputs.workspace_filter || github.event.inputs.workspace_id || '' }}

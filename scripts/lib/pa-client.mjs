@@ -8,6 +8,9 @@
  */
 
 import crypto from 'node:crypto';
+import { writeToSheetsApi, getAccountAgesFromSheetsApi } from './sheets-client.mjs';
+
+export { writeToSheetsApi, getAccountAgesFromSheetsApi };
 
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -33,7 +36,12 @@ export async function supaQuery(baseUrl, apiKey, table, params = '', options = {
     throw new Error(`Supabase ${table} failed (HTTP ${res.status}): ${txt}`);
   }
 
-  return res.json();
+  try {
+    return await res.json();
+  } catch (err) {
+    await res.body?.cancel().catch(() => {});
+    throw err;
+  }
 }
 
 /**
@@ -61,7 +69,16 @@ export async function supaPatch(baseUrl, apiKey, table, matchParams, body, optio
     throw new Error(`Supabase PATCH ${table} failed (HTTP ${res.status}): ${txt}`);
   }
 
-  return options.prefer?.includes('return=representation') ? res.json() : true;
+  if (options.prefer?.includes('return=representation')) {
+    try {
+      return await res.json();
+    } catch (err) {
+      await res.body?.cancel().catch(() => {});
+      throw err;
+    }
+  }
+  await res.text().catch(() => '');
+  return true;
 }
 
 /**
@@ -89,7 +106,16 @@ export async function supaInsert(baseUrl, apiKey, table, body, options = {}) {
     throw new Error(`Supabase POST ${table} failed (HTTP ${res.status}): ${txt}`);
   }
 
-  return options.prefer?.includes('return=representation') ? res.json() : true;
+  if (options.prefer?.includes('return=representation')) {
+    try {
+      return await res.json();
+    } catch (err) {
+      await res.body?.cancel().catch(() => {});
+      throw err;
+    }
+  }
+  await res.text().catch(() => '');
+  return true;
 }
 
 /**
@@ -279,15 +305,20 @@ export async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
         return { ok: false, error: typed };
       }
 
-      // (3) Lock conflict check
-      if (data.ok === false && data.error === 'locked') {
+      // (3) Lock & transient concurrency conflict check
+      const errStr = String(data.error || data.message || '');
+      const isLockConflict = data.ok === false && (
+        data.error === 'locked' ||
+        /lock|busy|timeout|service invoked too many times|try again|server error|exceeded maximum execution time/i.test(errStr)
+      );
+      if (isLockConflict) {
         if (attempt < maxRetries) {
           const backoffMs = Math.floor(3000 * Math.pow(2, attempt) + Math.random() * 2000);
-          console.warn(`⚠️ [GAS Write] Lock conflict detected on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${backoffMs}ms...`);
+          console.warn(`⚠️ [GAS Write] Transient conflict detected (${errStr.slice(0, 80)}) on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${backoffMs}ms...`);
           await sleep(backoffMs);
           continue;
         }
-        return { ok: false, error: 'locked' };
+        return { ok: false, error: data.error || data.message || 'locked' };
       }
 
       // (4) Success telemetry
@@ -311,6 +342,37 @@ export async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
     }
   }
   return { ok: false, error: 'gas_write_exhausted' };
+}
+
+/**
+ * Unified Google Sheet Writer.
+ * Uses Google Sheets API v4 (Service Account) when credentials & spreadsheetId are configured,
+ * otherwise falls back cleanly to Google Apps Script (GAS).
+ */
+export async function writeToGoogleSheet({
+  credentials,
+  spreadsheetId,
+  gasUrl,
+  secret,
+  payload,
+  maxRetries = 3,
+}) {
+  const effectiveCreds = credentials || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  const effectiveSheetId = spreadsheetId || process.env.PINARCHIVE_SPREADSHEET_ID;
+
+  if (effectiveCreds && effectiveSheetId) {
+    return await writeToSheetsApi(effectiveCreds, effectiveSheetId, payload, { maxRetries });
+  }
+
+  const effectiveGasUrl = gasUrl || process.env.PINARCHIVE_GAS_URL;
+  const effectiveSecret = secret || process.env.PINARCHIVE_INGEST_SECRET;
+
+  if (effectiveGasUrl) {
+    return await writeToGas(effectiveGasUrl, effectiveSecret, payload, maxRetries);
+  }
+
+  console.log('ℹ️ sheet_write skipped: Neither Google Sheets Service Account nor GAS URL configured');
+  return { ok: true, skipped: true };
 }
 
 /**
@@ -341,7 +403,14 @@ export async function callGasAccountAges(gasUrl, secret, workspaceId, usernames)
     throw new Error(`GAS HTTP ${res.status}: ${txt}`);
   }
 
-  const data = await res.json();
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (err) {
+    await res.body?.cancel().catch(() => {});
+    throw new Error(`GAS JSON parse error: ${err.message}`);
+  }
+
   if (!data || data.ok === false) {
     throw new Error(`GAS error: ${data?.error || 'Unknown GAS error'}`);
   }
