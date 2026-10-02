@@ -5,14 +5,15 @@
  *
  * Architecture & Concurrency Guarantees:
  *  1. Single-Flight Token Deduplication: Prevents OAuth token exchange thundering herd.
- *  2. In-Memory Token Caching: 50-minute bearer cache with auto-refresh.
+ *  2. In-Memory Token Caching: 50-minute bearer cache with auto-refresh and 401 eviction.
  *  3. Socket & Stream Leak Elimination: Enforces strict stream cancellation/consumption via `finally`.
  *  4. Cross-Runner Race Safety: Idempotent tab creation handles 400 "already exists" seamlessly.
  *  5. Tab-Existence Pre-Filtering: Prevents 400 "Unable to parse range" on `batchGet` for missing tabs.
  *  6. Safe Overwrite Appending: Eliminates empty-row inflation and table-pushing drifts.
- *  7. In-Process Per-Tab FIFO Mutex (`withTabLock`): Eliminates intra-process concurrent write collisions and deadlocks.
- *  8. Full Data Integrity: Preserves `first_seen_at` & `archived_at`, detects newly qualified pins.
- *  9. Jittered 4-Stage Exponential Backoff: Full 60-second recovery for HTTP 429 quota exhaustion.
+ *  7. In-Process Per-Tab FIFO Mutex (`withTabLock`): Eliminates intra-process race conditions with timeout deadlock immunity.
+ *  8. Full Data Integrity: Preserves `first_seen_at`, `archived_at`, and unmutated fields on sparse updates.
+ *  9. Chunked Batch Writes & Appends: Respects payload size limits (500 updates / 1000 appends).
+ * 10. Jittered 5-Stage Exponential Backoff: Full 140-second recovery for HTTP 429 quota exhaustion.
  *
  * Rule: Pure utility module only — no top-level side effects or script execution.
  */
@@ -171,21 +172,17 @@ export async function withTabLock(lockKey, operationFn, timeoutMs = 60000) {
   tabWriteQueues.set(lockKey, nextQueuePromise);
 
   let timeoutId;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`Tab lock acquisition timed out after ${timeoutMs}ms for ${lockKey}`));
-    }, timeoutMs);
-  });
-
   try {
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`Tab lock acquisition timed out after ${timeoutMs}ms for ${lockKey}`));
+      }, timeoutMs);
+    });
+
     await Promise.race([prev.catch(() => {}), timeoutPromise]);
-  } finally {
-    clearTimeout(timeoutId);
-  }
-
-  try {
     return await operationFn();
   } finally {
+    if (timeoutId) clearTimeout(timeoutId);
     release();
     if (tabWriteQueues.get(lockKey) === nextQueuePromise) {
       tabWriteQueues.delete(lockKey);
@@ -298,7 +295,7 @@ export async function getGoogleAccessToken(rawCredentials, options = {}) {
  * Execute an authenticated Google Sheets API v4 request with retry logic for transient errors.
  * Ensures complete stream consumption and socket leak prevention via guaranteed finally block.
  */
-async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 4) {
+async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 5) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     let res = null;
     try {
@@ -321,6 +318,10 @@ async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 4) 
         let errJson = null;
         try { errJson = JSON.parse(bodyText); } catch {}
         const errorDetail = errJson?.error?.message || bodyText.slice(0, 300) || `HTTP ${res.status}`;
+
+        if (res.status === 401) {
+          clearTokenCache();
+        }
 
         if (isTransient && attempt < maxRetries) {
           // Check for Retry-After header
@@ -530,6 +531,11 @@ export function buildSheetRow(pinObj, headerMap, width = PINARCHIVE_SHEET_HEADER
       val = pinObj.archived_at || getExistingVal('archived_at') || '';
     }
 
+    // Preserve existing sheet value if field is undefined/null/empty in sparse pin updates
+    if ((val === undefined || val === null || val === '') && existingRow) {
+      val = getExistingVal(h);
+    }
+
     if (Array.isArray(val)) {
       val = val.join(', ');
     }
@@ -677,16 +683,20 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
       if (mode === 'append') {
         const rowsToAppend = dedupedRows.map(r => buildSheetRow(r, headerMap, width, null, nowFormatted));
         if (rowsToAppend.length > 0) {
-          const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
-          const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE`;
-          await sheetsFetch(accessToken, appendUrl, {
-            method: 'POST',
-            body: JSON.stringify({
-              range: appendRange,
-              majorDimension: 'ROWS',
-              values: rowsToAppend,
-            }),
-          }, options.maxRetries || 4);
+          const APPEND_CHUNK = 1000;
+          for (let a = 0; a < rowsToAppend.length; a += APPEND_CHUNK) {
+            const chunkAppend = rowsToAppend.slice(a, a + APPEND_CHUNK);
+            const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
+            const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE`;
+            await sheetsFetch(accessToken, appendUrl, {
+              method: 'POST',
+              body: JSON.stringify({
+                range: appendRange,
+                majorDimension: 'ROWS',
+                values: chunkAppend,
+              }),
+            }, options.maxRetries || 4);
+          }
         }
 
         const elapsedMs = Date.now() - startedAt;
@@ -704,11 +714,12 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
 
       // mode === 'update'
       // Build index of existing pin IDs: pin_id -> { index (0-based within existingRows), row }
+      // Uses first occurrence mapping to prevent duplicate ambiguity
       const pinIdColIdx = headerMap['pin_id'] !== undefined ? headerMap['pin_id'] : 0;
       const existingIndex = new Map();
       existingRows.forEach((row, i) => {
         const id = String(row[pinIdColIdx] || '').trim();
-        if (id) existingIndex.set(id, { index: i, row });
+        if (id && !existingIndex.has(id)) existingIndex.set(id, { index: i, row });
       });
 
       const toAppend = [];
@@ -757,18 +768,22 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
         }
       }
 
-      // 5. Execute appends via values:append with OVERWRITE
+      // 5. Execute appends via values:append with OVERWRITE in chunks of 1000
       if (toAppend.length > 0) {
-        const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
-        const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE`;
-        await sheetsFetch(accessToken, appendUrl, {
-          method: 'POST',
-          body: JSON.stringify({
-            range: appendRange,
-            majorDimension: 'ROWS',
-            values: toAppend,
-          }),
-        }, options.maxRetries || 4);
+        const APPEND_CHUNK = 1000;
+        for (let a = 0; a < toAppend.length; a += APPEND_CHUNK) {
+          const chunkAppend = toAppend.slice(a, a + APPEND_CHUNK);
+          const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
+          const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE`;
+          await sheetsFetch(accessToken, appendUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              range: appendRange,
+              majorDimension: 'ROWS',
+              values: chunkAppend,
+            }),
+          }, options.maxRetries || 4);
+        }
       }
 
       const elapsedMs = Date.now() - startedAt;
@@ -839,7 +854,9 @@ export async function getAccountAgesFromSheetsApi(credentials, spreadsheetId, us
       const valueRanges = Array.isArray(data?.valueRanges) ? data.valueRanges : [];
 
       valueRanges.forEach((vr, idx) => {
-        const username = chunk[idx];
+        // Robust range title parsing: extracts username from 'pins_<username>'!G2:G
+        const rangeMatch = String(vr?.range || '').match(/^'?pins_([^'!]+)'?!/i);
+        const username = rangeMatch ? rangeMatch[1].toLowerCase() : chunk[idx];
         if (!username) return;
 
         const cells = Array.isArray(vr?.values) ? vr.values : [];

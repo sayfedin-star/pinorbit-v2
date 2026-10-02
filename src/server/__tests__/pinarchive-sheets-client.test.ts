@@ -257,6 +257,24 @@ describe('PinArchive Sheets Client & Service Account API v4 Suite', () => {
       expect(row[15]).toBe('2026-10-02 12:00:00'); // last_updated_at updated
     });
 
+    it('preserves existing unmutated metadata fields when sparse pin update is provided', () => {
+      const existingRow = new Array(18).fill('');
+      existingRow[1] = 'Great Title';
+      existingRow[2] = 'Original Description';
+      existingRow[5] = 'Dessert Board';
+
+      const sparsePin = {
+        pin_id: '123456789',
+        saves: 500, // only metric updated, no title/desc/board provided
+      };
+
+      const row = buildSheetRow(sparsePin, headerMap, 18, existingRow, '2026-10-02 12:00:00');
+      expect(row[1]).toBe('Great Title');
+      expect(row[2]).toBe('Original Description');
+      expect(row[5]).toBe('Dessert Board');
+      expect(row[10]).toBe(500);
+    });
+
     it('rowNeedsUpdate detects metric and metadata changes accurately', () => {
       const baseRow = new Array(18).fill('');
       baseRow[0] = '123';
@@ -735,6 +753,34 @@ describe('PinArchive Sheets Client & Service Account API v4 Suite', () => {
       // Clean up hanging task
       releaseHang!();
       await p1;
+    });
+
+    it('releases lock and allows subsequent task to run even after predecessor timed out (no deadlock leak)', async () => {
+      let releaseHang: () => void;
+      const hangPromise = new Promise<void>(resolve => { releaseHang = resolve; });
+
+      // Task 1 hangs
+      const p1 = withTabLock('test-no-deadlock-leak', () => hangPromise);
+
+      // Task 2 times out
+      const p2 = withTabLock('test-no-deadlock-leak', async () => 'task2', 30);
+      await expect(p2).rejects.toThrow(/Tab lock acquisition timed out after 30ms/);
+
+      // Task 3 is queued behind Task 2 with a generous timeout
+      let task3Ran = false;
+      const p3 = withTabLock('test-no-deadlock-leak', async () => {
+        task3Ran = true;
+        return 'task3-success';
+      }, 5000);
+
+      // Now Task 1 completes
+      releaseHang!();
+      await p1;
+
+      // Task 3 MUST NOT be blocked by Task 2's timeout!
+      const res3 = await p3;
+      expect(task3Ran).toBe(true);
+      expect(res3).toBe('task3-success');
     });
   });
 });
