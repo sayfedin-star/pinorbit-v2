@@ -381,7 +381,7 @@ export async function getGoogleAccessToken(rawCredentials, options = {}) {
  * When credentials are provided and a 401 Unauthorized occurs, automatically refreshes token and retries.
  */
 async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 5, credentials = null) {
-  let currentToken = accessToken;
+  let currentToken = (tokenCache?.token && credentials) ? tokenCache.token : accessToken;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     let res = null;
     try {

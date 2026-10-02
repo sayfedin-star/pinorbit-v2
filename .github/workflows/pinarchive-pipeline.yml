@@ -76,7 +76,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install @supabase/supabase-js --no-save
+        run: npm install @supabase/supabase-js --no-save --no-audit --no-fund --prefer-offline
 
       - name: Log Egress IP
         run: |
@@ -130,10 +130,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm install @supabase/supabase-js --no-save
 
       - name: Log Egress IP
         run: |
