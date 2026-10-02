@@ -1,0 +1,726 @@
+/**
+ * scripts/lib/sheets-client.mjs
+ *
+ * Zero-dependency Google Sheets API v4 Client using Node.js 22 built-in `node:crypto`.
+ * Implements Google Service Account OAuth2 JWT Bearer authorization and REST API calls
+ * for ultra-low latency, concurrent, conflict-free spreadsheet reading and writing.
+ *
+ * Rule: Pure utility module only — no top-level side effects or script execution.
+ */
+
+import crypto from 'node:crypto';
+
+export const PINARCHIVE_SHEET_HEADERS = [
+  'pin_id',
+  'title',
+  'description',
+  'link',
+  'domain',
+  'board_name',
+  'created_at',
+  'image_url',
+  'image_signature',
+  'dominant_color',
+  'saves',
+  'repins',
+  'comments',
+  'velocity',
+  'first_seen_at',
+  'last_updated_at',
+  'archived_at',
+  'tags',
+];
+
+const SHEETS_BASE_URL = 'https://sheets.googleapis.com/v4/spreadsheets';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
+
+// In-memory token cache: { token, expiresAtMs, clientEmail }
+let tokenCache = null;
+
+// In-memory set of known tab titles per spreadsheetId: Map<spreadsheetId, Set<tabTitle>>
+const knownTabsCache = new Map();
+
+export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Format a Date object to "YYYY-MM-DD HH:mm:ss" GMT string matching Google Sheets convention.
+ */
+export function formatSheetDate(d = new Date()) {
+  const dateObj = d instanceof Date ? d : new Date(d);
+  if (!Number.isFinite(dateObj.getTime())) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return `${dateObj.getUTCFullYear()}-${pad(dateObj.getUTCMonth() + 1)}-${pad(dateObj.getUTCDate())} ${pad(dateObj.getUTCHours())}:${pad(dateObj.getUTCMinutes())}:${pad(dateObj.getUTCSeconds())}`;
+}
+
+/**
+ * Parse a date/timestamp cell value from Google Sheets to unix milliseconds.
+ */
+export function parseSheetTimestamp(cell) {
+  if (cell instanceof Date) return cell.getTime();
+  const s = String(cell || '').trim();
+  if (!s) return NaN;
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/);
+  if (m) {
+    const frac = m[3] || '';
+    let tz = m[4] || 'Z';
+    if (/^[+-]\d{4}$/.test(tz)) tz = tz.slice(0, 3) + ':' + tz.slice(3);
+    return Date.parse(m[1] + 'T' + m[2] + frac + tz);
+  }
+  return Date.parse(s);
+}
+
+/**
+ * Escape a sheet / tab name for A1 notation (e.g. `'pins_username'`).
+ */
+export function escapeSheetTitle(title) {
+  return `'${String(title || '').replace(/'/g, "''")}'`;
+}
+
+/**
+ * Parse and validate Google Service Account credentials.
+ * Accepts either a JSON string (e.g. from GOOGLE_SERVICE_ACCOUNT_KEY env) or a parsed object.
+ */
+export function parseCredentials(raw) {
+  if (!raw) {
+    throw new Error('Google Service Account credentials missing');
+  }
+
+  let creds = raw;
+  if (typeof raw === 'string') {
+    try {
+      creds = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`Invalid JSON in Google Service Account credentials: ${err.message}`);
+    }
+  }
+
+  if (!creds || typeof creds !== 'object') {
+    throw new Error('Google Service Account credentials must be an object');
+  }
+
+  const clientEmail = String(creds.client_email || '').trim();
+  let privateKey = String(creds.private_key || '').trim();
+
+  if (!clientEmail) {
+    throw new Error('Missing client_email in Google Service Account credentials');
+  }
+  if (!privateKey) {
+    throw new Error('Missing private_key in Google Service Account credentials');
+  }
+
+  // Handle literal escaped newlines (e.g. from environment variables: "\\n" -> "\n")
+  if (privateKey.includes('\\n')) {
+    privateKey = privateKey.replace(/\\n/g, '\n');
+  }
+
+  return {
+    client_email: clientEmail,
+    private_key: privateKey,
+    token_uri: creds.token_uri || GOOGLE_TOKEN_URL,
+    project_id: creds.project_id || '',
+  };
+}
+
+/**
+ * Clear the in-memory token cache (useful for testing and key rotation).
+ */
+export function clearTokenCache() {
+  tokenCache = null;
+}
+
+/**
+ * Clear the in-memory tabs cache (useful for testing).
+ */
+export function clearTabsCache() {
+  knownTabsCache.clear();
+}
+
+/**
+ * Generate a Google OAuth2 Access Token using Service Account JWT bearer assertion.
+ * Pure Node.js 22 built-in `node:crypto` implementation.
+ */
+export async function getGoogleAccessToken(rawCredentials, options = {}) {
+  const creds = parseCredentials(rawCredentials);
+  const nowMs = Date.now();
+
+  // Return cached token if valid for at least 5 more minutes (300,000ms)
+  if (
+    tokenCache &&
+    tokenCache.clientEmail === creds.client_email &&
+    tokenCache.expiresAtMs > nowMs + 300000
+  ) {
+    return tokenCache.token;
+  }
+
+  const nowSec = Math.floor(nowMs / 1000);
+  const headerObj = { alg: 'RS256', typ: 'JWT' };
+  const claimsObj = {
+    iss: creds.client_email,
+    scope: GOOGLE_SHEETS_SCOPE,
+    aud: creds.token_uri,
+    exp: nowSec + 3600,
+    iat: nowSec,
+  };
+
+  const encodedHeader = Buffer.from(JSON.stringify(headerObj)).toString('base64url');
+  const encodedClaims = Buffer.from(JSON.stringify(claimsObj)).toString('base64url');
+  const unsignedToken = `${encodedHeader}.${encodedClaims}`;
+
+  let signature = '';
+  try {
+    const signer = crypto.createSign('RSA-SHA256');
+    signer.update(unsignedToken);
+    signature = signer.sign(creds.private_key, 'base64url');
+  } catch (err) {
+    throw new Error(`Failed to sign Google OAuth JWT with private key: ${err.message}`);
+  }
+
+  const signedJwt = `${unsignedToken}.${signature}`;
+
+  const bodyParams = new URLSearchParams({
+    grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+    assertion: signedJwt,
+  });
+
+  const signal = options.signal || AbortSignal.timeout(15000);
+  const res = await fetch(creds.token_uri, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: bodyParams.toString(),
+    signal,
+  });
+
+  const resText = await res.text().catch(() => '');
+  let tokenData = null;
+  try {
+    tokenData = JSON.parse(resText);
+  } catch {
+    tokenData = null;
+  }
+
+  if (!res.ok || !tokenData?.access_token) {
+    const errMsg = tokenData?.error_description || tokenData?.error || resText || `HTTP ${res.status}`;
+    throw new Error(`Google OAuth2 token exchange failed (${res.status}): ${errMsg}`);
+  }
+
+  const expiresInSec = Number(tokenData.expires_in) || 3600;
+  tokenCache = {
+    token: tokenData.access_token,
+    clientEmail: creds.client_email,
+    expiresAtMs: nowMs + expiresInSec * 1000,
+  };
+
+  return tokenCache.token;
+}
+
+/**
+ * Execute an authenticated Google Sheets API v4 request with retry logic for transient errors.
+ */
+async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const signal = fetchOptions.signal || AbortSignal.timeout(30000);
+      const res = await fetch(url, {
+        ...fetchOptions,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          ...(fetchOptions.headers || {}),
+        },
+        signal,
+      });
+
+      // Transient rate-limit (429) or Google server error (500, 502, 503, 504)
+      const isTransient = res.status === 429 || (res.status >= 500 && res.status < 600);
+
+      if (!res.ok) {
+        const bodyText = await res.text().catch(() => '');
+        let errJson = null;
+        try { errJson = JSON.parse(bodyText); } catch {}
+        const errorDetail = errJson?.error?.message || bodyText.slice(0, 300) || `HTTP ${res.status}`;
+
+        if (isTransient && attempt < maxRetries) {
+          const backoffMs = Math.floor(1500 * Math.pow(2, attempt) + Math.random() * 1000);
+          console.warn(`⚠️ [Sheets API] Transient HTTP ${res.status} on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${backoffMs}ms...`);
+          await sleep(backoffMs);
+          continue;
+        }
+
+        const err = new Error(`Sheets API request failed (HTTP ${res.status}): ${errorDetail}`);
+        err.status = res.status;
+        err.detail = errorDetail;
+        throw err;
+      }
+
+      const text = await res.text().catch(() => '');
+      if (!text) return {};
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        throw new Error(`Sheets API returned non-JSON body: ${err.message}`);
+      }
+    } catch (err) {
+      const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+      if ((isTimeout || !err.status) && attempt < maxRetries) {
+        const backoffMs = Math.floor(1500 * Math.pow(2, attempt) + Math.random() * 1000);
+        console.warn(`⚠️ [Sheets API] Network/Timeout error on attempt ${attempt + 1}/${maxRetries + 1}: ${err.message}, retrying in ${backoffMs}ms...`);
+        await sleep(backoffMs);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error('Sheets API retries exhausted');
+}
+
+/**
+ * Fetch spreadsheet metadata to discover existing tab titles.
+ */
+export async function getSpreadsheetTabs(accessToken, spreadsheetId) {
+  const url = `${SHEETS_BASE_URL}/${spreadsheetId}?fields=sheets.properties(sheetId,title)`;
+  const data = await sheetsFetch(accessToken, url);
+  const titles = new Set();
+  if (Array.isArray(data?.sheets)) {
+    for (const s of data.sheets) {
+      if (s?.properties?.title) {
+        titles.add(String(s.properties.title).trim());
+      }
+    }
+  }
+  return titles;
+}
+
+/**
+ * Ensure that a specific creator sheet tab exists.
+ * If not present, creates the tab and writes the canonical 18 headers in row 1.
+ */
+export async function ensureSheetExists(accessToken, spreadsheetId, tabName) {
+  let known = knownTabsCache.get(spreadsheetId);
+  if (!known) {
+    known = await getSpreadsheetTabs(accessToken, spreadsheetId);
+    knownTabsCache.set(spreadsheetId, known);
+  }
+
+  if (known.has(tabName)) {
+    return true;
+  }
+
+  // Tab not in cache: verify with live metadata before creating
+  const freshTabs = await getSpreadsheetTabs(accessToken, spreadsheetId);
+  knownTabsCache.set(spreadsheetId, freshTabs);
+  if (freshTabs.has(tabName)) {
+    return true;
+  }
+
+  // Create sheet with frozen header row
+  const addUrl = `${SHEETS_BASE_URL}/${spreadsheetId}:batchUpdate`;
+  await sheetsFetch(accessToken, addUrl, {
+    method: 'POST',
+    body: JSON.stringify({
+      requests: [
+        {
+          addSheet: {
+            properties: {
+              title: tabName,
+              gridProperties: {
+                frozenRowCount: 1,
+              },
+            },
+          },
+        },
+      ],
+    }),
+  });
+
+  // Write header row
+  const headerRange = `${escapeSheetTitle(tabName)}!A1:R1`;
+  const headerUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(headerRange)}?valueInputOption=USER_ENTERED`;
+  await sheetsFetch(accessToken, headerUrl, {
+    method: 'PUT',
+    body: JSON.stringify({
+      range: headerRange,
+      majorDimension: 'ROWS',
+      values: [PINARCHIVE_SHEET_HEADERS],
+    }),
+  });
+
+  freshTabs.add(tabName);
+  return true;
+}
+
+/**
+ * Read all rows from a sheet tab.
+ * Returns { headers: string[], headerMap: Record<string, number>, rows: string[][] }
+ */
+export async function readSheetRows(accessToken, spreadsheetId, tabName) {
+  const range = `${escapeSheetTitle(tabName)}!A:R`;
+  const url = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(range)}`;
+  let data = null;
+  try {
+    data = await sheetsFetch(accessToken, url);
+  } catch (err) {
+    if (err.status === 400 && String(err.message).includes('Unable to parse range')) {
+      return { headers: [], headerMap: {}, rows: [] };
+    }
+    throw err;
+  }
+
+  const rawValues = Array.isArray(data?.values) ? data.values : [];
+  if (rawValues.length === 0) {
+    return { headers: [], headerMap: {}, rows: [] };
+  }
+
+  const headers = rawValues[0].map(h => String(h || '').trim());
+  const headerMap = {};
+  headers.forEach((h, i) => {
+    if (h) headerMap[h] = i; // 0-based column index
+  });
+
+  const rows = rawValues.slice(1);
+  return { headers, headerMap, rows };
+}
+
+/**
+ * Build an 18-column row array matching the canonical PinArchive sheet schema.
+ */
+export function buildSheetRow(pinObj, headerMap, width = PINARCHIVE_SHEET_HEADERS.length, existingRow = null, nowFormatted = formatSheetDate()) {
+  const row = new Array(width).fill('');
+
+  const getExistingVal = (colName) => {
+    if (!existingRow || !headerMap || headerMap[colName] === undefined) return '';
+    return existingRow[headerMap[colName]] ?? '';
+  };
+
+  PINARCHIVE_SHEET_HEADERS.forEach(h => {
+    let val = pinObj[h];
+
+    if (h === 'created_at' && (val === undefined || val === null || val === '')) {
+      val = pinObj.created_at_pinterest || getExistingVal('created_at');
+    }
+
+    if (h === 'tags') {
+      if (val === undefined || val === null) {
+        if (Array.isArray(pinObj.annotations) && pinObj.annotations.length > 0) {
+          val = pinObj.annotations
+            .map(a => (typeof a === 'string' ? a.trim() : String(a?.name || '').trim()))
+            .filter(Boolean)
+            .join(', ');
+        } else {
+          val = getExistingVal('tags');
+        }
+      } else if (Array.isArray(val)) {
+        val = val.join(', ');
+      }
+    }
+
+    if (h === 'first_seen_at') {
+      val = getExistingVal('first_seen_at') || pinObj.first_seen_at || nowFormatted;
+    }
+
+    if (h === 'last_updated_at') {
+      val = nowFormatted;
+    }
+
+    if (h === 'archived_at') {
+      val = pinObj.archived_at || getExistingVal('archived_at') || '';
+    }
+
+    if (Array.isArray(val)) {
+      val = val.join(', ');
+    }
+
+    const colIdx = headerMap && headerMap[h] !== undefined ? headerMap[h] : PINARCHIVE_SHEET_HEADERS.indexOf(h);
+    if (colIdx >= 0 && colIdx < width) {
+      row[colIdx] = val !== undefined && val !== null ? val : '';
+    }
+  });
+
+  return row;
+}
+
+/**
+ * Determine whether an existing sheet row needs an update based on changed fields.
+ */
+export function rowNeedsUpdate(existRow, headerMap, r) {
+  const compareFields = [
+    'title',
+    'description',
+    'link',
+    'domain',
+    'board_name',
+    'created_at',
+    'image_url',
+    'image_signature',
+    'dominant_color',
+    'saves',
+    'repins',
+    'comments',
+    'velocity',
+    'tags',
+  ];
+
+  for (const f of compareFields) {
+    const colIdx = headerMap[f];
+    const oldVal = colIdx !== undefined ? String(existRow[colIdx] ?? '').trim() : '';
+
+    let newVal = r[f];
+    if (f === 'created_at' && (newVal === undefined || newVal === null || newVal === '')) {
+      newVal = r.created_at_pinterest;
+    }
+    if (f === 'tags') {
+      if (newVal === undefined || newVal === null) {
+        if (Array.isArray(r.annotations) && r.annotations.length > 0) {
+          newVal = r.annotations
+            .map(a => (typeof a === 'string' ? a.trim() : String(a?.name || '').trim()))
+            .filter(Boolean)
+            .join(', ');
+        }
+      } else if (Array.isArray(newVal)) {
+        newVal = newVal.join(', ');
+      }
+    }
+
+    if (newVal !== undefined && newVal !== null) {
+      const newStr = String(newVal).trim();
+      if (newStr && newStr !== oldVal) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Direct Google Sheets API v4 Writer.
+ * Replaces GAS Web App with direct sub-second authenticated REST API operations.
+ *
+ * @param {string|object} credentials - Service Account JSON string or parsed object
+ * @param {string} spreadsheetId - Google Spreadsheet ID
+ * @param {object} payload - { username, mode: 'update' | 'append', rows: any[] }
+ * @param {object} [options] - Additional options (e.g. maxRetries)
+ */
+export async function writeToSheetsApi(credentials, spreadsheetId, payload, options = {}) {
+  const startedAt = Date.now();
+  const username = String(payload?.username || '').trim();
+  if (!username) {
+    return { ok: false, error: 'username required' };
+  }
+
+  const rawRows = Array.isArray(payload?.rows) ? payload.rows : [];
+  if (rawRows.length === 0) {
+    return {
+      ok: true,
+      version: '4.0.0-api',
+      total_received: 0,
+      written: 0,
+      appended: 0,
+      updated: 0,
+      unchanged: 0,
+    };
+  }
+
+  if (!spreadsheetId) {
+    return { ok: false, error: 'spreadsheetId required' };
+  }
+
+  try {
+    const accessToken = await getGoogleAccessToken(credentials, options);
+    const tabName = `pins_${username.toLowerCase()}`;
+
+    // 1. Ensure tab exists with headers
+    await ensureSheetExists(accessToken, spreadsheetId, tabName);
+
+    // 2. Read existing rows
+    const { headerMap, rows: existingRows } = await readSheetRows(accessToken, spreadsheetId, tabName);
+    const width = Math.max(PINARCHIVE_SHEET_HEADERS.length, Object.keys(headerMap).length);
+    const nowFormatted = formatSheetDate();
+
+    // 3. In-batch deduplication of input pins
+    const dedupedRows = [];
+    const seenInputIds = new Set();
+    for (const r of rawRows) {
+      const id = String(r?.pin_id || '').trim();
+      if (!id || seenInputIds.has(id)) continue;
+      seenInputIds.add(id);
+      dedupedRows.push(r);
+    }
+
+    const mode = payload.mode === 'update' ? 'update' : 'append';
+
+    if (mode === 'append') {
+      const rowsToAppend = dedupedRows.map(r => buildSheetRow(r, headerMap, width, null, nowFormatted));
+      if (rowsToAppend.length > 0) {
+        const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
+        const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+        await sheetsFetch(accessToken, appendUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            range: appendRange,
+            majorDimension: 'ROWS',
+            values: rowsToAppend,
+          }),
+        }, options.maxRetries || 3);
+      }
+
+      const elapsedMs = Date.now() - startedAt;
+      console.log(`✅ [Sheets API] @${username}: written=${rowsToAppend.length} (app=${rowsToAppend.length}, upd=0, unch=0) in ${elapsedMs}ms`);
+      return {
+        ok: true,
+        version: '4.0.0-api',
+        total_received: rawRows.length,
+        written: rowsToAppend.length,
+        appended: rowsToAppend.length,
+        updated: 0,
+        unchanged: 0,
+      };
+    }
+
+    // mode === 'update'
+    // Build index of existing pin IDs: pin_id -> { index (0-based within existingRows), row }
+    const pinIdColIdx = headerMap['pin_id'] !== undefined ? headerMap['pin_id'] : 0;
+    const existingIndex = new Map();
+    existingRows.forEach((row, i) => {
+      const id = String(row[pinIdColIdx] || '').trim();
+      if (id) existingIndex.set(id, { index: i, row });
+    });
+
+    const toAppend = [];
+    const batchUpdateData = [];
+    let updatedCount = 0;
+    let unchangedCount = 0;
+
+    for (const r of dedupedRows) {
+      const pinId = String(r.pin_id || '').trim();
+      if (!pinId) continue;
+
+      const existing = existingIndex.get(pinId);
+      if (existing) {
+        if (!rowNeedsUpdate(existing.row, headerMap, r)) {
+          unchangedCount++;
+          continue;
+        }
+
+        const builtRow = buildSheetRow(r, headerMap, width, existing.row, nowFormatted);
+        const rowNumber = existing.index + 2; // 1-based, row 1 is header
+        batchUpdateData.push({
+          range: `${escapeSheetTitle(tabName)}!A${rowNumber}:R${rowNumber}`,
+          majorDimension: 'ROWS',
+          values: [builtRow],
+        });
+        updatedCount++;
+      } else {
+        toAppend.push(buildSheetRow(r, headerMap, width, null, nowFormatted));
+      }
+    }
+
+    // 4. Execute updates via values:batchUpdate
+    if (batchUpdateData.length > 0) {
+      const batchUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values:batchUpdate`;
+      await sheetsFetch(accessToken, batchUrl, {
+        method: 'POST',
+        body: JSON.stringify({
+          valueInputOption: 'USER_ENTERED',
+          data: batchUpdateData,
+        }),
+      }, options.maxRetries || 3);
+    }
+
+    // 5. Execute appends via values:append
+    if (toAppend.length > 0) {
+      const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
+      const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+      await sheetsFetch(accessToken, appendUrl, {
+        method: 'POST',
+        body: JSON.stringify({
+          range: appendRange,
+          majorDimension: 'ROWS',
+          values: toAppend,
+        }),
+      }, options.maxRetries || 3);
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    const written = toAppend.length + updatedCount;
+    console.log(`✅ [Sheets API] @${username}: written=${written} (app=${toAppend.length}, upd=${updatedCount}, unch=${unchangedCount}) in ${elapsedMs}ms`);
+
+    return {
+      ok: true,
+      version: '4.0.0-api',
+      total_received: rawRows.length,
+      written,
+      appended: toAppend.length,
+      updated: updatedCount,
+      unchanged: unchangedCount,
+    };
+  } catch (err) {
+    const elapsedMs = Date.now() - startedAt;
+    const errMsg = err?.message || 'Sheets API error';
+    console.warn(`❌ [Sheets API] Failed for @${username} (${elapsedMs}ms): ${errMsg}`);
+    return { ok: false, error: errMsg };
+  }
+}
+
+/**
+ * Query true oldest pin timestamps (account_ages) directly via Google Sheets API v4 batchGet.
+ * Replaces GAS `account_ages` action with a single ultra-fast REST call.
+ */
+export async function getAccountAgesFromSheetsApi(credentials, spreadsheetId, usernames, options = {}) {
+  const USERNAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
+  const validUsernames = Array.isArray(usernames)
+    ? usernames.map(String).map(s => s.trim().toLowerCase().replace(/^@/, '')).filter(s => USERNAME_RE.test(s))
+    : [];
+
+  const ages = {};
+  for (const u of validUsernames) {
+    ages[u] = null;
+  }
+
+  if (validUsernames.length === 0 || !spreadsheetId) {
+    return ages;
+  }
+
+  try {
+    const accessToken = await getGoogleAccessToken(credentials, options);
+
+    // Build batchGet ranges for created_at column (column G)
+    const ranges = validUsernames.map(u => `${escapeSheetTitle(`pins_${u}`)}!G2:G`);
+    const rangesParam = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
+    const batchGetUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values:batchGet?${rangesParam}`;
+
+    const data = await sheetsFetch(accessToken, batchGetUrl, {}, options.maxRetries || 2);
+    const valueRanges = Array.isArray(data?.valueRanges) ? data.valueRanges : [];
+
+    valueRanges.forEach((vr, i) => {
+      const username = validUsernames[i];
+      if (!username) return;
+
+      const cells = Array.isArray(vr?.values) ? vr.values : [];
+      let minMs = Infinity;
+      let minIso = null;
+
+      for (const row of cells) {
+        const cell = row[0];
+        if (cell === '' || cell === null || cell === undefined) continue;
+        const t = parseSheetTimestamp(cell);
+        if (Number.isFinite(t) && t < minMs) {
+          minMs = t;
+          minIso = new Date(t).toISOString();
+        }
+      }
+
+      if (Number.isFinite(minMs)) {
+        ages[username] = minIso;
+      }
+    });
+
+    return ages;
+  } catch (err) {
+    console.warn(`⚠️ [Sheets API] Batch getAccountAges failed: ${err.message}`);
+    return ages;
+  }
+}

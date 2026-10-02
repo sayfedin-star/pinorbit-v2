@@ -34,6 +34,7 @@ import {
   supaQuery,
   supaPatch,
   callGasAccountAges,
+  getAccountAgesFromSheetsApi,
   resolveMonotonicOldestPin,
   fetchAllAccounts,
 } from './lib/pa-client.mjs';
@@ -57,6 +58,8 @@ const SUPABASE_URL = process.env.PINARCHIVE_SUPABASE_URL || DEFAULT_SUPABASE_URL
 const SUPABASE_KEY = process.env.PINARCHIVE_SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const GAS_URL = process.env.PINARCHIVE_GAS_URL || DEFAULT_GAS_URL;
 const INGEST_SECRET = process.env.PINARCHIVE_INGEST_SECRET || process.env.PINARCHIVE_SECRET || '';
+const GOOGLE_SERVICE_ACCOUNT_KEY = process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '';
+const PINARCHIVE_SPREADSHEET_ID = process.env.PINARCHIVE_SPREADSHEET_ID || '';
 
 async function main() {
   console.log('===========================================================');
@@ -69,13 +72,19 @@ async function main() {
     process.exit(1);
   }
 
-  if (!INGEST_SECRET) {
-    console.error('❌ Error: PINARCHIVE_INGEST_SECRET is required to query Google Apps Script bridge.');
+  const hasSheetsApi = Boolean(GOOGLE_SERVICE_ACCOUNT_KEY && PINARCHIVE_SPREADSHEET_ID);
+
+  if (!hasSheetsApi && !INGEST_SECRET) {
+    console.error('❌ Error: PINARCHIVE_INGEST_SECRET or GOOGLE_SERVICE_ACCOUNT_KEY is required to query Google Sheets.');
     process.exit(1);
   }
 
   console.log(`📡 Supabase URL: ${SUPABASE_URL}`);
-  console.log(`🌐 GAS Web App URL: ${GAS_URL}`);
+  if (hasSheetsApi) {
+    console.log(`🔑 Engine: Google Sheets API v4 (Service Account, spreadsheet: ${PINARCHIVE_SPREADSHEET_ID})`);
+  } else {
+    console.log(`🌐 Engine: GAS Web App (${GAS_URL})`);
+  }
   console.log(`🧪 Mode: ${flags['dry-run'] ? 'DRY RUN (no DB writes)' : 'LIVE SYNC'}`);
   if (flags.workspace) console.log(`🔍 Workspace Filter: ${flags.workspace}`);
   if (flags.username) console.log(`🔍 Username Filter: ${flags.username}`);
@@ -117,14 +126,19 @@ async function main() {
     // Chunk into 50 usernames per call
     for (let i = 0; i < allUsernames.length; i += 50) {
       const chunk = allUsernames.slice(i, i + 50);
-      console.log(`⏳ Querying GAS account_ages for chunk [${i + 1}-${i + chunk.length}] of ${allUsernames.length}...`);
+      const queryEngine = hasSheetsApi ? 'Sheets API v4 batchGet' : 'GAS account_ages';
+      console.log(`⏳ Querying ${queryEngine} for chunk [${i + 1}-${i + chunk.length}] of ${allUsernames.length}...`);
 
       let ages = {};
       try {
-        ages = await callGasAccountAges(GAS_URL, INGEST_SECRET, wsId, chunk);
-        if (flags.verbose) console.log('   Raw GAS response:', ages);
+        if (hasSheetsApi) {
+          ages = await getAccountAgesFromSheetsApi(GOOGLE_SERVICE_ACCOUNT_KEY, PINARCHIVE_SPREADSHEET_ID, chunk);
+        } else {
+          ages = await callGasAccountAges(GAS_URL, INGEST_SECRET, wsId, chunk);
+        }
+        if (flags.verbose) console.log('   Raw response:', ages);
       } catch (err) {
-        console.error(`❌ GAS query failed for workspace ${wsId}: ${err.message}`);
+        console.error(`❌ Sheet query failed for workspace ${wsId}: ${err.message}`);
         totalFailed += chunk.length;
         continue;
       }

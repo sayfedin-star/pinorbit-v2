@@ -22,7 +22,7 @@ import path from 'path';
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { aesKey, decryptCookieValue, resolveKek, getVaultCookie } from './lib/vault.mjs';
-import { writeToGas, pushToIngest as pushToIngestClient, fetchAllAccounts, partitionAccountsLPT } from './lib/pa-client.mjs';
+import { writeToGas, writeToGoogleSheet, pushToIngest as pushToIngestClient, fetchAllAccounts, partitionAccountsLPT } from './lib/pa-client.mjs';
 import { formatPin } from './lib/pinterest.mjs';
 import { savePinsToRunnerCache, flushRunnerCacheToDisk } from './lib/runner-cache.mjs';
 
@@ -46,6 +46,8 @@ const {
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
   PINARCHIVE_GAS_URL,
+  GOOGLE_SERVICE_ACCOUNT_KEY,
+  PINARCHIVE_SPREADSHEET_ID,
 } = process.env;
 
 const DISCOVERY_WORKSPACE_ID = (process.env.DISCOVERY_WORKSPACE_ID || process.env.WORKSPACE_ID || process.env.WORKSPACE_FILTER || process.env.DISCOVERY_WORKSPACE_FILTER || '').trim();
@@ -788,36 +790,46 @@ async function main() {
       }
     }
 
-    // 5. Push all pins to GAS writer (sheet_write mode=update)
+    // 5. Push all pins to Google Sheet (Sheets API v4 or GAS writer fallback, mode=update)
     let sheetPushed = 0;
     let sheetBreakdown = '';
-    if (allPinsForSheet.length > 0 && PINARCHIVE_GAS_URL) {
-      console.log(`📑 Writing ${allPinsForSheet.length} pins to Google Sheet via GAS writer (mode=update)...`);
+    const hasSheetsApi = Boolean(GOOGLE_SERVICE_ACCOUNT_KEY && PINARCHIVE_SPREADSHEET_ID);
+    const hasGas = Boolean(PINARCHIVE_GAS_URL);
+
+    if (allPinsForSheet.length > 0 && (hasSheetsApi || hasGas)) {
+      const writerName = hasSheetsApi ? 'Sheets API v4 (Service Account)' : 'GAS writer';
+      console.log(`📑 Writing ${allPinsForSheet.length} pins to Google Sheet via ${writerName} (mode=update)...`);
       for (let i = 0; i < allPinsForSheet.length; i += maxBatchPins) {
         const batch = allPinsForSheet.slice(i, i + maxBatchPins);
-        const gasRes = await writeToGas(PINARCHIVE_GAS_URL, PINARCHIVE_INGEST_SECRET, {
-          workspace_id: acc.workspace_id,
-          username: acc.username,
-          mode: 'update',
-          rows: batch,
+        const sheetRes = await writeToGoogleSheet({
+          credentials: GOOGLE_SERVICE_ACCOUNT_KEY,
+          spreadsheetId: PINARCHIVE_SPREADSHEET_ID,
+          gasUrl: PINARCHIVE_GAS_URL,
+          secret: PINARCHIVE_INGEST_SECRET,
+          payload: {
+            workspace_id: acc.workspace_id,
+            username: acc.username,
+            mode: 'update',
+            rows: batch,
+          },
         });
-        if (gasRes?.ok) {
-          const writtenCount = typeof gasRes.written === 'number'
-            ? gasRes.written
-            : (Number(gasRes.appended) || 0) + (Number(gasRes.updated) || 0);
+        if (sheetRes?.ok) {
+          const writtenCount = typeof sheetRes.written === 'number'
+            ? sheetRes.written
+            : (Number(sheetRes.appended) || 0) + (Number(sheetRes.updated) || 0);
           sheetPushed += writtenCount;
           grandSummary.sheetPushed += writtenCount;
 
-          if (typeof gasRes.appended === 'number' && typeof gasRes.updated === 'number') {
-            if (typeof gasRes.unchanged === 'number') {
-              sheetBreakdown = ` (app=${gasRes.appended}, upd=${gasRes.updated}, unch=${gasRes.unchanged})`;
+          if (typeof sheetRes.appended === 'number' && typeof sheetRes.updated === 'number') {
+            if (typeof sheetRes.unchanged === 'number') {
+              sheetBreakdown = ` (app=${sheetRes.appended}, upd=${sheetRes.updated}, unch=${sheetRes.unchanged})`;
             } else {
-              sheetBreakdown = ` (app=${gasRes.appended}, upd=${gasRes.updated})`;
+              sheetBreakdown = ` (app=${sheetRes.appended}, upd=${sheetRes.updated})`;
             }
           }
         } else {
-          const errMsg = gasRes?.error || 'gas_write_failed';
-          console.error(`❌ [GAS Write] Failed for @${acc.username}: ${errMsg}`);
+          const errMsg = sheetRes?.error || 'sheet_write_failed';
+          console.error(`❌ [Sheet Write] Failed for @${acc.username}: ${errMsg}`);
           grandSummary.errors.push(`sheet: @${acc.username} - ${errMsg}`);
           sheetBreakdown = ` (sheet_err: ${errMsg})`;
         }
@@ -919,6 +931,7 @@ export {
   decryptCookieValue,
   resolveKek,
   writeToGas,
+  writeToGoogleSheet,
   checkCalendarEligibility,
   computeNextRunDate,
   computeOldestPinAt,

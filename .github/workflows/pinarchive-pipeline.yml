@@ -96,6 +96,8 @@ jobs:
           PINORBIT_WORKER_URL: ${{ secrets.PINORBIT_WORKER_URL }}
           PINARCHIVE_INGEST_SECRET: ${{ secrets.PINARCHIVE_INGEST_SECRET }}
           PINARCHIVE_GAS_URL: ${{ secrets.PINARCHIVE_GAS_URL }}
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          PINARCHIVE_SPREADSHEET_ID: ${{ secrets.PINARCHIVE_SPREADSHEET_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           DISCOVERY_WORKSPACE_ID: ${{ github.event.inputs.workspace_filter || github.event.inputs.workspace_id || '' }}

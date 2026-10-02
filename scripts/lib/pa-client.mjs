@@ -8,6 +8,9 @@
  */
 
 import crypto from 'node:crypto';
+import { writeToSheetsApi, getAccountAgesFromSheetsApi } from './sheets-client.mjs';
+
+export { writeToSheetsApi, getAccountAgesFromSheetsApi };
 
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -339,6 +342,37 @@ export async function writeToGas(gasUrl, secret, payload, maxRetries = 3) {
     }
   }
   return { ok: false, error: 'gas_write_exhausted' };
+}
+
+/**
+ * Unified Google Sheet Writer.
+ * Uses Google Sheets API v4 (Service Account) when credentials & spreadsheetId are configured,
+ * otherwise falls back cleanly to Google Apps Script (GAS).
+ */
+export async function writeToGoogleSheet({
+  credentials,
+  spreadsheetId,
+  gasUrl,
+  secret,
+  payload,
+  maxRetries = 3,
+}) {
+  const effectiveCreds = credentials || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  const effectiveSheetId = spreadsheetId || process.env.PINARCHIVE_SPREADSHEET_ID;
+
+  if (effectiveCreds && effectiveSheetId) {
+    return await writeToSheetsApi(effectiveCreds, effectiveSheetId, payload, { maxRetries });
+  }
+
+  const effectiveGasUrl = gasUrl || process.env.PINARCHIVE_GAS_URL;
+  const effectiveSecret = secret || process.env.PINARCHIVE_INGEST_SECRET;
+
+  if (effectiveGasUrl) {
+    return await writeToGas(effectiveGasUrl, effectiveSecret, payload, maxRetries);
+  }
+
+  console.log('ℹ️ sheet_write skipped: Neither Google Sheets Service Account nor GAS URL configured');
+  return { ok: true, skipped: true };
 }
 
 /**
