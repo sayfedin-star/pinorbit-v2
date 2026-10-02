@@ -59,6 +59,7 @@ const knownTabsCache = new Map();
  * Guarantees strict sequential execution for writes targeting the same tab.
  * When a queued waiter times out, it cleanly removes itself from the queue
  * without compromising or releasing the active lock held by the running task.
+ * Release function is strictly idempotent to prevent duplicate release anomalies.
  */
 class TabMutex {
   constructor() {
@@ -66,10 +67,19 @@ class TabMutex {
     this._locked = false;
   }
 
-  async acquire(timeoutMs = 60000) {
+  _makeRelease() {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._release();
+    };
+  }
+
+  async acquire(timeoutMs = 120000) {
     if (!this._locked) {
       this._locked = true;
-      return () => this._release();
+      return this._makeRelease();
     }
 
     return new Promise((resolve, reject) => {
@@ -103,7 +113,7 @@ class TabMutex {
   _release() {
     if (this._queue.length > 0) {
       const next = this._queue.shift();
-      next.resolve(() => this._release());
+      next.resolve(this._makeRelease());
     } else {
       this._locked = false;
     }
@@ -112,6 +122,19 @@ class TabMutex {
   isIdle() {
     return !this._locked && this._queue.length === 0;
   }
+}
+
+/**
+ * Convert a 0-based column index to an A1-notation column letter (e.g. 0 -> 'A', 17 -> 'R', 27 -> 'AB').
+ */
+export function columnIndexToLetter(colIndex) {
+  let temp = Math.max(0, parseInt(colIndex, 10) || 0);
+  let letter = '';
+  while (temp >= 0) {
+    letter = String.fromCharCode((temp % 26) + 65) + letter;
+    temp = Math.floor(temp / 26) - 1;
+  }
+  return letter;
 }
 
 // Per-tab write serialization mutexes: Map<lockKey, TabMutex>
@@ -218,7 +241,7 @@ export function clearTabsCache() {
  * Execute an operation under a per-tab mutex to prevent concurrent write collisions
  * within the same Node.js process.
  */
-export async function withTabLock(lockKey, operationFn, timeoutMs = 60000) {
+export async function withTabLock(lockKey, operationFn, timeoutMs = 120000) {
   let mutex = tabMutexes.get(lockKey);
   if (!mutex) {
     mutex = new TabMutex();
@@ -291,42 +314,57 @@ export async function getGoogleAccessToken(rawCredentials, options = {}) {
         assertion: signedJwt,
       });
 
-      const signal = options.signal || AbortSignal.timeout(15000);
-      let res = null;
-      try {
-        res = await fetch(creds.token_uri, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: bodyParams.toString(),
-          signal,
-        });
-
-        const resText = await res.text();
-        let tokenData = null;
+      const maxOAuthRetries = 2;
+      for (let oAttempt = 0; oAttempt <= maxOAuthRetries; oAttempt++) {
+        const signal = options.signal || AbortSignal.timeout(15000);
+        let res = null;
         try {
-          tokenData = JSON.parse(resText);
-        } catch {
-          tokenData = null;
-        }
+          res = await fetch(creds.token_uri, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: bodyParams.toString(),
+            signal,
+          });
 
-        if (!res.ok || !tokenData?.access_token) {
-          const errMsg = tokenData?.error_description || tokenData?.error || resText || `HTTP ${res.status}`;
-          throw new Error(`Google OAuth2 token exchange failed (${res.status}): ${errMsg}`);
-        }
+          const resText = await res.text();
+          let tokenData = null;
+          try {
+            tokenData = JSON.parse(resText);
+          } catch {
+            tokenData = null;
+          }
 
-        const expiresInSec = Number(tokenData.expires_in) || 3600;
-        tokenCache = {
-          token: tokenData.access_token,
-          clientEmail: creds.client_email,
-          expiresAtMs: currentNowMs + expiresInSec * 1000,
-        };
+          if (!res.ok || !tokenData?.access_token) {
+            const isTransientOAuth = res.status >= 500 && res.status < 600;
+            if (isTransientOAuth && oAttempt < maxOAuthRetries) {
+              await sleep((oAttempt + 1) * 1000);
+              continue;
+            }
+            const errMsg = tokenData?.error_description || tokenData?.error || resText || `HTTP ${res.status}`;
+            throw new Error(`Google OAuth2 token exchange failed (${res.status}): ${errMsg}`);
+          }
 
-        return tokenCache.token;
-      } finally {
-        if (res && !res.bodyUsed && res.body) {
-          await res.body.cancel().catch(() => {});
+          const expiresInSec = Number(tokenData.expires_in) || 3600;
+          tokenCache = {
+            token: tokenData.access_token,
+            clientEmail: creds.client_email,
+            expiresAtMs: currentNowMs + expiresInSec * 1000,
+          };
+
+          return tokenCache.token;
+        } catch (err) {
+          const isTimeoutOrNetwork = err?.name === 'TimeoutError' || err?.name === 'AbortError' || (!err?.message?.includes('Google OAuth2 token exchange failed') && !err?.message?.includes('Failed to sign'));
+          if (isTimeoutOrNetwork && oAttempt < maxOAuthRetries) {
+            await sleep((oAttempt + 1) * 1000);
+            continue;
+          }
+          throw err;
+        } finally {
+          if (res && !res.bodyUsed && res.body) {
+            await res.body.cancel().catch(() => {});
+          }
         }
       }
     } finally {
@@ -340,16 +378,22 @@ export async function getGoogleAccessToken(rawCredentials, options = {}) {
 /**
  * Execute an authenticated Google Sheets API v4 request with retry logic for transient errors.
  * Ensures complete stream consumption and socket leak prevention via guaranteed finally block.
+ * When credentials are provided and a 401 Unauthorized occurs, automatically refreshes token and retries.
  */
-async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 5) {
+async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 5, credentials = null) {
+  let currentToken = accessToken;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     let res = null;
     try {
-      const signal = fetchOptions.signal || AbortSignal.timeout(30000);
+      const perAttemptSignal = AbortSignal.timeout(fetchOptions.timeoutMs || 30000);
+      const signal = fetchOptions.signal
+        ? AbortSignal.any([fetchOptions.signal, perAttemptSignal])
+        : perAttemptSignal;
+
       res = await fetch(url, {
         ...fetchOptions,
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${currentToken}`,
           'Content-Type': 'application/json',
           ...(fetchOptions.headers || {}),
         },
@@ -367,6 +411,12 @@ async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 5) 
 
         if (res.status === 401) {
           clearTokenCache();
+          if (credentials && attempt < maxRetries) {
+            console.warn(`⚠️ [Sheets API] HTTP 401 Unauthorized on attempt ${attempt + 1}/${maxRetries + 1}, refreshing token and retrying...`);
+            currentToken = await getGoogleAccessToken(credentials, fetchOptions);
+            await sleep(500);
+            continue;
+          }
         }
 
         if (isTransient && attempt < maxRetries) {
@@ -418,9 +468,9 @@ async function sheetsFetch(accessToken, url, fetchOptions = {}, maxRetries = 5) 
 /**
  * Fetch spreadsheet metadata to discover existing tab titles.
  */
-export async function getSpreadsheetTabs(accessToken, spreadsheetId) {
+export async function getSpreadsheetTabs(accessToken, spreadsheetId, credentials = null) {
   const url = `${SHEETS_BASE_URL}/${spreadsheetId}?fields=sheets.properties(sheetId,title)`;
-  const data = await sheetsFetch(accessToken, url);
+  const data = await sheetsFetch(accessToken, url, {}, 5, credentials);
   const titles = new Set();
   if (Array.isArray(data?.sheets)) {
     for (const s of data.sheets) {
@@ -436,10 +486,10 @@ export async function getSpreadsheetTabs(accessToken, spreadsheetId) {
  * Ensure that a specific creator sheet tab exists.
  * Race-safe: If another runner created the tab concurrently, handles 400 "already exists" seamlessly.
  */
-export async function ensureSheetExists(accessToken, spreadsheetId, tabName) {
+export async function ensureSheetExists(accessToken, spreadsheetId, tabName, credentials = null) {
   let known = knownTabsCache.get(spreadsheetId);
   if (!known) {
-    known = await getSpreadsheetTabs(accessToken, spreadsheetId);
+    known = await getSpreadsheetTabs(accessToken, spreadsheetId, credentials);
     knownTabsCache.set(spreadsheetId, known);
   }
 
@@ -448,7 +498,7 @@ export async function ensureSheetExists(accessToken, spreadsheetId, tabName) {
   }
 
   // Tab not in local cache: verify with live metadata before attempting creation
-  const freshTabs = await getSpreadsheetTabs(accessToken, spreadsheetId);
+  const freshTabs = await getSpreadsheetTabs(accessToken, spreadsheetId, credentials);
   for (const t of freshTabs) known.add(t);
   if (known.has(tabName)) {
     return true;
@@ -473,10 +523,11 @@ export async function ensureSheetExists(accessToken, spreadsheetId, tabName) {
           },
         ],
       }),
-    });
+    }, 5, credentials);
 
     // Write canonical header row into newly created sheet
-    const headerRange = `${escapeSheetTitle(tabName)}!A1:R1`;
+    const endCol = columnIndexToLetter(PINARCHIVE_SHEET_HEADERS.length - 1);
+    const headerRange = `${escapeSheetTitle(tabName)}!A1:${endCol}1`;
     const headerUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(headerRange)}?valueInputOption=USER_ENTERED`;
     await sheetsFetch(accessToken, headerUrl, {
       method: 'PUT',
@@ -485,7 +536,7 @@ export async function ensureSheetExists(accessToken, spreadsheetId, tabName) {
         majorDimension: 'ROWS',
         values: [PINARCHIVE_SHEET_HEADERS],
       }),
-    });
+    }, 5, credentials);
 
     known.add(tabName);
     return true;
@@ -504,12 +555,12 @@ export async function ensureSheetExists(accessToken, spreadsheetId, tabName) {
  * Read all rows from a sheet tab.
  * Returns { headers: string[], headerMap: Record<string, number>, rows: string[][] }
  */
-export async function readSheetRows(accessToken, spreadsheetId, tabName) {
+export async function readSheetRows(accessToken, spreadsheetId, tabName, credentials = null) {
   const range = `${escapeSheetTitle(tabName)}!A:R`;
   const url = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(range)}`;
   let data = null;
   try {
-    data = await sheetsFetch(accessToken, url);
+    data = await sheetsFetch(accessToken, url, {}, 5, credentials);
   } catch (err) {
     if (err.status === 400 && String(err.message).includes('Unable to parse range')) {
       return { headers: [], headerMap: {}, rows: [] };
@@ -534,9 +585,11 @@ export async function readSheetRows(accessToken, spreadsheetId, tabName) {
 
 /**
  * Build an 18-column row array matching the canonical PinArchive sheet schema.
+ * Preserves custom columns outside the canonical schema if present in existingRow.
  */
 export function buildSheetRow(pinObj, headerMap, width = PINARCHIVE_SHEET_HEADERS.length, existingRow = null, nowFormatted = formatSheetDate()) {
-  const row = new Array(width).fill('');
+  const row = existingRow ? [...existingRow] : new Array(width).fill('');
+  while (row.length < width) row.push('');
 
   const getExistingVal = (colName) => {
     if (!existingRow || !headerMap || headerMap[colName] === undefined) return '';
@@ -598,6 +651,7 @@ export function buildSheetRow(pinObj, headerMap, width = PINARCHIVE_SHEET_HEADER
 /**
  * Determine whether an existing sheet row needs an update based on changed fields.
  * Includes data integrity guard for newly qualified pins (`archived_at`).
+ * Normalizes numeric metric fields (e.g. "1,000" vs "1000") to eliminate false diffs.
  */
 export function rowNeedsUpdate(existRow, headerMap, r) {
   // 1. Data Integrity: Check if pin newly became archived
@@ -648,8 +702,25 @@ export function rowNeedsUpdate(existRow, headerMap, r) {
 
     if (newVal !== undefined && newVal !== null) {
       const newStr = String(newVal).trim();
-      if (newStr && newStr !== oldVal) {
-        return true;
+      if (newStr) {
+        // Metric field normalization (strip thousands commas: "1,000" vs "1000")
+        if (['saves', 'repins', 'comments'].includes(f)) {
+          const normOld = oldVal.replace(/,/g, '');
+          const normNew = newStr.replace(/,/g, '');
+          if (normNew !== normOld) {
+            return true;
+          }
+        } else if (f === 'velocity') {
+          const numOld = Number(oldVal.replace(/,/g, ''));
+          const numNew = Number(newStr.replace(/,/g, ''));
+          if (Number.isFinite(numOld) && Number.isFinite(numNew)) {
+            if (numOld !== numNew) return true;
+          } else if (newStr !== oldVal) {
+            return true;
+          }
+        } else if (newStr !== oldVal) {
+          return true;
+        }
       }
     }
   }
@@ -698,6 +769,8 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
     return { ok: false, error: 'spreadsheetId required' };
   }
 
+  const lockTimeoutMs = options.lockTimeoutMs || 120000;
+
   // Execute under per-tab mutex to eliminate race conditions within this process
   return await withTabLock(lockKey, async () => {
     try {
@@ -708,11 +781,32 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
       const accessToken = await getGoogleAccessToken(credentials, options);
 
       // 1. Ensure tab exists with headers (race-safe)
-      await ensureSheetExists(accessToken, spreadsheetId, tabName);
+      await ensureSheetExists(accessToken, spreadsheetId, tabName, credentials);
 
       // 2. Read existing rows
-      const { headerMap, rows: existingRows } = await readSheetRows(accessToken, spreadsheetId, tabName);
+      let { headers, headerMap, rows: existingRows } = await readSheetRows(accessToken, spreadsheetId, tabName, credentials);
+
+      // Self-healing: if tab was empty without headers, write canonical headers immediately
+      if (headers.length === 0) {
+        const endHeaderCol = columnIndexToLetter(PINARCHIVE_SHEET_HEADERS.length - 1);
+        const headerRange = `${escapeSheetTitle(tabName)}!A1:${endHeaderCol}1`;
+        const headerUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(headerRange)}?valueInputOption=USER_ENTERED`;
+        await sheetsFetch(accessToken, headerUrl, {
+          method: 'PUT',
+          body: JSON.stringify({
+            range: headerRange,
+            majorDimension: 'ROWS',
+            values: [PINARCHIVE_SHEET_HEADERS],
+          }),
+        }, options.maxRetries || 4, credentials);
+
+        headers = [...PINARCHIVE_SHEET_HEADERS];
+        headerMap = {};
+        headers.forEach((h, i) => { headerMap[h] = i; });
+      }
+
       const width = Math.max(PINARCHIVE_SHEET_HEADERS.length, Object.keys(headerMap).length);
+      const endColLetter = columnIndexToLetter(width - 1);
       const nowFormatted = formatSheetDate();
 
       // 3. In-batch deduplication of input pins
@@ -733,7 +827,7 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
           const APPEND_CHUNK = 1000;
           for (let a = 0; a < rowsToAppend.length; a += APPEND_CHUNK) {
             const chunkAppend = rowsToAppend.slice(a, a + APPEND_CHUNK);
-            const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
+            const appendRange = `${escapeSheetTitle(tabName)}!A:${endColLetter}`;
             const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE`;
             await sheetsFetch(accessToken, appendUrl, {
               method: 'POST',
@@ -742,7 +836,7 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
                 majorDimension: 'ROWS',
                 values: chunkAppend,
               }),
-            }, options.maxRetries || 4);
+            }, options.maxRetries || 4, credentials);
           }
         }
 
@@ -788,7 +882,7 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
           const builtRow = buildSheetRow(r, headerMap, width, existing.row, nowFormatted);
           const rowNumber = existing.index + 2; // 1-based, row 1 is header
           batchUpdateData.push({
-            range: `${escapeSheetTitle(tabName)}!A${rowNumber}:R${rowNumber}`,
+            range: `${escapeSheetTitle(tabName)}!A${rowNumber}:${endColLetter}${rowNumber}`,
             majorDimension: 'ROWS',
             values: [builtRow],
           });
@@ -811,7 +905,7 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
               valueInputOption: 'USER_ENTERED',
               data: chunkData,
             }),
-          }, options.maxRetries || 4);
+          }, options.maxRetries || 4, credentials);
         }
       }
 
@@ -820,7 +914,7 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
         const APPEND_CHUNK = 1000;
         for (let a = 0; a < toAppend.length; a += APPEND_CHUNK) {
           const chunkAppend = toAppend.slice(a, a + APPEND_CHUNK);
-          const appendRange = `${escapeSheetTitle(tabName)}!A:R`;
+          const appendRange = `${escapeSheetTitle(tabName)}!A:${endColLetter}`;
           const appendUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE`;
           await sheetsFetch(accessToken, appendUrl, {
             method: 'POST',
@@ -829,7 +923,7 @@ export async function writeToSheetsApi(credentials, spreadsheetId, payload, opti
               majorDimension: 'ROWS',
               values: chunkAppend,
             }),
-          }, options.maxRetries || 4);
+          }, options.maxRetries || 4, credentials);
         }
       }
 
@@ -880,13 +974,13 @@ export async function getAccountAgesFromSheetsApi(credentials, spreadsheetId, us
     // Discover existing tabs (cached in knownTabsCache to minimize redundant calls)
     let existingTabs = knownTabsCache.get(spreadsheetId);
     if (!existingTabs) {
-      existingTabs = await getSpreadsheetTabs(accessToken, spreadsheetId);
+      existingTabs = await getSpreadsheetTabs(accessToken, spreadsheetId, credentials);
       knownTabsCache.set(spreadsheetId, existingTabs);
     } else {
       // If any requested usernames are not present in cache, refresh tabs once
       const hasMissingTabs = validUsernames.some(u => !existingTabs.has(`pins_${u}`));
       if (hasMissingTabs) {
-        const freshTabs = await getSpreadsheetTabs(accessToken, spreadsheetId);
+        const freshTabs = await getSpreadsheetTabs(accessToken, spreadsheetId, credentials);
         for (const t of freshTabs) existingTabs.add(t);
       }
     }
@@ -896,15 +990,15 @@ export async function getAccountAgesFromSheetsApi(credentials, spreadsheetId, us
       return ages;
     }
 
-    // Google Sheets API allows up to 100 ranges per batchGet call
-    const BATCH_SIZE = 100;
+    // Google Sheets API batchGet safe chunking (50 ranges per call guarantees URI < 5KB to prevent HTTP 414)
+    const BATCH_SIZE = 50;
     for (let i = 0; i < queryableUsernames.length; i += BATCH_SIZE) {
       const chunk = queryableUsernames.slice(i, i + BATCH_SIZE);
       const ranges = chunk.map(u => `${escapeSheetTitle(`pins_${u}`)}!G2:G`);
       const rangesParam = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
       const batchGetUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values:batchGet?${rangesParam}`;
 
-      const data = await sheetsFetch(accessToken, batchGetUrl, {}, options.maxRetries || 3);
+      const data = await sheetsFetch(accessToken, batchGetUrl, {}, options.maxRetries || 3, credentials);
       const valueRanges = Array.isArray(data?.valueRanges) ? data.valueRanges : [];
 
       valueRanges.forEach((vr, idx) => {

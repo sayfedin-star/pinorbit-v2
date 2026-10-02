@@ -16,6 +16,7 @@ import {
   writeToSheetsApi,
   getAccountAgesFromSheetsApi,
   withTabLock,
+  columnIndexToLetter,
 } from '../../../scripts/lib/sheets-client.mjs';
 import { writeToGoogleSheet } from '../../../scripts/lib/pa-client.mjs';
 
@@ -585,6 +586,37 @@ describe('PinArchive Sheets Client & Service Account API v4 Suite', () => {
       // Because withTabLock serializes writes for the same tab, max concurrency is strictly 1!
       expect(maxConcurrencyObserved).toBe(1);
     });
+
+    it('normalizes username by stripping leading @ and lowercasing in writeToSheetsApi', async () => {
+      let requestedSheetTitle = '';
+      const fetchMock = vi.fn().mockImplementation(async (url) => {
+        if (url.includes('oauth2.googleapis.com')) {
+          return createMockResponse(200, { access_token: 'token', expires_in: 3600 });
+        }
+        if (url.includes('fields=sheets.properties')) {
+          return createMockResponse(200, { sheets: [{ properties: { title: 'pins_mycreator' } }] });
+        }
+        if (url.includes('/values/')) {
+          requestedSheetTitle = url;
+          return createMockResponse(200, { values: [PINARCHIVE_SHEET_HEADERS] });
+        }
+        if (url.includes(':append')) {
+          return createMockResponse(200, { updates: { updatedRows: 1 } });
+        }
+        return createMockResponse(404, {});
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await writeToSheetsApi(validCreds, mockSpreadsheetId, {
+        username: '@MyCreator',
+        mode: 'append',
+        rows: [{ pin_id: 'p1', title: 'P1' }],
+      });
+
+      expect(res.ok).toBe(true);
+      expect(decodeURIComponent(requestedSheetTitle)).toContain("'pins_mycreator'");
+      expect(decodeURIComponent(requestedSheetTitle)).not.toContain('@');
+    });
   });
 
   describe('6. getAccountAgesFromSheetsApi (Fast Batch Oldest Pin Sync)', () => {
@@ -781,6 +813,129 @@ describe('PinArchive Sheets Client & Service Account API v4 Suite', () => {
       const res3 = await p3;
       expect(task3Ran).toBe(true);
       expect(res3).toBe('task3-success');
+    });
+  });
+
+  describe('9. Production Hardening: Columns, Number Normalization & Custom Fields', () => {
+    it('columnIndexToLetter converts column indices accurately to A1 letters', () => {
+      expect(columnIndexToLetter(0)).toBe('A');
+      expect(columnIndexToLetter(1)).toBe('B');
+      expect(columnIndexToLetter(17)).toBe('R');
+      expect(columnIndexToLetter(25)).toBe('Z');
+      expect(columnIndexToLetter(26)).toBe('AA');
+      expect(columnIndexToLetter(27)).toBe('AB');
+      expect(columnIndexToLetter(51)).toBe('AZ');
+      expect(columnIndexToLetter(52)).toBe('BA');
+    });
+
+    it('rowNeedsUpdate normalizes numbers with commas so "1,000" matches 1000 without triggering false updates', () => {
+      const headerMap: Record<string, number> = {};
+      PINARCHIVE_SHEET_HEADERS.forEach((h, i) => { headerMap[h] = i; });
+
+      const existingRow = new Array(PINARCHIVE_SHEET_HEADERS.length).fill('');
+      existingRow[headerMap['pin_id']] = 'pin_100';
+      existingRow[headerMap['title']] = 'Same Title';
+      existingRow[headerMap['saves']] = '1,000'; // Sheet formatted with commas
+      existingRow[headerMap['repins']] = '250';
+      existingRow[headerMap['comments']] = '15';
+      existingRow[headerMap['velocity']] = '4.50';
+
+      // Incoming pin has numeric 1000 (no commas) and identical other fields
+      const incomingPin = {
+        pin_id: 'pin_100',
+        title: 'Same Title',
+        saves: 1000,
+        repins: 250,
+        comments: 15,
+        velocity: 4.5,
+      };
+
+      expect(rowNeedsUpdate(existingRow, headerMap, incomingPin)).toBe(false);
+
+      // But if saves actually changed to 1200:
+      const changedPin = {
+        ...incomingPin,
+        saves: 1200,
+      };
+      expect(rowNeedsUpdate(existingRow, headerMap, changedPin)).toBe(true);
+    });
+
+    it('buildSheetRow preserves custom columns outside canonical schema from existingRow', () => {
+      const headerMap: Record<string, number> = {};
+      PINARCHIVE_SHEET_HEADERS.forEach((h, i) => { headerMap[h] = i; });
+      headerMap['custom_status'] = 18;
+      headerMap['custom_notes'] = 19;
+
+      const existingRow = new Array(20).fill('');
+      existingRow[headerMap['pin_id']] = 'p999';
+      existingRow[headerMap['title']] = 'Old Title';
+      existingRow[18] = 'ACTIVE_VERIFIED'; // custom column
+      existingRow[19] = 'Do not delete this'; // custom column
+
+      const newPinData = {
+        pin_id: 'p999',
+        title: 'New Title',
+      };
+
+      const built = buildSheetRow(newPinData, headerMap, 20, existingRow);
+      expect(built[headerMap['title']]).toBe('New Title');
+      expect(built[18]).toBe('ACTIVE_VERIFIED');
+      expect(built[19]).toBe('Do not delete this');
+    });
+
+    it('writeToSheetsApi self-heals empty sheet by automatically writing canonical headers before appending', async () => {
+      const callLog: Array<{ url: string; method?: string; body?: any }> = [];
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any, init: any) => {
+        const urlStr = String(url);
+        let bodyObj: any = null;
+        if (init?.body && typeof init.body === 'string') {
+          try {
+            bodyObj = JSON.parse(init.body);
+          } catch {
+            bodyObj = init.body;
+          }
+        }
+        callLog.push({ url: urlStr, method: init?.method, body: bodyObj });
+
+        // 1. Token exchange
+        if (urlStr.includes('oauth2.googleapis.com')) {
+          return createMockResponse(200, { access_token: 'self-heal-token', expires_in: 3600 }) as any;
+        }
+
+        // 2. Metadata: tab already exists
+        if (urlStr.includes('/values/') === false && urlStr.includes(mockSpreadsheetId)) {
+          return createMockResponse(200, {
+            sheets: [{ properties: { sheetId: 101, title: 'pins_emptytab' } }],
+          }) as any;
+        }
+
+        // 3. Read values: empty sheet (values: [])
+        if (urlStr.includes('/values/') && init?.method === undefined) {
+          return createMockResponse(200, { values: [] }) as any;
+        }
+
+        // 4. Header write PUT or Append POST
+        if (init?.method === 'PUT' || init?.method === 'POST') {
+          return createMockResponse(200, { updatedRows: 1 }) as any;
+        }
+
+        return createMockResponse(200, {}) as any;
+      });
+
+      const res = await writeToSheetsApi(validCreds, mockSpreadsheetId, {
+        username: 'emptytab',
+        mode: 'update',
+        rows: [{ pin_id: 'new_pin_1', title: 'New Pin' }],
+      });
+
+      expect(res.ok).toBe(true);
+      expect(res.written).toBe(1);
+
+      // Verify that PUT for headers A1:R1 was invoked before appending
+      const headerPutCall = callLog.find(c => c.method === 'PUT' && c.url.includes('A1%3AR1'));
+      expect(headerPutCall).toBeDefined();
+      expect(headerPutCall?.body?.values[0]).toEqual(PINARCHIVE_SHEET_HEADERS);
     });
   });
 });
